@@ -1,6 +1,7 @@
 package com.agent.backend.controller;
 
 import com.agent.backend.model.AgentResponse;
+import com.agent.backend.model.ChatRequest;
 import com.agent.backend.model.SessionContext;
 import com.agent.backend.orchestration.OrchestrationAgent;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -21,7 +22,7 @@ public class AgentController {
     }
 
     @PostMapping("/chat")
-    public AgentResponse chat(@RequestParam String sessionId, @RequestBody String message) {
+    public AgentResponse chat(@RequestParam String sessionId, @RequestBody ChatRequest request) {
         // Get Firebase UID from Security Context
         var auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated()) {
@@ -42,7 +43,7 @@ public class AgentController {
             throw new RuntimeException("Unauthorized access to session");
         }
         
-        return orchestrator.orchestrate(message, context);
+        return orchestrator.orchestrate(request.getMessage(), context);
     }
 
     @GetMapping("/agents")
