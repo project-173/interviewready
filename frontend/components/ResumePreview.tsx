@@ -1,9 +1,9 @@
 
 import React, { useState } from 'react';
-import { ResumeSchema } from '../types';
+import { Resume } from '../types';
 
 interface ResumePreviewProps {
-  resume: ResumeSchema | null;
+  resume: Resume | null;
 }
 
 export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   SharedState, 
   WorkflowStatus, 
-  ResumeSchema
+  Resume
 } from './types';
 import { 
   extractorAgent, 
@@ -122,7 +122,7 @@ const App: React.FC = () => {
     }
   };
 
-  const processExtractedResume = (schema: ResumeSchema) => {
+  const processExtractedResume = (schema: Resume) => {
     setState(prev => ({ 
       ...prev, 
       currentResume: schema, 
@@ -132,7 +132,7 @@ const App: React.FC = () => {
     runCritic(schema);
   };
 
-  const runCritic = async (resume: ResumeSchema) => {
+  const runCritic = async (resume: Resume) => {
     setIsLoading(true);
     try {
       const report = await resumeCriticAgent(resume);
@@ -284,7 +284,7 @@ const App: React.FC = () => {
                        onClick={() => setState(prev => ({ ...prev, currentResume: h, status: WorkflowStatus.CRITIQUING }))}
                        className="w-full p-2.5 rounded-lg text-left text-[11px] font-medium text-slate-600 hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-all truncate"
                      >
-                       {h.name}
+                        {h.contact?.fullName || 'Untitled Resume'}
                      </button>
                    ))}
                  </div>
