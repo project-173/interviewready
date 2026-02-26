@@ -17,7 +17,7 @@ public class JobAlignmentAgent implements BaseAgent {
 
     public JobAlignmentAgent() {
         this.systemPrompt = """
-            You are a JD Alignment Agent.
+            You are a Job Description Alignment Agent.
 
             Compare the candidate resume against the job description.
 
@@ -35,10 +35,17 @@ public class JobAlignmentAgent implements BaseAgent {
         return "JD Alignment Agent";
     }
 
+    private String getFinalPrompt(String resume, String jobDesc) {
+        String resumePrompt = "Resume is: " + resume + "\n\n Job Description is: " + jobDesc;
+        this.systemPrompt = systemPrompt + "\n\n" + resumePrompt;
+
+        return systemPrompt;
+    }
+
     @Override
     public AgentResponse process(String input, SessionContext context) {
 
-        String finalPrompt = systemPrompt + "\n\n" + input;
+        String finalPrompt = getFinalPrompt(input, input);
 
         String rawOutput = callLLM(finalPrompt);
 
@@ -88,7 +95,9 @@ public class JobAlignmentAgent implements BaseAgent {
     }
 
     private String callLLM(String prompt) {
-    // Replace with your Gemini / OpenAI call
+        
+        
+        
         return """
         {
             "skillsMatch": ["Java", "Spring Boot"],
