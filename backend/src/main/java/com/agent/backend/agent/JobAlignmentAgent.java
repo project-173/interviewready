@@ -32,7 +32,7 @@ public class JobAlignmentAgent implements BaseAgent {
     
     @Override
     public String getName() {
-        return "JD Alignment Agent";
+        return "JobAlignmentAgent";
     }
 
     private String getFinalPrompt(String resume, String jobDesc) {
@@ -45,34 +45,34 @@ public class JobAlignmentAgent implements BaseAgent {
     @Override
     public AgentResponse process(String input, SessionContext context) {
 
-        String finalPrompt = getFinalPrompt(input, input);
+        // String finalPrompt = getFinalPrompt(input, input);
 
-        String rawOutput = callLLM(finalPrompt);
+        // String rawOutput = callLLM(finalPrompt);
 
-        // ---- Parse LLM JSON (assume you use Gson) ----
-        Map<String, Object> parsed = parseJson(rawOutput);
+        // // ---- Parse LLM JSON (assume you use Gson) ----
+        // Map<String, Object> parsed = parseJson(rawOutput);
 
-        List<String> skillsMatch = (List<String>) parsed.getOrDefault("skillsMatch", new ArrayList<>());
-        List<String> missingSkills = (List<String>) parsed.getOrDefault("missingSkills", new ArrayList<>());
-        int fitScore = ((Number) parsed.getOrDefault("fitScore", 50)).intValue();
-        String reasoning = (String) parsed.getOrDefault("reasoning", "No reasoning provided.");
+        // List<String> skillsMatch = (List<String>) parsed.getOrDefault("skillsMatch", new ArrayList<>());
+        // List<String> missingSkills = (List<String>) parsed.getOrDefault("missingSkills", new ArrayList<>());
+        // int fitScore = ((Number) parsed.getOrDefault("fitScore", 50)).intValue();
+        // String reasoning = (String) parsed.getOrDefault("reasoning", "No reasoning provided.");
 
-        // ---- Confidence logic ----
-        double confidence = computeConfidence(fitScore, missingSkills);
+        // // ---- Confidence logic ----
+        // double confidence = computeConfidence(fitScore, missingSkills);
 
-        // ---- Decision trace ----
-        List<String> trace = new ArrayList<>();
-        trace.add("Parsed LLM output");
-        trace.add("Identified " + skillsMatch.size() + " matching skills");
-        trace.add("Identified " + missingSkills.size() + " missing skills");
-        trace.add("Computed fit score: " + fitScore);
+        // // ---- Decision trace ----
+        // List<String> trace = new ArrayList<>();
+        // trace.add("Parsed LLM output");
+        // trace.add("Identified " + skillsMatch.size() + " matching skills");
+        // trace.add("Identified " + missingSkills.size() + " missing skills");
+        // trace.add("Computed fit score: " + fitScore);
 
-        // ---- Metadata ----
-        Map<String, Object> metadata = new HashMap<>();
-        metadata.put("fitScore", fitScore);
-        metadata.put("skillsMatch", skillsMatch);
-        metadata.put("missingSkills", missingSkills);
-        metadata.put("agentVersion", "1.0");
+        // // ---- Metadata ----
+        // Map<String, Object> metadata = new HashMap<>();
+        // metadata.put("fitScore", fitScore);
+        // metadata.put("skillsMatch", skillsMatch);
+        // metadata.put("missingSkills", missingSkills);
+        // metadata.put("agentVersion", "1.0");
 
         return new AgentResponse(
                 getName(),
@@ -95,8 +95,6 @@ public class JobAlignmentAgent implements BaseAgent {
     }
 
     private String callLLM(String prompt) {
-        
-        
         
         return """
         {
