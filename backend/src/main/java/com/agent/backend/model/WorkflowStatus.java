@@ -1,0 +1,15 @@
+package com.agent.backend.model;
+
+public enum WorkflowStatus {
+    IDLE,
+    EXTRACTING,
+    ROUTING,
+    CRITIQUING,
+    AWAITING_CRITIC_APPROVAL,
+    ANALYZING_CONTENT,
+    AWAITING_CONTENT_APPROVAL,
+    ALIGNING_JD,
+    AWAITING_ALIGNMENT_APPROVAL,
+    INTERVIEWING,
+    COMPLETED
+}
