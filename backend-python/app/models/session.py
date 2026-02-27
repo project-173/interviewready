@@ -13,6 +13,8 @@ class SessionContext(BaseModel):
     shared_memory: Optional[Dict[str, Any]] = Field(default_factory=dict)
     history: Optional[List[AgentResponse]] = Field(default_factory=list)
     decision_trace: Optional[List[str]] = Field(default_factory=list)
+    resume_data: Optional[str] = None  # Resume text content
+    job_description: Optional[str] = None  # Job description text
     
     def add_to_history(self, response: AgentResponse) -> None:
         """Add an agent response to the session history."""

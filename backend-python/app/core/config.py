@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # Gemini Model Configuration
     GEMINI_MODEL: str = "gemini-2.5-flash"
     GOOGLE_API_KEY: str
+    GEMINI_API_KEY: str
     
     # Firebase Configuration
     FIREBASE_ENABLED: bool = False

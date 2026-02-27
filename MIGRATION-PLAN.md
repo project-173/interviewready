@@ -35,13 +35,35 @@ The migration will be executed in the following phases:
 
 ### Phase 3: Agent Migration
 
-Each agent will be re-implemented in Python, leveraging LangGraph for state management and execution flow.
+Each agent will be re-implemented in Python, leveraging LangGraph for state management and execution flow while preserving the exact logic from the Java implementations.
 
-1.  **`ExtractorAgent`:** (from `README.md`) Create a Python equivalent for parsing resumes.
-2.  **`ResumeCriticAgent`:** Re-implement the `ResumeCriticAgent` logic.
-3.  **`ContentStrengthAgent`:** Re-implement the `ContentStrengthAgent` with its detailed JSON output structure.
-4.  **`JobAlignmentAgent`:** Re-implement the `JobAlignmentAgent`.
-5.  **`InterviewCoachAgent`:** Re-implement the `InterviewCoachAgent`, including the `GeminiLiveService` functionality if possible, or a suitable alternative.
+#### 3.1 Base Agent Architecture
+1. **Abstract Base Agent:** Create `BaseAgent` abstract class equivalent to Java `AbstractAgent`
+2. **Agent Interface:** Implement `BaseAgentProtocol` matching Java `BaseAgent` interface
+3. **Gemini Integration:** Create `GeminiService` to replace Spring AI ChatClient
+4. **Response Builder:** Implement `AgentResponseBuilder` for consistent response creation
+
+#### 3.2 Individual Agent Implementation
+1. **`ExtractorAgent`:** Create Python equivalent for resume parsing (if exists in Java)
+2. **`ResumeCriticAgent`:** Migrate with identical system prompt and confidence scoring (0.9)
+3. **`ContentStrengthAgent`:** Full migration with:
+   - Complete system prompt preservation
+   - JSON parsing logic with regex fallback
+   - Confidence calculation algorithms
+   - Hallucination risk assessment
+   - Evidence strength classification
+4. **`JobAlignmentAgent`:** Migrate with alignment evaluation logic (0.88 confidence)
+5. **`InterviewCoachAgent`:** Migrate with:
+   - GeminiLiveService integration
+   - Audio preview model support
+   - Fallback error handling
+
+#### 3.3 Agent Logic Preservation
+- **System Prompts:** Exact copy from Java implementations
+- **Confidence Scores:** Preserve original scoring logic
+- **Decision Traces:** Maintain audit trail format
+- **SHARP Metadata:** Keep governance data structure
+- **Error Handling:** Replicate exception handling patterns
 
 ### Phase 4: Orchestration and Governance
 
