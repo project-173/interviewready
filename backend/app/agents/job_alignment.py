@@ -13,14 +13,19 @@ class JobAlignmentAgent(BaseAgent):
     SYSTEM_PROMPT = """
         You are a Job Description Alignment Agent.
 
-        Compare the candidate resume against the job description.
+        You MUST return ONLY valid JSON.
+        Do NOT wrap in markdown.
+        Do NOT add explanation outside JSON.
 
-        Return structured JSON with:
-        - skillsMatch (list)
-        - missingSkills (list)
-        - experienceMatch (summary)
-        - fitScore (0-100 integer)
-        - reasoning (short explanation)
+        Return format:
+
+        {
+        "skillsMatch": [],
+        "missingSkills": [],
+        "experienceMatch": "",
+        "fitScore": 0,
+        "reasoning": ""
+        }
     """
 
     def __init__(self, gemini_service):
@@ -41,24 +46,44 @@ class JobAlignmentAgent(BaseAgent):
         self.system_prompt = self.system_prompt + "\n\n" + resume_prompt
         return self.system_prompt
 
-    def _call_llm(self, prompt: str) -> str:
+    def _call_llm(self, resume: str, job_desc: str, context: SessionContext) -> str:
         """Call LLM — currently returns hardcoded mock response."""
-        return """
-        {
-            "skillsMatch": ["Java", "Spring Boot"],
-            "missingSkills": ["AWS", "Kubernetes"],
-            "experienceMatch": "Strong backend experience",
-            "fitScore": 78,
-            "reasoning": "Good backend alignment but missing cloud exposure."
-        }
+
+        user_input = f"""
+            Resume:
+            {resume}
+
+            Job Description:
+            {job_desc}
+
+            Return ONLY valid JSON.
         """
 
+        return self.gemini_service.generate_response(
+            system_prompt=self.SYSTEM_PROMPT,
+            user_input=user_input,
+            context=context
+        )
+
+        # return """
+        # {
+        #     "skillsMatch": ["Java", "Spring Boot"],
+        #     "missingSkills": ["AWS", "Kubernetes"],
+        #     "experienceMatch": "Strong backend experience",
+        #     "fitScore": 78,
+        #     "reasoning": "Good backend alignment but missing cloud exposure."
+        # }
+        # """
+
     def _parse_json(self, raw: str) -> Dict[str, Any]:
-        """Parse JSON string into a dict, returning empty dict on failure."""
         try:
             return json.loads(raw)
-        except Exception:
-            return {}
+        except json.JSONDecodeError:
+            cleaned = re.sub(r"```json|```", "", raw).strip()
+            try:
+                return json.loads(cleaned)
+            except:
+                return {}
 
     def _compute_confidence(self, fit_score: int, missing_skills: List[str]) -> float:
         """Compute confidence score from fit score and missing skills count."""
@@ -90,9 +115,11 @@ class JobAlignmentAgent(BaseAgent):
         Returns:
             Agent response with alignment evaluation
         """
-        final_prompt = self._get_final_prompt(input_text, input_text)
 
-        raw_output = self._call_llm(final_prompt)
+        resume = input_text
+        job_desc = context.job_description or ""
+
+        raw_output = self._call_llm(resume, job_desc, context)
 
         # ---- Parse LLM JSON ----
         parsed = self._parse_json(raw_output)
