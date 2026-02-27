@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any, List
 from google import genai
 from google.genai import types
 from ..models.session import SessionContext
+from ..core.config import settings
 
 
 class GeminiService:
@@ -16,11 +17,11 @@ class GeminiService:
         """Initialize Gemini service.
         
         Args:
-            api_key: Gemini API key. If None, will try to get from environment
+            api_key: Gemini API key. If None, will use settings
             model_name: Gemini model name to use
         """
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
-        self.model_name = model_name
+        self.api_key = api_key or settings.GEMINI_API_KEY
+        self.model_name = model_name or settings.GEMINI_MODEL
         
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY environment variable must be set")

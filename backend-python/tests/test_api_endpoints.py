@@ -3,7 +3,6 @@ import os
 from fastapi.testclient import TestClient
 
 os.environ["DEBUG"] = "false"
-os.environ.setdefault("GOOGLE_API_KEY", "test-google-api-key")
 os.environ.setdefault("GEMINI_API_KEY", "test-gemini-api-key")
 
 from app.core.auth import get_current_user

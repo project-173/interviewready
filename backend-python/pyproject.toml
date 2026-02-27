@@ -10,7 +10,7 @@ authors = [
     {name = "InterviewReady Team", email = "team@interviewready.com"},
 ]
 dependencies = [
-    "fastapi>=0.104.0",
+    "fastapi[standard]>=0.104.0",
     "uvicorn[standard]>=0.24.0",
     "pydantic>=2.4.0",
     "pydantic-settings>=2.0.0",

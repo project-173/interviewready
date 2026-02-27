@@ -24,7 +24,6 @@ class Settings(BaseSettings):
     
     # Gemini Model Configuration
     GEMINI_MODEL: str = "gemini-2.5-flash"
-    GOOGLE_API_KEY: str
     GEMINI_API_KEY: str
     
     # Firebase Configuration
@@ -40,6 +39,8 @@ class Settings(BaseSettings):
     
     # Security
     SECURITY_FILTER_ORDER: int = 5
+    AUTH_ENABLED: bool = True
+    AUTH_DISABLED_USER_ID: str = "dev-user"
     
     # CORS
     ALLOWED_HOSTS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]

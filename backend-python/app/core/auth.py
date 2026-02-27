@@ -3,14 +3,16 @@
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.core.firebase import verify_firebase_token
+from app.core.config import settings
 from typing import Optional, Dict, Any
 
 # Initialize HTTP Bearer security scheme
-security = HTTPBearer()
 optional_security = HTTPBearer(auto_error=False)
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)) -> Dict[str, Any]:
+async def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(optional_security),
+) -> Dict[str, Any]:
     """
     Authenticate and retrieve current user from Firebase token.
     
@@ -23,6 +25,16 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(
     Raises:
         HTTPException: If authentication fails
     """
+    if not settings.AUTH_ENABLED:
+        return {"uid": settings.AUTH_DISABLED_USER_ID}
+
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     token = credentials.credentials
     user_info = await verify_firebase_token(token)
     
@@ -47,6 +59,9 @@ async def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] 
     Returns:
         Decoded user information from Firebase or None
     """
+    if not settings.AUTH_ENABLED:
+        return {"uid": settings.AUTH_DISABLED_USER_ID}
+
     if not credentials:
         return None
     
