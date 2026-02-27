@@ -1,8 +1,0 @@
-target/
-*.jar
-.mvn/
-.idea/
-.git/
-.gitignore
-Dockerfile
-docker-compose.yaml
