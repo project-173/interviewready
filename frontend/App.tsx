@@ -11,7 +11,7 @@ import {
   contentStrengthAgent, 
   alignmentAgent, 
   interviewCoachAgent 
-} from './geminiService';
+} from './backendService';
 import { StepIndicator } from './components/StepIndicator';
 import { ResumePreview } from './components/ResumePreview';
 import { 

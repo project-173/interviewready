@@ -2,7 +2,7 @@
 
 ## 1. Executive Summary
 
-This document outlines the plan to migrate the existing Java-based backend to a new Python-based backend. The goal is to replicate all existing functionalities while leveraging the strengths of the Python ecosystem for AI and machine learning development. The new backend will be developed in the `backend-python` directory.
+This document outlines the plan to migrate the existing Java-based backend to a new Python-based backend. The goal is to replicate all existing functionalities while leveraging the strengths of the Python ecosystem for AI and machine learning development. The new backend will be developed in the `backend` directory.
 
 ## 2. Proposed Python Architecture
 
@@ -22,7 +22,7 @@ The migration will be executed in the following phases:
 
 ### Phase 1: Project Setup and Core Infrastructure
 
-1.  **Create Project Structure:** Create the `backend-python` directory with subdirectories for `app`, `agents`, `core`, `models`, `tests`, etc.
+1.  **Create Project Structure:** Create the `backend` directory with subdirectories for `app`, `agents`, `core`, `models`, `tests`, etc.
 2.  **Dependency Management:** Create a `pyproject.toml` file to manage project dependencies with `uv`.
 3.  **FastAPI Application:** Set up the main FastAPI application, including the configuration for database and AI services.
 4.  **Authentication:** Implement a middleware for FastAPI to handle Firebase authentication, mirroring the logic in `FirebaseAuthenticationFilter.java`.

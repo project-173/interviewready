@@ -52,7 +52,7 @@ Once running, visit:
 ## Project Structure
 
 ```
-backend-python/
+backend/
 ├── app/
 │   ├── agents/          # Agent implementations
 │   ├── api/            # API endpoints

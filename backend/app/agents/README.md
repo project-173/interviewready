@@ -101,7 +101,7 @@ print(response.content)
 Run the test script to verify all agents:
 
 ```bash
-cd backend-python
+cd backend
 python test_agents.py
 ```
 
