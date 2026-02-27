@@ -54,7 +54,7 @@ Once running, visit:
 ```
 backend/
 ├── app/
-│   ├── agents/          # Agent implementations
+│   ├── agents/         # Agent implementations
 │   ├── api/            # API endpoints
 │   ├── core/           # Configuration and utilities
 │   ├── models/         # Data models
