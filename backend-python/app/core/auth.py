@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any
 
 # Initialize HTTP Bearer security scheme
 security = HTTPBearer()
+optional_security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)) -> Dict[str, Any]:
@@ -35,7 +36,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(
     return user_info
 
 
-async def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] = Security(security, auto_error=False)) -> Optional[Dict[str, Any]]:
+async def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] = Security(optional_security)) -> Optional[Dict[str, Any]]:
     """
     Optionally retrieve current user from Firebase token.
     Does not raise exception if authentication fails.

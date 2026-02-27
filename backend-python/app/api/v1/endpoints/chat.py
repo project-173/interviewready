@@ -1,35 +1,57 @@
 """Chat endpoint for interacting with the agentic system."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.concurrency import run_in_threadpool
+
+from app.api.v1.services import (
+    get_or_create_session_context,
+    get_orchestration_agent,
+)
 from app.core.auth import get_current_user
-from app.models import ChatRequest, AgentResponse
+from app.models import AgentResponse, ChatRequest
 
 router = APIRouter()
 
 
-@router.post("/", response_model=AgentResponse)
+@router.post("", response_model=AgentResponse)
 async def chat_endpoint(
     request: ChatRequest,
-    current_user: dict = Depends(get_current_user)
+    session_id: str = Query(..., alias="sessionId"),
+    current_user: dict = Depends(get_current_user),
 ) -> AgentResponse:
-    """
-    Main chat endpoint for interacting with the agentic system.
-    
-    This endpoint will be implemented in Phase 5 with full agent orchestration.
-    For now, it returns a placeholder response.
-    
-    Args:
-        request: Chat request containing message
-        current_user: Authenticated user from Firebase
-        
-    Returns:
-        Response from the agentic system
-    """
-    return AgentResponse(
-        agent_name="PlaceholderAgent",
-        content=f"Received message: {request.message}",
-        reasoning="This is a placeholder response until Phase 5 implementation",
-        confidence_score=0.0,
-        decision_trace=["placeholder", "pending_implementation"],
-        sharp_metadata={"status": "placeholder", "user_id": current_user.get("uid")}
+    """Run orchestration for the chat message within a user-owned session."""
+    user_id = str(
+        current_user.get("uid")
+        or current_user.get("user_id")
+        or current_user.get("sub")
+        or ""
     )
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing user identity in authentication token",
+        )
+
+    try:
+        context = get_or_create_session_context(session_id=session_id, user_id=user_id)
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+
+    try:
+        orchestrator = get_orchestration_agent()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Orchestration service unavailable: {exc}",
+        ) from exc
+
+    try:
+        return await run_in_threadpool(orchestrator.orchestrate, request.message, context)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process chat request: {exc}",
+        ) from exc
