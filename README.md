@@ -36,20 +36,18 @@ InterviewReady is a high-integrity AI system that converts unstructured resumes 
 - Google Cloud SDK (for GCP Deployment)
 
 ### Local Development
-
-#### Backend
-```bash
-cd backend
-mvn clean install
-mvn spring-boot:run
-```
-
-#### Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
+### Development Commands
+| Task | Command |
+|------|---------|
+| Backend Setup | `cd backend && uv sync` |
+| Frontend Setup | `cd frontend && npm install` |
+| Run Backend | `cd backend && uv run fastapi dev` |
+| Run Frontend | `cd frontend && npm run dev` |
+| Backend Tests | `cd backend && uv run python -m pytest` |
+| Frontend Tests | `cd frontend && npm run test` |
+| Code Linting | `cd backend && ruff check .` |
+| Code Formatting | `cd backend && ruff format .` |
+| Type Checking | `cd backend && mypy .` |
 
 ### Containerization
 
