@@ -192,6 +192,13 @@ export enum WorkflowStatus {
   COMPLETED = 'COMPLETED'
 }
 
+export interface ChatRequest {
+  intent: 'RESUME_CRITIC' | 'CONTENT_STRENGTH' | 'ALIGNMENT' | 'INTERVIEW_COACH';
+  resumeData: Resume;
+  jobDescription: string;
+  messageHistory: { role: 'user' | 'agent'; text: string }[];
+}
+
 export interface SharedState {
   currentResume: Resume | null;
   history: Resume[];
