@@ -14,8 +14,9 @@ from app.agents.base import BaseAgentProtocol
 from app.agents.gemini_service import GeminiService
 from app.core.logging import logger
 from app.governance.sharp_governance_service import SharpGovernanceService
-from app.models.agent import AgentResponse
+from app.models.agent import AgentResponse, ChatRequest
 from app.models.session import SessionContext
+from app.utils.pdf_parser import process_pdf_input, create_pdf_processing_prompt
 
 
 class OrchestrationState(TypedDict):
@@ -69,22 +70,29 @@ Respond with ONLY the JSON array, no other text.
         self.intent_gemini_service = intent_gemini_service
         self.workflow = self._build_workflow()
 
-    def orchestrate(self, input_text: str, context: SessionContext) -> AgentResponse:
+    def orchestrate(self, request: ChatRequest, context: SessionContext) -> AgentResponse:
         """Run intent analysis and execute selected agent sequence."""
         start_time = time.time()
         session_id = getattr(context, 'session_id', 'unknown')
         user_id = getattr(context, 'user_id', None)
         
+        # Extract intent from request and build input text for agents
+        intent = request.intent
+        resume_data = request.resumeData or {}
+        job_description = request.jobDescription or ""
+        message_history = request.messageHistory or []
+        
+        # Build input text based on intent and available data
+        input_text = self._build_agent_input(intent, resume_data, job_description, message_history)
+        
         # Log orchestration start
         logger.log_orchestration_start(input_text, session_id, user_id)
         
         try:
-            agent_sequence = self._analyze_intent(input_text, context)
-            if not agent_sequence:
-                agent_sequence = ["ResumeCriticAgent"]
-                logger.debug("Defaulted to ResumeCriticAgent due to empty intent analysis", session_id=session_id)
-
-            logger.log_intent_analysis(input_text, agent_sequence, "keyword_based", session_id)
+            # Map intent to agent sequence directly
+            agent_sequence = self._map_intent_to_agents(intent)
+            
+            logger.log_intent_analysis(input_text, agent_sequence, "intent_based", session_id)
             
             state: OrchestrationState = {
                 "original_input": input_text,
@@ -343,3 +351,44 @@ Respond with ONLY the JSON array, no other text.
             f"{prior_content}\n\n"
             "Continue analysis based on the above context."
         )
+
+    def _build_agent_input(self, intent: str, resume_data: dict, job_description: str, message_history: list) -> str:
+        """Build input text for agents based on intent and available data."""
+        if intent == "RESUME_CRITIC":
+            # Check if this is a PDF file upload
+            if job_description and ("file data:" in job_description.lower() or "resume text:" in job_description.lower()):
+                # Try to parse PDF if present
+                extracted_text = process_pdf_input(job_description)
+                if extracted_text:
+                    return create_pdf_processing_prompt(extracted_text)
+                else:
+                    # PDF parsing failed, fall back to original instruction
+                    return job_description
+            else:
+                # Regular resume critique
+                return f"Analyze this resume: {json.dumps(resume_data, indent=2)}"
+        
+        elif intent == "CONTENT_STRENGTH":
+            return f"Analyze the content strength and skills of this resume using STAR/XYZ methodology: {json.dumps(resume_data, indent=2)}"
+        
+        elif intent == "ALIGNMENT":
+            return f"Analyze the fit between this resume and the Job Description. Use Google Search to research the company or specific technology trends if necessary.\nResume: {json.dumps(resume_data, indent=2)}\nJD: {job_description}"
+        
+        elif intent == "INTERVIEW_COACH":
+            history_str = json.dumps([{"role": msg.role, "text": msg.text} for msg in message_history], indent=2)
+            return f"You are a high-stakes Interview Coach. Based on this alignment data: {job_description}, conduct a realistic mock interview. Ask one targeted question at a time. History: {history_str}"
+        
+        else:
+            # Fallback
+            return f"Process this request: {json.dumps(resume_data, indent=2)}"
+
+    def _map_intent_to_agents(self, intent: str) -> list[str]:
+        """Map intent directly to agent sequence."""
+        intent_mapping = {
+            "RESUME_CRITIC": ["ResumeCriticAgent"],
+            "CONTENT_STRENGTH": ["ContentStrengthAgent"], 
+            "ALIGNMENT": ["JobAlignmentAgent"],
+            "INTERVIEW_COACH": ["InterviewCoachAgent"]
+        }
+        
+        return intent_mapping.get(intent, ["ResumeCriticAgent"])

@@ -16,10 +16,20 @@ class AgentResponse(BaseModel):
     sharp_metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)  # SHARP Compliance Data
 
 
-class ChatRequest(BaseModel):
-    """Chat request model."""
+class InterviewMessage(BaseModel):
+    """Interview coaching message."""
     
-    message: str
+    role: Optional[str] = None
+    text: Optional[str] = None
+
+
+class ChatRequest(BaseModel):
+    """Chat request model with rich JSON structure."""
+    
+    intent: str  # 'RESUME_CRITIC' | 'CONTENT_STRENGTH' | 'ALIGNMENT' | 'INTERVIEW_COACH'
+    resumeData: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    jobDescription: Optional[str] = ""
+    messageHistory: Optional[List[InterviewMessage]] = Field(default_factory=list)
 
 
 class AlignmentReport(BaseModel):
@@ -39,13 +49,6 @@ class ContentAnalysisReport(BaseModel):
     gaps: Optional[List[str]] = Field(default_factory=list)
     skill_improvements: Optional[List[str]] = Field(default_factory=list)
     quantified_impact_score: Optional[float] = None
-
-
-class InterviewMessage(BaseModel):
-    """Interview coaching message."""
-    
-    role: Optional[str] = None
-    text: Optional[str] = None
 
 
 class StructuralAssessment(BaseModel):

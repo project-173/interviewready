@@ -49,7 +49,7 @@ async def chat_endpoint(
         ) from exc
 
     try:
-        return await run_in_threadpool(orchestrator.orchestrate, request.message, context)
+        return await run_in_threadpool(orchestrator.orchestrate, request, context)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
