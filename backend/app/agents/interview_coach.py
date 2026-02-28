@@ -4,6 +4,8 @@ import os
 from typing import List, Dict, Any, Optional
 from .base import BaseAgent
 from .gemini_service import GeminiLiveService
+from .mock_config import MockConfig
+from .mock_gemini_service import MockGeminiLiveService
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
 
@@ -27,18 +29,21 @@ class InterviewCoachAgent(BaseAgent):
             name="InterviewCoachAgent"
         )
         
-        # Initialize Gemini Live Service
-        self.gemini_live_service = GeminiLiveService()
-        
-        # Try to connect to Gemini Live if API key is available
-        api_key = os.getenv("GEMINI_API_KEY")
-        if api_key and api_key.strip():
-            try:
-                self.gemini_live_service.connect(api_key, self.DEFAULT_MODEL)
-            except Exception as e:
-                print(f"Failed to connect to Gemini Live: {e}")
+        # Initialize appropriate service based on mock mode
+        if MockConfig.is_mock_enabled():
+            self.gemini_live_service = MockGeminiLiveService()
         else:
-            print("GEMINI_API_KEY not set; Gemini Live will not be used.")
+            self.gemini_live_service = GeminiLiveService()
+            
+            # Try to connect to Gemini Live if API key is available
+            api_key = os.getenv("GEMINI_API_KEY")
+            if api_key and api_key.strip():
+                try:
+                    self.gemini_live_service.connect(api_key, self.DEFAULT_MODEL)
+                except Exception as e:
+                    print(f"Failed to connect to Gemini Live: {e}")
+            else:
+                print("GEMINI_API_KEY not set; Gemini Live will not be used.")
     
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process interview coaching request.

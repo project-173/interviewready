@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from typing import Protocol, Optional, Dict, Any, List
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
+from .mock_config import MockConfig
+from .mock_gemini_service import MockGeminiService
 
 
 class BaseAgentProtocol(Protocol):
@@ -40,6 +42,12 @@ class BaseAgent(ABC, BaseAgentProtocol):
         self.gemini_service = gemini_service
         self.system_prompt = system_prompt
         self.name = name
+        
+        # Initialize mock service if mock mode is enabled
+        if MockConfig.is_mock_enabled():
+            self.mock_service = MockGeminiService()
+        else:
+            self.mock_service = None
     
     def get_name(self) -> str:
         """Get the agent name."""
@@ -68,6 +76,15 @@ class BaseAgent(ABC, BaseAgentProtocol):
         Returns:
             Gemini response text
         """
+        # Use mock service if enabled
+        if self.mock_service:
+            return self.mock_service.generate_response(
+                system_prompt=self.system_prompt,
+                user_input=input_text,
+                context=context
+            )
+        
+        # Use real Gemini service
         return self.gemini_service.generate_response(
             system_prompt=self.system_prompt,
             user_input=input_text,

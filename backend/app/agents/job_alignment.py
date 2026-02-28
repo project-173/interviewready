@@ -5,7 +5,7 @@ from typing import List, Dict, Any
 from .base import BaseAgent
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
-
+from .mock_config import MockConfig
 
 class JobAlignmentAgent(BaseAgent):
     """Agent for evaluating how well a resume matches a specific job description."""
@@ -90,9 +90,12 @@ class JobAlignmentAgent(BaseAgent):
         Returns:
             Agent response with alignment evaluation
         """
-        final_prompt = self._get_final_prompt(input_text, input_text)
-
-        raw_output = self._call_llm(final_prompt)
+        # Use mock service if enabled, otherwise use the existing _call_llm method
+        if MockConfig.is_mock_enabled():
+            raw_output = self.call_gemini(input_text, context)
+        else:
+            final_prompt = self._get_final_prompt(input_text, input_text)
+            raw_output = self._call_llm(final_prompt)
 
         # ---- Parse LLM JSON ----
         parsed = self._parse_json(raw_output)

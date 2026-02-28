@@ -49,6 +49,105 @@ InterviewReady is a high-integrity AI system that converts unstructured resumes 
 | Code Formatting | `cd backend && ruff format .` |
 | Type Checking | `cd backend && mypy .` |
 
+## Backend Request/Response Contracts
+
+Primary chat endpoint:
+
+- `POST /api/v1/chat?sessionId=<session-id>`
+
+Request body (`ChatRequest`):
+
+```json
+{
+  "message": "Review my resume for ATS issues and interview prep."
+}
+```
+
+Response body (`AgentResponse`):
+
+```json
+{
+  "agent_name": "ResumeCriticAgent",
+  "content": "Agent output text (or JSON-as-text for some agents)",
+  "reasoning": "Short explanation of analysis",
+  "confidence_score": 0.9,
+  "decision_trace": [
+    "Orchestrator: Routed to ResumeCriticAgent based on intent analysis."
+  ],
+  "sharp_metadata": {
+    "analysis_type": "resume_critique"
+  }
+}
+```
+
+Agent output expectations in `AgentResponse.content`:
+
+- `ContentStrengthAgent`: JSON string with `skills`, `achievements`, `suggestions`, `hallucinationRisk`, `summary`.
+- `JobAlignmentAgent`: JSON string with `skillsMatch`, `missingSkills`, `experienceMatch`, `fitScore`, `reasoning`.
+- `ResumeCriticAgent`: Markdown/text critique.
+- `InterviewCoachAgent`: Markdown/text coaching feedback.
+
+## Mock Responses File Format
+
+Set in backend `.env`:
+
+```bash
+MOCK_GEMINI=true
+MOCK_RESPONSES_FILE=./mock_responses.json
+LOG_MOCK_CALLS=true
+```
+
+Example file is included at:
+
+- `backend/mock_responses.json`
+
+Supported schema:
+
+```json
+{
+  "agents": {
+    "ContentStrengthAgent": {
+      "default": {
+        "response_json": {}
+      }
+    },
+    "ResumeCriticAgent": {
+      "default": {
+        "response_text": "..."
+      }
+    },
+    "InterviewCoachAgent": {
+      "rules": [
+        {
+          "when": {
+            "user_input_contains_any": ["question", "answer"]
+          },
+          "response_text": "..."
+        }
+      ],
+      "default": {
+        "response_text": "..."
+      }
+    },
+    "JobAlignmentAgent": {
+      "default": {
+        "response_json": {}
+      }
+    }
+  },
+  "fallback": {
+    "response_text": "..."
+  }
+}
+```
+
+Rule behavior:
+
+- `rules` are evaluated in order, first match wins.
+- `when.user_input_contains_any` matches if any listed term appears in the user message (case-insensitive).
+- `response_json` is serialized to JSON text and returned to agents.
+- `response_text` is returned as-is.
+
 ### Containerization
 
 #### Run with Docker Compose
