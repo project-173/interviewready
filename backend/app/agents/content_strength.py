@@ -2,8 +2,10 @@
 
 import json
 import re
+import time
 from typing import List, Dict, Any, Optional
 from .base import BaseAgent
+from ..core.logging import logger
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
 
@@ -95,35 +97,87 @@ class ContentStrengthAgent(BaseAgent):
         Returns:
             Agent response with content strength analysis
         """
-        raw_result = self.call_gemini(input_text, context)
+        session_id = getattr(context, 'session_id', 'unknown')
+        agent_name = self.get_name()
+        processing_start_time = time.time()
         
-        parsed = self._parse_json(raw_result)
+        # Log processing start
+        logger.debug(f"ContentStrengthAgent processing started", 
+                    session_id=session_id, 
+                    input_length=len(input_text),
+                    input_preview=input_text[:100] + "..." if len(input_text) > 100 else input_text)
         
-        overall_confidence = self._calculate_overall_confidence(parsed)
-        hallucination_risk = self._get_double_or_zero(parsed, "hallucinationRisk")
-        summary = self._get_text_or_empty(parsed, "summary")
-        
-        decision_trace = [
-            "ContentStrengthAgent: Analyzed resume for skills and achievements",
-            f"ContentStrengthAgent: Identified {self._count_array(parsed, 'skills')} skills",
-            f"ContentStrengthAgent: Identified {self._count_array(parsed, 'achievements')} achievements",
-            f"ContentStrengthAgent: Generated {self._count_array(parsed, 'suggestions')} suggestions",
-            f"ContentStrengthAgent: Hallucination risk: {hallucination_risk}"
-        ]
-        
-        sharp_metadata = {
-            "hallucinationRisk": hallucination_risk,
-            "overallConfidence": overall_confidence
-        }
-        
-        return AgentResponse(
-            agent_name=self.get_name(),
-            content=raw_result,
-            reasoning=summary,
-            confidence_score=overall_confidence,
-            decision_trace=decision_trace,
-            sharp_metadata=sharp_metadata
-        )
+        try:
+            raw_result = self.call_gemini(input_text, context)
+            processing_time = time.time() - processing_start_time
+            
+            # Log Gemini API call completion
+            logger.debug(f"ContentStrengthAgent Gemini call completed", 
+                        session_id=session_id, 
+                        processing_time_ms=round(processing_time * 1000, 2),
+                        raw_result_length=len(raw_result))
+            
+            parsed = self._parse_json(raw_result)
+            
+            # Log parsing results
+            logger.debug(f"ContentStrengthAgent JSON parsing completed", 
+                        session_id=session_id, 
+                        parsing_successful=bool(parsed),
+                        parsed_keys=list(parsed.keys()) if parsed else [])
+            
+            overall_confidence = self._calculate_overall_confidence(parsed)
+            hallucination_risk = self._get_double_or_zero(parsed, "hallucinationRisk")
+            summary = self._get_text_or_empty(parsed, "summary")
+            
+            # Log analysis metrics
+            logger.debug(f"ContentStrengthAgent analysis metrics calculated", 
+                        session_id=session_id, 
+                        overall_confidence=overall_confidence,
+                        hallucination_risk=hallucination_risk,
+                        skills_count=self._count_array(parsed, 'skills'),
+                        achievements_count=self._count_array(parsed, 'achievements'),
+                        suggestions_count=self._count_array(parsed, 'suggestions'))
+            
+            decision_trace = [
+                "ContentStrengthAgent: Analyzed resume for skills and achievements",
+                f"ContentStrengthAgent: Identified {self._count_array(parsed, 'skills')} skills",
+                f"ContentStrengthAgent: Identified {self._count_array(parsed, 'achievements')} achievements",
+                f"ContentStrengthAgent: Generated {self._count_array(parsed, 'suggestions')} suggestions",
+                f"ContentStrengthAgent: Hallucination risk: {hallucination_risk}"
+            ]
+            
+            sharp_metadata = {
+                "hallucinationRisk": hallucination_risk,
+                "overallConfidence": overall_confidence
+            }
+            
+            response = AgentResponse(
+                agent_name=self.get_name(),
+                content=raw_result,
+                reasoning=summary,
+                confidence_score=overall_confidence,
+                decision_trace=decision_trace,
+                sharp_metadata=sharp_metadata
+            )
+            
+            # Log response creation
+            logger.debug(f"ContentStrengthAgent response created", 
+                        session_id=session_id, 
+                        confidence_score=overall_confidence,
+                        hallucination_risk=hallucination_risk,
+                        analysis_type="content_strength")
+            
+            return response
+            
+        except Exception as e:
+            processing_time = time.time() - processing_start_time
+            logger.log_agent_error(agent_name, e, session_id)
+            logger.error(f"ContentStrengthAgent processing failed", 
+                        session_id=session_id, 
+                        processing_time_ms=round(processing_time * 1000, 2),
+                        error_type=type(e).__name__,
+                        error_message=str(e))
+            raise
     
     def _parse_json(self, text: str) -> Dict[str, Any]:
         """Parse JSON from text with regex fallback.
@@ -134,14 +188,21 @@ class ContentStrengthAgent(BaseAgent):
         Returns:
             Parsed JSON dictionary
         """
+        session_id = "unknown"  # We don't have session context here
+        
         try:
             json_pattern = re.compile(r'\{[\s\S]*\}', re.MULTILINE)
             matcher = json_pattern.search(text)
             if matcher:
-                return json.loads(matcher.group())
+                result = json.loads(matcher.group())
+                logger.debug("JSON parsing successful with regex", session_id=session_id, keys_found=list(result.keys()))
+                return result
             
-            return json.loads(text)
-        except Exception:
+            result = json.loads(text)
+            logger.debug("JSON parsing successful without regex", session_id=session_id, keys_found=list(result.keys()))
+            return result
+        except Exception as e:
+            logger.warning("JSON parsing failed, returning empty dict", session_id=session_id, error=str(e), text_preview=text[:200])
             return {}
     
     def _calculate_overall_confidence(self, node: Dict[str, Any]) -> float:
