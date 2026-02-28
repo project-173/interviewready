@@ -6,7 +6,7 @@ import time
 from typing import List, Dict, Any, Optional
 from .base import BaseAgent
 from ..core.logging import logger
-from ..models.agent import AgentResponse
+from ..models.agent import AgentResponse, ContentAnalysisReport
 from ..models.session import SessionContext
 
 
@@ -118,6 +118,7 @@ class ContentStrengthAgent(BaseAgent):
                         raw_result_length=len(raw_result))
             
             parsed = self._parse_json(raw_result)
+            normalized = self._normalize_content_analysis(parsed)
             
             # Log parsing results
             logger.debug(f"ContentStrengthAgent JSON parsing completed", 
@@ -125,24 +126,24 @@ class ContentStrengthAgent(BaseAgent):
                         parsing_successful=bool(parsed),
                         parsed_keys=list(parsed.keys()) if parsed else [])
             
-            overall_confidence = self._calculate_overall_confidence(parsed)
-            hallucination_risk = self._get_double_or_zero(parsed, "hallucinationRisk")
-            summary = self._get_text_or_empty(parsed, "summary")
+            overall_confidence = self._calculate_overall_confidence(normalized)
+            hallucination_risk = self._get_double_or_zero(normalized, "hallucinationRisk")
+            summary = self._get_text_or_empty(normalized, "summary")
             
             # Log analysis metrics
             logger.debug(f"ContentStrengthAgent analysis metrics calculated", 
                         session_id=session_id, 
                         overall_confidence=overall_confidence,
                         hallucination_risk=hallucination_risk,
-                        skills_count=self._count_array(parsed, 'skills'),
-                        achievements_count=self._count_array(parsed, 'achievements'),
-                        suggestions_count=self._count_array(parsed, 'suggestions'))
+                        skills_count=self._count_array(normalized, 'skills'),
+                        achievements_count=self._count_array(normalized, 'achievements'),
+                        suggestions_count=self._count_array(normalized, 'suggestions'))
             
             decision_trace = [
                 "ContentStrengthAgent: Analyzed resume for skills and achievements",
-                f"ContentStrengthAgent: Identified {self._count_array(parsed, 'skills')} skills",
-                f"ContentStrengthAgent: Identified {self._count_array(parsed, 'achievements')} achievements",
-                f"ContentStrengthAgent: Generated {self._count_array(parsed, 'suggestions')} suggestions",
+                f"ContentStrengthAgent: Identified {self._count_array(normalized, 'skills')} skills",
+                f"ContentStrengthAgent: Identified {self._count_array(normalized, 'achievements')} achievements",
+                f"ContentStrengthAgent: Generated {self._count_array(normalized, 'suggestions')} suggestions",
                 f"ContentStrengthAgent: Hallucination risk: {hallucination_risk}"
             ]
             
@@ -153,7 +154,7 @@ class ContentStrengthAgent(BaseAgent):
             
             response = AgentResponse(
                 agent_name=self.get_name(),
-                content=raw_result,
+                content=json.dumps(normalized, indent=2),
                 reasoning=summary,
                 confidence_score=overall_confidence,
                 decision_trace=decision_trace,
@@ -297,3 +298,25 @@ class ContentStrengthAgent(BaseAgent):
             return float(node.get(field, 0.0))
         except (ValueError, TypeError):
             return 0.0
+
+    def _normalize_content_analysis(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize parsed JSON to match ContentAnalysisReport model."""
+        data: Dict[str, Any] = {
+            "skills": parsed.get("skills", []),
+            "achievements": parsed.get("achievements", []),
+            "suggestions": parsed.get("suggestions", []),
+            "hallucinationRisk": self._get_double_or_zero(parsed, "hallucinationRisk"),
+            "summary": self._get_text_or_empty(parsed, "summary"),
+        }
+        try:
+            validated = ContentAnalysisReport.model_validate(data)
+            return validated.model_dump()
+        except Exception:
+            fallback = ContentAnalysisReport(
+                skills=[],
+                achievements=[],
+                suggestions=[],
+                hallucinationRisk=self._get_double_or_zero(parsed, "hallucinationRisk"),
+                summary=self._get_text_or_empty(parsed, "summary"),
+            )
+            return fallback.model_dump()

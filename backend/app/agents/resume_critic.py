@@ -1,17 +1,29 @@
 """Resume Critic Agent implementation."""
 
+import json
+import re
 import time
-from typing import List, Dict, Any
+from typing import Dict, Any
 from .base import BaseAgent
 from ..core.logging import logger
-from ..models.agent import AgentResponse
+from ..models.agent import AgentResponse, StructuralAssessment
 from ..models.session import SessionContext
 
 
 class ResumeCriticAgent(BaseAgent):
     """Agent for analyzing resume structure, ATS compatibility, and impact."""
-    
-    SYSTEM_PROMPT = "You are an expert Resume Critic. Analyze the resume for structure, ATS compatibility, and impact."
+
+    SYSTEM_PROMPT = """
+    You are an expert Resume Critic. Analyze the resume for structure, ATS compatibility, and impact.
+
+    Return ONLY valid JSON with this exact schema:
+    {
+      "score": 0-100 number,
+      "readability": "short text summary",
+      "formattingRecommendations": ["recommendation 1", "recommendation 2"],
+      "suggestions": ["actionable suggestion 1", "actionable suggestion 2"]
+    }
+    """
     CONFIDENCE_SCORE = 0.9
     
     def __init__(self, gemini_service):
@@ -47,16 +59,17 @@ class ResumeCriticAgent(BaseAgent):
                     input_preview=input_text[:100] + "..." if len(input_text) > 100 else input_text)
         
         try:
-            # Call Gemini with the resume content
-            result = self.call_gemini(input_text, context)
+            raw_result = self.call_gemini(input_text, context)
+            parsed_result = self._parse_json(raw_result)
+            structured_result = self._normalize_structural_assessment(parsed_result)
             processing_time = time.time() - processing_start_time
             
             # Log processing completion
             logger.debug(f"ResumeCriticAgent processing completed", 
                         session_id=session_id, 
                         processing_time_ms=round(processing_time * 1000, 2),
-                        result_length=len(result),
-                        result_preview=result[:100] + "..." if len(result) > 100 else result)
+                        result_length=len(raw_result),
+                        result_preview=raw_result[:100] + "..." if len(raw_result) > 100 else raw_result)
             
             # Build decision trace for auditability
             decision_trace = [
@@ -73,7 +86,7 @@ class ResumeCriticAgent(BaseAgent):
             
             response = AgentResponse(
                 agent_name=self.get_name(),
-                content=result,
+                content=json.dumps(structured_result, indent=2),
                 reasoning="Analyzed resume structure and content impact.",
                 confidence_score=self.CONFIDENCE_SCORE,
                 decision_trace=decision_trace,
@@ -98,3 +111,77 @@ class ResumeCriticAgent(BaseAgent):
                         error_type=type(e).__name__,
                         error_message=str(e))
             raise
+
+    def _parse_json(self, text: str) -> Dict[str, Any]:
+        """Parse JSON from raw or fenced markdown text."""
+        if not text:
+            return {}
+
+        try:
+            return json.loads(text)
+        except Exception:
+            pass
+
+        fenced_match = re.search(
+            r"```(?:json)?\s*(\{[\s\S]*\})\s*```",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if fenced_match:
+            try:
+                return json.loads(fenced_match.group(1).strip())
+            except Exception:
+                return {}
+
+        json_match = re.search(r"\{[\s\S]*\}", text)
+        if json_match:
+            try:
+                return json.loads(json_match.group(0).strip())
+            except Exception:
+                return {}
+
+        return {}
+
+    def _normalize_structural_assessment(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize parsed content into StructuralAssessment schema."""
+        fallback_suggestions = [
+            "Use consistent bullet formatting across all sections.",
+            "Add measurable impact statements for key achievements.",
+        ]
+
+        result = {
+            "score": self._as_float(parsed.get("score"), 70.0),
+            "readability": self._as_str(
+                parsed.get("readability"),
+                "Resume analyzed. Improve clarity and consistency for stronger ATS performance.",
+            ),
+            "formattingRecommendations": self._as_str_list(
+                parsed.get("formattingRecommendations")
+            ),
+            "suggestions": self._as_str_list(parsed.get("suggestions")),
+        }
+
+        if not result["formattingRecommendations"]:
+            result["formattingRecommendations"] = fallback_suggestions
+        if not result["suggestions"]:
+            result["suggestions"] = fallback_suggestions
+
+        validated = StructuralAssessment.model_validate(result)
+        return validated.model_dump()
+
+    @staticmethod
+    def _as_float(value: Any, fallback: float) -> float:
+        try:
+            return float(value)
+        except Exception:
+            return fallback
+
+    @staticmethod
+    def _as_str(value: Any, fallback: str) -> str:
+        return value if isinstance(value, str) and value.strip() else fallback
+
+    @staticmethod
+    def _as_str_list(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item) for item in value if isinstance(item, str) and item.strip()]

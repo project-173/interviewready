@@ -1,8 +1,7 @@
 """Agent-related models."""
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from pydantic import BaseModel, Field
-from .base import Source
 
 
 class AgentResponse(BaseModel):
@@ -14,6 +13,13 @@ class AgentResponse(BaseModel):
     confidence_score: Optional[float] = None  # Confidence Indicator
     decision_trace: Optional[List[str]] = Field(default_factory=list)  # Auditability
     sharp_metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)  # SHARP Compliance Data
+
+
+class ChatApiResponse(BaseModel):
+    """External API response model for frontend consumption."""
+
+    agent: Optional[str] = None
+    payload: Optional[Dict[str, Any] | List[Any] | str] = None
 
 
 class InterviewMessage(BaseModel):
@@ -34,31 +40,61 @@ class ChatRequest(BaseModel):
 
 class AlignmentReport(BaseModel):
     """Job alignment analysis report."""
-    
-    overall_score: Optional[float] = None
-    matching_keywords: Optional[List[str]] = Field(default_factory=list)
-    missing_keywords: Optional[List[str]] = Field(default_factory=list)
-    role_fit_analysis: Optional[str] = None
-    sources: Optional[List[Source]] = Field(default_factory=list)
+
+    skillsMatch: Optional[List[str]] = Field(default_factory=list)
+    missingSkills: Optional[List[str]] = Field(default_factory=list)
+    experienceMatch: Optional[str] = None
+    fitScore: Optional[int] = None
+    reasoning: Optional[str] = None
+
+
+class ContentSkill(BaseModel):
+    """Skill evidence extracted from the resume."""
+
+    name: str
+    category: Literal["Technical", "Soft", "Domain", "Tool"]
+    confidenceScore: float
+    evidenceStrength: Literal["HIGH", "MEDIUM", "LOW"]
+    evidence: str
+
+
+class ContentAchievement(BaseModel):
+    """Achievement evidence extracted from the resume."""
+
+    description: str
+    impact: Literal["HIGH", "MEDIUM", "LOW"]
+    quantifiable: bool
+    confidenceScore: float
+    originalText: str
+
+
+class ContentSuggestion(BaseModel):
+    """Faithful phrasing suggestion for resume improvement."""
+
+    original: str
+    suggested: str
+    rationale: str
+    faithful: bool
+    confidenceScore: float
 
 
 class ContentAnalysisReport(BaseModel):
     """Content strength analysis report."""
-    
-    strengths: Optional[List[str]] = Field(default_factory=list)
-    gaps: Optional[List[str]] = Field(default_factory=list)
-    skill_improvements: Optional[List[str]] = Field(default_factory=list)
-    quantified_impact_score: Optional[float] = None
+
+    skills: Optional[List[ContentSkill]] = Field(default_factory=list)
+    achievements: Optional[List[ContentAchievement]] = Field(default_factory=list)
+    suggestions: Optional[List[ContentSuggestion]] = Field(default_factory=list)
+    hallucinationRisk: Optional[float] = None
+    summary: Optional[str] = None
 
 
 class StructuralAssessment(BaseModel):
     """Resume structural assessment."""
-    
-    overall_score: Optional[float] = None
-    format_issues: Optional[List[str]] = Field(default_factory=list)
-    completeness_score: Optional[float] = None
-    readability_score: Optional[float] = None
-    recommendations: Optional[List[str]] = Field(default_factory=list)
+
+    score: Optional[float] = None
+    readability: Optional[str] = None
+    formattingRecommendations: Optional[List[str]] = Field(default_factory=list)
+    suggestions: Optional[List[str]] = Field(default_factory=list)
 
 
 class WorkflowStatus(BaseModel):
