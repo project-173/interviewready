@@ -21,6 +21,7 @@ __all__ = [
     
     # Agent models
     "AgentResponse",
+    "ChatApiResponse",
     "ChatRequest",
     "AlignmentReport",
     "ContentAnalysisReport",

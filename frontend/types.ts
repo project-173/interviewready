@@ -2,69 +2,70 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
 export interface Experience {
-  title: string;
   company: string;
-  startDate: Date;
-  endDate: Date | null;
-  description: string;
+  role: string;
+  duration: string;
+  achievements: string[];
 }
 
 export interface Education {
-  school: string;
+  institution: string;
   degree: string;
-  startDate: Date;
-  endDate: Date | null;
-  gpa: number | null;
-  gpaMax: number | null;
-  description: string;
+  year: string;
 }
 
 export interface Project {
   title: string;
-  startDate: Date;
-  endDate: Date | null;
-  description: Record<string, unknown> | null;
+  description: string;
+  date: string;
 }
 
 export interface Certification {
   name: string;
   issuer: string;
-  issueDate: Date;
-  expiryDate: Date | null;
-  credentialId: string;
-  credentialUrl: string;
+  date: string;
 }
 
 export interface Award {
   title: string;
   issuer: string;
-  date: Date | null;
-  description: Record<string, unknown> | null;
+  date: string;
 }
 
-export interface Contact {
-  fullName: string;
-  email: string;
-  phone: string;
-  city: string;
-  country: string;
-  linkedin: string;
-  github: string;
-  portfolio: string;
+export interface ResumeSchema {
+  id?: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  location?: string;
+  summary?: string;
+  skills?: string[];
+  experience?: Experience[];
+  education?: Education[];
+  projects?: Project[];
+  certifications?: Certification[];
+  awards?: Award[];
+  timestamp?: string;
+  // Backward compatibility properties
+  title?: string;
+  isMaster?: boolean;
+  contact?: {
+    fullName: string;
+    email: string;
+    phone: string;
+    city: string;
+    country: string;
+    linkedin: string;
+    github: string;
+    portfolio: string;
+  };
+  // Plural forms for backward compatibility
+  experiences?: Experience[];
+  educations?: Education[];
 }
 
-export interface Resume {
-  title: string;
-  summary: string;
-  isMaster: boolean;
-  experiences: Experience[];
-  educations: Education[];
-  skills: string[];
-  awards: Award[];
-  certifications: Certification[];
-  projects: Project[];
-  contact: Contact;
-}
+// Backward compatibility alias
+export type Resume = ResumeSchema;
 
 export interface StructuralAssessment {
   score: number;
@@ -73,84 +74,96 @@ export interface StructuralAssessment {
   suggestions: string[];
 }
 
+export type SkillCategory = "Technical" | "Soft" | "Domain" | "Tool";
+export type EvidenceStrength = "HIGH" | "MEDIUM" | "LOW";
+export type ImpactLevel = "HIGH" | "MEDIUM" | "LOW";
+
+export interface ContentSkill {
+  name: string;
+  category: SkillCategory;
+  confidenceScore: number;
+  evidenceStrength: EvidenceStrength;
+  evidence: string;
+}
+
+export interface ContentAchievement {
+  description: string;
+  impact: ImpactLevel;
+  quantifiable: boolean;
+  confidenceScore: number;
+  originalText: string;
+}
+
+export interface ContentSuggestion {
+  original: string;
+  suggested: string;
+  rationale: string;
+  faithful: boolean;
+  confidenceScore: number;
+}
+
 export interface ContentAnalysisReport {
-  strengths: string[];
-  gaps: string[];
-  skillImprovements: string[];
-  quantifiedImpactScore: number;
+  skills: ContentSkill[];
+  achievements: ContentAchievement[];
+  suggestions: ContentSuggestion[];
+  hallucinationRisk: number;
+  summary: string;
 }
 
 export interface AlignmentReport {
-  overallScore: number;
-  matchingKeywords: string[];
-  missingKeywords: string[];
-  roleFitAnalysis: string;
+  skillsMatch: string[];
+  missingSkills: string[];
+  experienceMatch: string;
+  fitScore: number;
+  reasoning: string;
   sources?: { title: string; uri: string }[];
 }
 
 const experienceSchema = z.object({
-  title: z.string(),
   company: z.string(),
-  startDate: z.string(),
-  endDate: z.string().nullable(),
-  description: z.string(),
+  role: z.string(),
+  duration: z.string(),
+  achievements: z.array(z.string()),
 });
 
 const educationSchema = z.object({
-  school: z.string(),
+  institution: z.string(),
   degree: z.string(),
-  startDate: z.string(),
-  endDate: z.string().nullable(),
-  gpa: z.number().nullable(),
-  gpaMax: z.number().nullable(),
-  description: z.string(),
+  year: z.string(),
 });
 
 const projectSchema = z.object({
   title: z.string(),
-  startDate: z.string(),
-  endDate: z.string().nullable(),
-  description: z.record(z.unknown()).nullable(),
+  description: z.string(),
+  date: z.string(),
 });
 
 const certificationSchema = z.object({
   name: z.string(),
   issuer: z.string(),
-  issueDate: z.string(),
-  expiryDate: z.string().nullable(),
-  credentialId: z.string(),
-  credentialUrl: z.string(),
+  date: z.string(),
 });
 
 const awardSchema = z.object({
   title: z.string(),
   issuer: z.string(),
-  date: z.string().nullable(),
-  description: z.record(z.unknown()).nullable(),
-});
-
-const contactSchema = z.object({
-  fullName: z.string(),
-  email: z.string(),
-  phone: z.string(),
-  city: z.string(),
-  country: z.string(),
-  linkedin: z.string(),
-  github: z.string(),
-  portfolio: z.string(),
+  date: z.string(),
 });
 
 export const resumeJsonSchema = zodToJsonSchema(z.object({
-  title: z.string(),
-  summary: z.string(),
-  isMaster: z.boolean(),
-  experiences: z.array(experienceSchema),
-  educations: z.array(educationSchema),
+  id: z.string(),
+  name: z.string(),
+  email: z.string(),
+  phone: z.string().optional(),
+  location: z.string().optional(),
+  summary: z.string().optional(),
   skills: z.array(z.string()),
-  awards: z.array(awardSchema),
-  certifications: z.array(certificationSchema),
+  experience: z.array(experienceSchema),
+  education: z.array(educationSchema),
   projects: z.array(projectSchema),
-  contact: contactSchema,
+  certifications: z.array(certificationSchema),
+  awards: z.array(awardSchema),
+  timestamp: z.string(),
 }), 'resumeSchema');
 
 export const structuralAssessmentJsonSchema = zodToJsonSchema(z.object({
@@ -161,17 +174,37 @@ export const structuralAssessmentJsonSchema = zodToJsonSchema(z.object({
 }), 'structuralAssessmentSchema');
 
 export const contentAnalysisReportJsonSchema = zodToJsonSchema(z.object({
-  strengths: z.array(z.string()),
-  gaps: z.array(z.string()),
-  skillImprovements: z.array(z.string()),
-  quantifiedImpactScore: z.number(),
+  skills: z.array(z.object({
+    name: z.string(),
+    category: z.enum(["Technical", "Soft", "Domain", "Tool"]),
+    confidenceScore: z.number(),
+    evidenceStrength: z.enum(["HIGH", "MEDIUM", "LOW"]),
+    evidence: z.string(),
+  })),
+  achievements: z.array(z.object({
+    description: z.string(),
+    impact: z.enum(["HIGH", "MEDIUM", "LOW"]),
+    quantifiable: z.boolean(),
+    confidenceScore: z.number(),
+    originalText: z.string(),
+  })),
+  suggestions: z.array(z.object({
+    original: z.string(),
+    suggested: z.string(),
+    rationale: z.string(),
+    faithful: z.boolean(),
+    confidenceScore: z.number(),
+  })),
+  hallucinationRisk: z.number(),
+  summary: z.string(),
 }), 'contentAnalysisReportSchema');
 
 export const alignmentReportJsonSchema = zodToJsonSchema(z.object({
-  overallScore: z.number(),
-  matchingKeywords: z.array(z.string()),
-  missingKeywords: z.array(z.string()),
-  roleFitAnalysis: z.string(),
+  skillsMatch: z.array(z.string()),
+  missingSkills: z.array(z.string()),
+  experienceMatch: z.string(),
+  fitScore: z.number(),
+  reasoning: z.string(),
   sources: z.array(z.object({
     title: z.string(),
     uri: z.string(),
@@ -192,13 +225,25 @@ export enum WorkflowStatus {
   COMPLETED = 'COMPLETED'
 }
 
+export interface ChatRequest {
+  intent: 'RESUME_CRITIC' | 'CONTENT_STRENGTH' | 'ALIGNMENT' | 'INTERVIEW_COACH';
+  resumeData: ResumeSchema;
+  jobDescription: string;
+  messageHistory: InterviewMessage[];
+}
+
+export interface InterviewMessage {
+  role: 'user' | 'agent';
+  text: string;
+}
+
 export interface SharedState {
-  currentResume: Resume | null;
-  history: Resume[];
+  currentResume: ResumeSchema | null;
+  history: ResumeSchema[];
   jobDescription: string;
   status: WorkflowStatus;
   criticReport: StructuralAssessment | null;
   contentReport: ContentAnalysisReport | null;
   alignmentReport: AlignmentReport | null;
-  interviewHistory: { role: 'user' | 'agent'; text: string }[];
+  interviewHistory: InterviewMessage[];
 }

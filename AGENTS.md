@@ -27,9 +27,9 @@
 |------|---------|
 | Backend Setup | `cd backend && uv sync` |
 | Frontend Setup | `cd frontend && npm install` |
-| Run Backend | `cd backend && python -m app.main` |
+| Run Backend | `cd backend && uv run fastapi dev` |
 | Run Frontend | `cd frontend && npm run dev` |
-| Backend Tests | `cd backend && pytest tests/` |
+| Backend Tests | `cd backend && uv run python -m pytest` |
 | Frontend Tests | `cd frontend && npm run test` |
 | Code Linting | `cd backend && ruff check .` |
 | Code Formatting | `cd backend && ruff format .` |
@@ -66,4 +66,4 @@
   - **Breaking changes?**
 - Reference relevant issues and include reproduction steps
 
-For detailed project documentation, see `docs/` directory. For migration status, see `MIGRATION-PLAN.md`.
+For detailed project documentation, see `docs/` directory.
