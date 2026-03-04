@@ -3,6 +3,7 @@ import {
   StructuralAssessment, 
   ContentAnalysisReport, 
   AlignmentReport,
+  ChatRequest,
   resumeJsonSchema,
   structuralAssessmentJsonSchema,
   contentAnalysisReportJsonSchema,
@@ -40,14 +41,14 @@ class BackendService {
     return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
-  private async callChatEndpoint(message: string): Promise<ChatResponse> {
+  async callChatEndpoint(request: ChatRequest): Promise<ChatResponse> {
     const response = await fetch(`${API_BASE_URL}/api/v1/chat?sessionId=${this.sessionId}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.getAuthToken()}`,
       },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify(request),
     });
 
     if (!response.ok) {
@@ -63,50 +64,15 @@ class BackendService {
     return localStorage.getItem('authToken') || '';
   }
 
-  async extractorAgent(input: string | ExtractorFileData): Promise<Resume> {
-    let message: string;
-    
-    if (typeof input === 'string') {
-      message = `EXTRACTOR: Parse the following resume text into a structured JSON format. Resume Text: ${input}`;
-    } else {
-      message = `EXTRACTOR: Parse the attached resume file into a structured JSON format. File data: ${input.data}, MIME type: ${input.mimeType}`;
-    }
-
-    const response = await this.callChatEndpoint(message);
-    
-    try {
-      const data = JSON.parse(response.content || '{}');
-      return {
-        title: data.title || 'Untitled Resume',
-        summary: data.summary || '',
-        isMaster: false,
-        contact: data.contact || {
-          fullName: '',
-          email: '',
-          phone: '',
-          city: '',
-          country: '',
-          linkedin: '',
-          github: '',
-          portfolio: ''
-        },
-        skills: data.skills || [],
-        experiences: data.experiences || [],
-        educations: data.educations || [],
-        projects: data.projects || [],
-        certifications: data.certifications || [],
-        awards: data.awards || []
-      };
-    } catch (error) {
-      console.error('Failed to parse extractor response:', error);
-      throw new Error('Invalid response from extractor agent');
-    }
-  }
-
   async resumeCriticAgent(resume: Resume): Promise<StructuralAssessment> {
-    const message = `RESUME_CRITIC: Critique the structure and formatting of this resume: ${JSON.stringify(resume)}`;
+    const request: ChatRequest = {
+      intent: 'RESUME_CRITIC',
+      resumeData: resume,
+      jobDescription: '',
+      messageHistory: []
+    };
     
-    const response = await this.callChatEndpoint(message);
+    const response = await this.callChatEndpoint(request);
     
     try {
       return JSON.parse(response.content || '{}');
@@ -117,9 +83,14 @@ class BackendService {
   }
 
   async contentStrengthAgent(resume: Resume): Promise<ContentAnalysisReport> {
-    const message = `CONTENT_STRENGTH: Analyze the content strength and skills of this resume using STAR/XYZ methodology: ${JSON.stringify(resume)}`;
+    const request: ChatRequest = {
+      intent: 'CONTENT_STRENGTH',
+      resumeData: resume,
+      jobDescription: '',
+      messageHistory: []
+    };
     
-    const response = await this.callChatEndpoint(message);
+    const response = await this.callChatEndpoint(request);
     
     try {
       return JSON.parse(response.content || '{}');
@@ -130,11 +101,14 @@ class BackendService {
   }
 
   async alignmentAgent(resume: Resume, jd: string): Promise<AlignmentReport> {
-    const message = `ALIGNMENT: Analyze the fit between this resume and the Job Description. Use Google Search to research the company or specific technology trends if necessary.
-    Resume: ${JSON.stringify(resume)}
-    JD: ${jd}`;
+    const request: ChatRequest = {
+      intent: 'ALIGNMENT',
+      resumeData: resume,
+      jobDescription: jd,
+      messageHistory: []
+    };
     
-    const response = await this.callChatEndpoint(message);
+    const response = await this.callChatEndpoint(request);
     
     try {
       const data = JSON.parse(response.content || '{}');
@@ -152,9 +126,37 @@ class BackendService {
     alignment: AlignmentReport, 
     history: { role: 'user' | 'agent'; text: string }[]
   ): Promise<string> {
-    const message = `INTERVIEW_COACH: You are a high-stakes Interview Coach. Based on this alignment report: ${JSON.stringify(alignment)}, conduct a realistic mock interview. Ask one targeted question at a time. History: ${JSON.stringify(history)}`;
+    // Create a minimal resume object for the interview coach
+    const resume: Resume = {
+      title: '',
+      summary: '',
+      isMaster: false,
+      contact: {
+        fullName: '',
+        email: '',
+        phone: '',
+        city: '',
+        country: '',
+        linkedin: '',
+        github: '',
+        portfolio: ''
+      },
+      skills: [],
+      experiences: [],
+      educations: [],
+      projects: [],
+      certifications: [],
+      awards: []
+    };
+
+    const request: ChatRequest = {
+      intent: 'INTERVIEW_COACH',
+      resumeData: resume,
+      jobDescription: JSON.stringify(alignment),
+      messageHistory: history
+    };
     
-    const response = await this.callChatEndpoint(message);
+    const response = await this.callChatEndpoint(request);
     return response.content || "I'm sorry, I couldn't generate a response.";
   }
 }
@@ -162,7 +164,6 @@ class BackendService {
 export const backendService = new BackendService();
 
 // Export individual functions for backward compatibility
-export const extractorAgent = (input: string | ExtractorFileData) => backendService.extractorAgent(input);
 export const resumeCriticAgent = (resume: Resume) => backendService.resumeCriticAgent(resume);
 export const contentStrengthAgent = (resume: Resume) => backendService.contentStrengthAgent(resume);
 export const alignmentAgent = (resume: Resume, jd: string) => backendService.alignmentAgent(resume, jd);

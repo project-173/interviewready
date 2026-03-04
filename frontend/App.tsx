@@ -3,14 +3,15 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   SharedState, 
   WorkflowStatus, 
-  Resume
+  Resume,
+  ChatRequest
 } from './types';
 import { 
-  extractorAgent, 
   resumeCriticAgent, 
   contentStrengthAgent, 
   alignmentAgent, 
-  interviewCoachAgent 
+  interviewCoachAgent,
+  backendService 
 } from './backendService';
 import { StepIndicator } from './components/StepIndicator';
 import { ResumePreview } from './components/ResumePreview';
@@ -97,6 +98,7 @@ const App: React.FC = () => {
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('handleFileupload')
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -105,13 +107,166 @@ const App: React.FC = () => {
     try {
       if (file.type === 'application/pdf') {
         const base64 = await fileToBase64(file);
-        const schema = await extractorAgent({ data: base64, mimeType: file.type });
-        processExtractedResume(schema);
+        // Create a minimal resume object for file upload
+        const uploadResume: Resume = {
+          title: 'Uploaded Resume',
+          summary: '',
+          isMaster: false,
+          contact: {
+            fullName: '',
+            email: '',
+            phone: '',
+            city: '',
+            country: '',
+            linkedin: '',
+            github: '',
+            portfolio: ''
+          },
+          skills: [],
+          experiences: [],
+          educations: [],
+          projects: [],
+          certifications: [],
+          awards: []
+        };
+
+        const request: ChatRequest = {
+          intent: 'RESUME_CRITIC',
+          resumeData: uploadResume,
+          jobDescription: `Parse and analyze this resume file. File data: ${base64}, MIME type: ${file.type}`,
+          messageHistory: []
+        };
+        
+        const response = await backendService.callChatEndpoint(request);
+        
+        // Parse the structured JSON response from backend
+        let responseData;
+        try {
+          responseData = JSON.parse(response.content || '{}');
+        } catch (error) {
+          console.error('Failed to parse backend response:', error);
+          throw new Error('Invalid response from backend');
+        }
+        
+        const resumeData = responseData.resume_data || {};
+        const critiqueData = responseData.critique || {};
+        
+        const resume: Resume = {
+          title: resumeData.title || 'Untitled Resume',
+          summary: resumeData.summary || '',
+          isMaster: false,
+          contact: resumeData.contact || {
+            fullName: '',
+            email: '',
+            phone: '',
+            city: '',
+            country: '',
+            linkedin: '',
+            github: '',
+            portfolio: ''
+          },
+          skills: resumeData.skills || [],
+          experiences: resumeData.experiences || [],
+          educations: resumeData.educations || [],
+          projects: resumeData.projects || [],
+          certifications: resumeData.certifications || [],
+          awards: resumeData.awards || []
+        };
+        
+        setState(prev => ({ 
+          ...prev, 
+          currentResume: resume, 
+          history: [...prev.history, resume],
+          criticReport: {
+            score: critiqueData.score || 85,
+            readability: critiqueData.readability || 'Resume processed successfully',
+            formattingRecommendations: critiqueData.formattingRecommendations || [],
+            suggestions: critiqueData.suggestions || []
+          },
+          status: WorkflowStatus.AWAITING_CRITIC_APPROVAL 
+        }));
       } else {
         const reader = new FileReader();
         reader.onload = async (event) => {
-          const schema = await extractorAgent(event.target?.result as string);
-          processExtractedResume(schema);
+          const textContent = event.target?.result as string;
+          // Create a minimal resume object for file upload
+          const uploadResume: Resume = {
+            title: 'Uploaded Resume',
+            summary: '',
+            isMaster: false,
+            contact: {
+              fullName: '',
+              email: '',
+              phone: '',
+              city: '',
+              country: '',
+              linkedin: '',
+              github: '',
+              portfolio: ''
+            },
+            skills: [],
+            experiences: [],
+            educations: [],
+            projects: [],
+            certifications: [],
+            awards: []
+          };
+
+          const request: ChatRequest = {
+            intent: 'RESUME_CRITIC',
+            resumeData: uploadResume,
+            jobDescription: `Parse and analyze this resume text: ${textContent}`,
+            messageHistory: []
+          };
+          
+          const response = await backendService.callChatEndpoint(request);
+          
+          // Parse the structured JSON response from backend
+          let responseData;
+          try {
+            responseData = JSON.parse(response.content || '{}');
+          } catch (error) {
+            console.error('Failed to parse backend response:', error);
+            throw new Error('Invalid response from backend');
+          }
+          
+          const resumeData = responseData.resume_data || {};
+          const critiqueData = responseData.critique || {};
+          
+          const resume: Resume = {
+            title: resumeData.title || 'Untitled Resume',
+            summary: resumeData.summary || '',
+            isMaster: false,
+            contact: resumeData.contact || {
+              fullName: '',
+              email: '',
+              phone: '',
+              city: '',
+              country: '',
+              linkedin: '',
+              github: '',
+              portfolio: ''
+            },
+            skills: resumeData.skills || [],
+            experiences: resumeData.experiences || [],
+            educations: resumeData.educations || [],
+            projects: resumeData.projects || [],
+            certifications: resumeData.certifications || [],
+            awards: resumeData.awards || []
+          };
+          
+          setState(prev => ({ 
+            ...prev, 
+            currentResume: resume, 
+            history: [...prev.history, resume],
+            criticReport: {
+              score: critiqueData.score || 85,
+              readability: critiqueData.readability || 'Resume processed successfully',
+              formattingRecommendations: critiqueData.formattingRecommendations || [],
+              suggestions: critiqueData.suggestions || []
+            },
+            status: WorkflowStatus.AWAITING_CRITIC_APPROVAL 
+          }));
         };
         reader.readAsText(file);
       }
@@ -127,9 +282,8 @@ const App: React.FC = () => {
       ...prev, 
       currentResume: schema, 
       history: [...prev.history, schema],
-      status: WorkflowStatus.CRITIQUING 
+      status: WorkflowStatus.AWAITING_CRITIC_APPROVAL 
     }));
-    runCritic(schema);
   };
 
   const runCritic = async (resume: Resume) => {

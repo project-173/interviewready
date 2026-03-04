@@ -1,9 +1,13 @@
 """Base agent classes and protocols."""
 
+import time
 from abc import ABC, abstractmethod
 from typing import Protocol, Optional, Dict, Any, List
+from ..core.logging import logger
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
+from .mock_config import MockConfig
+from .mock_gemini_service import MockGeminiService
 
 
 class BaseAgentProtocol(Protocol):
@@ -40,6 +44,12 @@ class BaseAgent(ABC, BaseAgentProtocol):
         self.gemini_service = gemini_service
         self.system_prompt = system_prompt
         self.name = name
+        
+        # Initialize mock service if mock mode is enabled
+        if MockConfig.is_mock_enabled():
+            self.mock_service = MockGeminiService()
+        else:
+            self.mock_service = None
     
     def get_name(self) -> str:
         """Get the agent name."""
@@ -68,8 +78,54 @@ class BaseAgent(ABC, BaseAgentProtocol):
         Returns:
             Gemini response text
         """
-        return self.gemini_service.generate_response(
-            system_prompt=self.system_prompt,
-            user_input=input_text,
-            context=context
-        )
+        session_id = getattr(context, 'session_id', 'unknown')
+        agent_name = self.get_name()
+        
+        # Log API call start
+        logger.log_api_call("gemini", "generate_response", session_id, 
+                          agent_name=agent_name, 
+                          system_prompt_length=len(self.system_prompt),
+                          input_length=len(input_text))
+        
+        api_start_time = time.time()
+        
+        try:
+            # Use mock service if enabled
+            if self.mock_service:
+                logger.debug("Using mock Gemini service", session_id=session_id, agent_name=agent_name)
+                response = self.mock_service.generate_response(
+                    system_prompt=self.system_prompt,
+                    user_input=input_text,
+                    context=context
+                )
+            else:
+                # Use real Gemini service
+                logger.debug("Using real Gemini service", session_id=session_id, agent_name=agent_name)
+                response = self.gemini_service.generate_response(
+                    system_prompt=self.system_prompt,
+                    user_input=input_text,
+                    context=context
+                )
+            
+            api_execution_time = time.time() - api_start_time
+            
+            # Log successful API call
+            logger.debug("Gemini API call completed", 
+                        session_id=session_id, 
+                        agent_name=agent_name,
+                        execution_time_ms=round(api_execution_time * 1000, 2),
+                        response_length=len(response),
+                        response_preview=response[:100] + "..." if len(response) > 100 else response)
+            
+            return response
+            
+        except Exception as e:
+            api_execution_time = time.time() - api_start_time
+            logger.log_agent_error(agent_name, e, session_id)
+            logger.error("Gemini API call failed", 
+                        session_id=session_id, 
+                        agent_name=agent_name,
+                        execution_time_ms=round(api_execution_time * 1000, 2),
+                        error_type=type(e).__name__,
+                        error_message=str(e))
+            raise

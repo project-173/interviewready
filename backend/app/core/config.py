@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # Gemini Model Configuration
     GEMINI_MODEL: str = "gemini-2.5-flash"
     GEMINI_API_KEY: str
+
+    MOCK_GEMINI: str
+    LOG_MOCK_CALLS: str
     
     # Firebase Configuration
     FIREBASE_ENABLED: bool = False
