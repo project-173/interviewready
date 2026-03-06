@@ -1,7 +1,6 @@
 """Job Alignment Agent implementation."""
 
 import json
-import re
 import time
 from typing import List, Dict, Any
 from .base import BaseAgent
@@ -9,6 +8,7 @@ from ..core.logging import logger
 from ..models.agent import AgentResponse, AlignmentReport
 from ..models.session import SessionContext
 from .mock_config import MockConfig
+from ..utils.json_parser import parse_json_object
 
 class JobAlignmentAgent(BaseAgent):
     """Agent for evaluating how well a resume matches a specific job description."""
@@ -59,26 +59,21 @@ class JobAlignmentAgent(BaseAgent):
     def _parse_json(self, raw: str) -> Dict[str, Any]:
         """Parse JSON string into a dict, returning empty dict on failure."""
         session_id = "unknown"  # We don't have session context here
-        
-        try:
-            result = json.loads(raw)
-            logger.debug("JobAlignmentAgent JSON parsing successful", session_id=session_id, keys_found=list(result.keys()))
-            return result
-        except Exception as e:
-            json_match = re.search(r"\{[\s\S]*\}", raw)
-            if json_match:
-                try:
-                    result = json.loads(json_match.group(0))
-                    logger.debug(
-                        "JobAlignmentAgent JSON parsing recovered with regex",
-                        session_id=session_id,
-                        keys_found=list(result.keys()),
-                    )
-                    return result
-                except Exception:
-                    pass
-            logger.warning("JobAlignmentAgent JSON parsing failed, returning empty dict", session_id=session_id, error=str(e), raw_preview=raw[:200])
-            return {}
+
+        result = parse_json_object(raw)
+        if result:
+            logger.debug(
+                "JobAlignmentAgent JSON parsing successful",
+                session_id=session_id,
+                keys_found=list(result.keys()),
+            )
+        else:
+            logger.warning(
+                "JobAlignmentAgent JSON parsing failed, returning empty dict",
+                session_id=session_id,
+                raw_preview=raw[:200],
+            )
+        return result
 
     def _compute_confidence(self, fit_score: int, missing_skills: List[str]) -> float:
         """Compute confidence score from fit score and missing skills count."""
