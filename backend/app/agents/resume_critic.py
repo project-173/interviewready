@@ -1,7 +1,6 @@
 """Resume Critic Agent implementation."""
 
 import json
-import re
 import time
 from typing import Dict, Any
 from .base import BaseAgent
@@ -9,6 +8,7 @@ from ..core.langfuse_client import trace_agent_process, observe
 from ..core.logging import logger
 from ..models.agent import AgentResponse, StructuralAssessment
 from ..models.session import SessionContext
+from ..utils.json_parser import parse_json_object
 
 
 class ResumeCriticAgent(BaseAgent):
@@ -81,7 +81,7 @@ class ResumeCriticAgent(BaseAgent):
         
         try:
             raw_result = self.call_gemini(input_text, context)
-            parsed_result = self._parse_json(raw_result)
+            parsed_result = parse_json_object(raw_result)
             structured_result = self._normalize_structural_assessment(parsed_result)
             processing_time = time.time() - processing_start_time
             

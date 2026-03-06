@@ -1,7 +1,5 @@
 """Chat endpoint for interacting with the agentic system."""
 
-import json
-import re
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -14,6 +12,7 @@ from app.api.v1.services import (
 from app.core.auth import get_current_user
 from app.core.langfuse_client import langfuse
 from app.models import AgentResponse, ChatApiResponse, ChatRequest
+from app.utils.json_parser import parse_json_payload
 
 router = APIRouter()
 
@@ -105,29 +104,7 @@ def _extract_api_payload(response: AgentResponse) -> Dict[str, Any] | list[Any] 
 
 def _parse_json_payload(content: str) -> Dict[str, Any] | list[Any] | None:
     """Parse JSON payload from raw content or fenced markdown code block."""
-    fenced_match = re.search(
-        r"```(?:json)?\s*(\{[\s\S]*\}|\[[\s\S]*\])\s*```",
-        content,
-        flags=re.IGNORECASE,
-    )
-    if fenced_match:
-        json_text = fenced_match.group(1).strip()
-        try:
-            parsed = json.loads(json_text)
-            if isinstance(parsed, (dict, list)):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-
-    candidate_match = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", content)
-    if not candidate_match:
-        return None
-
-    try:
-        parsed = json.loads(candidate_match.group(1).strip())
-        if isinstance(parsed, (dict, list)):
-            return parsed
-    except json.JSONDecodeError:
-        return None
-
+    parsed = parse_json_payload(content, allow_array=True)
+    if isinstance(parsed, (dict, list)):
+        return parsed
     return None
