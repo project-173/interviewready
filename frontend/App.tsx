@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   SharedState, 
@@ -6,7 +5,6 @@ import {
   ChatRequest
 } from './types';
 import { 
-  resumeCriticAgent, 
   contentStrengthAgent, 
   alignmentAgent, 
   interviewCoachAgent,
@@ -65,26 +63,32 @@ const App: React.FC = () => {
   }, []);
 
   const handleStepClick = useCallback((status: WorkflowStatus) => {
-    let canNavigate = false;
+    const canNavigate: Partial<Record<WorkflowStatus, boolean>> = {
+      [WorkflowStatus.IDLE]: true,
+      [WorkflowStatus.CRITIQUING]: !!state.currentResume,
+      [WorkflowStatus.ANALYZING_CONTENT]: !!state.criticReport,
+      [WorkflowStatus.ALIGNING_JD]: !!state.contentReport,
+      [WorkflowStatus.INTERVIEWING]: !!state.alignmentReport,
+    };
 
-    if (status === WorkflowStatus.IDLE) canNavigate = true;
-    if (status === WorkflowStatus.CRITIQUING && state.currentResume) canNavigate = true;
-    if (status === WorkflowStatus.ANALYZING_CONTENT && state.criticReport) canNavigate = true;
-    if (status === WorkflowStatus.ALIGNING_JD && state.contentReport) canNavigate = true;
-    if (status === WorkflowStatus.INTERVIEWING && state.alignmentReport) canNavigate = true;
+    if (!canNavigate[status]) return;
 
-    if (canNavigate) {
-      let targetStatus = status;
-      if (status === WorkflowStatus.CRITIQUING && state.criticReport) {
-        targetStatus = WorkflowStatus.AWAITING_CRITIC_APPROVAL;
-      } else if (status === WorkflowStatus.ANALYZING_CONTENT && state.contentReport) {
-        targetStatus = WorkflowStatus.AWAITING_CONTENT_APPROVAL;
-      } else if (status === WorkflowStatus.ALIGNING_JD && state.alignmentReport) {
-        targetStatus = WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL;
-      }
+    const completedStatus: Partial<Record<WorkflowStatus, WorkflowStatus>> = {
+      [WorkflowStatus.CRITIQUING]: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
+      [WorkflowStatus.ANALYZING_CONTENT]: WorkflowStatus.AWAITING_CONTENT_APPROVAL,
+      [WorkflowStatus.ALIGNING_JD]: WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL,
+    };
 
-      setState(prev => ({ ...prev, status: targetStatus }));
-    }
+    const reportAvailable: Partial<Record<WorkflowStatus, boolean>> = {
+      [WorkflowStatus.CRITIQUING]: !!state.criticReport,
+      [WorkflowStatus.ANALYZING_CONTENT]: !!state.contentReport,
+      [WorkflowStatus.ALIGNING_JD]: !!state.alignmentReport,
+    };
+
+    const targetStatus =
+      (reportAvailable[status] && completedStatus[status]) || status;
+
+    setState(prev => ({ ...prev, status: targetStatus }));
   }, [state.currentResume, state.criticReport, state.contentReport, state.alignmentReport]);
 
   const fileToBase64 = (file: File): Promise<string> => {
@@ -184,7 +188,7 @@ const App: React.FC = () => {
     setState(prev => ({ ...prev, interviewHistory: updatedHistory }));
     setIsLoading(true);
     try {
-      const responseText = await interviewCoachAgent(state.alignmentReport!, updatedHistory);
+      const responseText = await interviewCoachAgent(state.alignmentReport, updatedHistory);
       setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
     } catch (err: any) {
       setError(err.message);
@@ -277,9 +281,9 @@ const App: React.FC = () => {
               <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm w-64 max-h-[300px] overflow-y-auto">
                  <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-3">Recent Uploads</h4>
                  <div className="space-y-1.5">
-                   {state.history.map((h, i) => (
+                   {state.history.map((h) => (
                      <button 
-                       key={i} 
+                       key={h.contact?.fullName ?? h.email}
                        onClick={() => setState(prev => ({ ...prev, currentResume: h, status: WorkflowStatus.CRITIQUING }))}
                        className="w-full p-2.5 rounded-lg text-left text-[11px] font-medium text-slate-600 hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-all truncate"
                      >
