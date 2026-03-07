@@ -23,6 +23,7 @@ __all__ = [
     "AgentResponse",
     "ChatApiResponse",
     "ChatRequest",
+    "ResumeFile",
     "AlignmentReport",
     "ContentAnalysisReport",
     "InterviewMessage",

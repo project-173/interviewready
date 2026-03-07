@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   SharedState, 
   WorkflowStatus, 
-  Resume,
   ChatRequest
 } from './types';
 import { 
@@ -107,192 +106,38 @@ const App: React.FC = () => {
     try {
       if (file.type === 'application/pdf') {
         const base64 = await fileToBase64(file);
-        // Create a minimal resume object for file upload
-        const uploadResume: Resume = {
-          title: 'Uploaded Resume',
-          summary: '',
-          isMaster: false,
-          contact: {
-            fullName: '',
-            email: '',
-            phone: '',
-            city: '',
-            country: '',
-            linkedin: '',
-            github: '',
-            portfolio: ''
-          },
-          skills: [],
-          experiences: [],
-          educations: [],
-          projects: [],
-          certifications: [],
-          awards: []
-        };
 
         const request: ChatRequest = {
           intent: 'RESUME_CRITIC',
-          resumeData: uploadResume,
-          jobDescription: `Parse and analyze this resume file. File data: ${base64}, MIME type: ${file.type}`,
-          messageHistory: []
+          resumeData: null,
+          jobDescription: '',
+          messageHistory: [],
+          resumeFile: { data: base64, fileType: 'pdf' }
         };
         
         const response = await backendService.callChatEndpoint(request);
+        const parsedResume = await backendService.fetchCurrentResume();
+        const critiqueData =
+          response.payload && typeof response.payload === 'object' && !Array.isArray(response.payload)
+            ? response.payload
+            : {};
         
-        // Parse the structured JSON response from backend
-        let responseData;
-        try {
-          responseData = JSON.parse(response.content || '{}');
-        } catch (error) {
-          console.error('Failed to parse backend response:', error);
-          throw new Error('Invalid response from backend');
-        }
-        
-        const resumeData = responseData.resume_data || {};
-        const critiqueData = responseData.critique || {};
-        
-        const resume: Resume = {
-          title: resumeData.title || 'Untitled Resume',
-          summary: resumeData.summary || '',
-          isMaster: false,
-          contact: resumeData.contact || {
-            fullName: '',
-            email: '',
-            phone: '',
-            city: '',
-            country: '',
-            linkedin: '',
-            github: '',
-            portfolio: ''
-          },
-          skills: resumeData.skills || [],
-          experiences: resumeData.experiences || [],
-          educations: resumeData.educations || [],
-          projects: resumeData.projects || [],
-          certifications: resumeData.certifications || [],
-          awards: resumeData.awards || []
-        };
         
         setState(prev => ({ 
           ...prev, 
-          currentResume: resume, 
-          history: [...prev.history, resume],
+          currentResume: parsedResume || prev.currentResume,
+          history: parsedResume ? [...prev.history, parsedResume] : prev.history,
           criticReport: {
-            score: critiqueData.score || 85,
-            readability: critiqueData.readability || 'Resume processed successfully',
-            formattingRecommendations: critiqueData.formattingRecommendations || [],
-            suggestions: critiqueData.suggestions || []
+            score: Number((critiqueData as any).score) || 85,
+            readability: String((critiqueData as any).readability || 'Resume processed successfully'),
+            formattingRecommendations: Array.isArray((critiqueData as any).formattingRecommendations) ? (critiqueData as any).formattingRecommendations : [],
+            suggestions: Array.isArray((critiqueData as any).suggestions) ? (critiqueData as any).suggestions : []
           },
           status: WorkflowStatus.AWAITING_CRITIC_APPROVAL 
         }));
-      } else {
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-          const textContent = event.target?.result as string;
-          // Create a minimal resume object for file upload
-          const uploadResume: Resume = {
-            title: 'Uploaded Resume',
-            summary: '',
-            isMaster: false,
-            contact: {
-              fullName: '',
-              email: '',
-              phone: '',
-              city: '',
-              country: '',
-              linkedin: '',
-              github: '',
-              portfolio: ''
-            },
-            skills: [],
-            experiences: [],
-            educations: [],
-            projects: [],
-            certifications: [],
-            awards: []
-          };
-
-          const request: ChatRequest = {
-            intent: 'RESUME_CRITIC',
-            resumeData: uploadResume,
-            jobDescription: `Parse and analyze this resume text: ${textContent}`,
-            messageHistory: []
-          };
-          
-          const response = await backendService.callChatEndpoint(request);
-          
-          // Parse the structured JSON response from backend
-          let responseData;
-          try {
-            responseData = JSON.parse(response.content || '{}');
-          } catch (error) {
-            console.error('Failed to parse backend response:', error);
-            throw new Error('Invalid response from backend');
-          }
-          
-          const resumeData = responseData.resume_data || {};
-          const critiqueData = responseData.critique || {};
-          
-          const resume: Resume = {
-            title: resumeData.title || 'Untitled Resume',
-            summary: resumeData.summary || '',
-            isMaster: false,
-            contact: resumeData.contact || {
-              fullName: '',
-              email: '',
-              phone: '',
-              city: '',
-              country: '',
-              linkedin: '',
-              github: '',
-              portfolio: ''
-            },
-            skills: resumeData.skills || [],
-            experiences: resumeData.experiences || [],
-            educations: resumeData.educations || [],
-            projects: resumeData.projects || [],
-            certifications: resumeData.certifications || [],
-            awards: resumeData.awards || []
-          };
-          
-          setState(prev => ({ 
-            ...prev, 
-            currentResume: resume, 
-            history: [...prev.history, resume],
-            criticReport: {
-              score: critiqueData.score || 85,
-              readability: critiqueData.readability || 'Resume processed successfully',
-              formattingRecommendations: critiqueData.formattingRecommendations || [],
-              suggestions: critiqueData.suggestions || []
-            },
-            status: WorkflowStatus.AWAITING_CRITIC_APPROVAL 
-          }));
-        };
-        reader.readAsText(file);
-      }
+      } else setError("Invalid file type")
     } catch (err: any) {
       setError(err.message || "Failed to process resume");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const processExtractedResume = (schema: Resume) => {
-    setState(prev => ({ 
-      ...prev, 
-      currentResume: schema, 
-      history: [...prev.history, schema],
-      status: WorkflowStatus.AWAITING_CRITIC_APPROVAL 
-    }));
-  };
-
-  const runCritic = async (resume: Resume) => {
-    setIsLoading(true);
-    try {
-      const report = await resumeCriticAgent(resume);
-      setState(prev => ({ ...prev, criticReport: report, status: WorkflowStatus.AWAITING_CRITIC_APPROVAL }));
-    } catch (err: any) {
-      setError(err.message);
     } finally {
       setIsLoading(false);
     }
@@ -302,7 +147,7 @@ const App: React.FC = () => {
     setState(prev => ({ ...prev, status: WorkflowStatus.ANALYZING_CONTENT }));
     setIsLoading(true);
     try {
-      const report = await contentStrengthAgent(state.currentResume!);
+      const report = await contentStrengthAgent(state.currentResume);
       setState(prev => ({ ...prev, contentReport: report, status: WorkflowStatus.AWAITING_CONTENT_APPROVAL }));
     } catch (err: any) {
       setError(err.message);
@@ -317,7 +162,7 @@ const App: React.FC = () => {
     if (!state.jobDescription) return;
     setIsLoading(true);
     try {
-      const report = await alignmentAgent(state.currentResume!, state.jobDescription);
+      const report = await alignmentAgent(state.currentResume, state.jobDescription);
       setState(prev => ({ ...prev, alignmentReport: report, status: WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL }));
     } catch (err: any) {
       setError(err.message);

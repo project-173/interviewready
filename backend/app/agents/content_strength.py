@@ -2,7 +2,7 @@
 
 import json
 import time
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any
 from .base import BaseAgent
 from ..core.logging import logger
 from ..models.agent import AgentResponse, ContentAnalysisReport
@@ -12,6 +12,8 @@ from ..utils.json_parser import parse_json_object
 
 class ContentStrengthAgent(BaseAgent):
     """Agent for analyzing content strength, skills reasoning, and evidence evaluation."""
+    USE_MOCK_RESPONSE = False
+    MOCK_RESPONSE_KEY = "ContentStrengthAgent"
     
     SYSTEM_PROMPT = """
         You are a Content Strength & Skills Reasoning Agent. Your role is to analyze resumes to identify key skills, achievements, and evidence of impact.
@@ -108,7 +110,18 @@ class ContentStrengthAgent(BaseAgent):
                     input_preview=input_text[:100] + "..." if len(input_text) > 100 else input_text)
         
         try:
-            raw_result = self.call_gemini(input_text, context)
+            raw_result = None
+            if self.USE_MOCK_RESPONSE:
+                raw_result = self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
+                if raw_result is None:
+                    logger.warning(
+                        "ContentStrengthAgent mock enabled but response key not found",
+                        session_id=session_id,
+                        mock_response_key=self.MOCK_RESPONSE_KEY,
+                    )
+
+            if raw_result is None:
+                raw_result = self.call_gemini(input_text, context)
             processing_time = time.time() - processing_start_time
             
             # Log Gemini API call completion

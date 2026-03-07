@@ -2,6 +2,7 @@
 
 import firebase_admin
 from firebase_admin import credentials, auth
+from fastapi.concurrency import run_in_threadpool
 from app.core.config import settings
 from typing import Optional, Dict, Any
 import json
@@ -49,7 +50,8 @@ async def verify_firebase_token(id_token: str) -> Optional[Dict[str, Any]]:
         return None
         
     try:
-        decoded_token = auth.verify_id_token(id_token)
+        # Firebase SDK token verification is synchronous; isolate it from the event loop.
+        decoded_token = await run_in_threadpool(auth.verify_id_token, id_token)
         return decoded_token
     except auth.InvalidIdTokenError:
         return None

@@ -12,6 +12,8 @@ from ..utils.json_parser import parse_json_object
 
 class ResumeCriticAgent(BaseAgent):
     """Agent for analyzing resume structure, ATS compatibility, and impact."""
+    USE_MOCK_RESPONSE = True
+    MOCK_RESPONSE_KEY = "ResumeCriticAgent"
 
     SYSTEM_PROMPT = """
     You are an expert Resume Critic. Analyze the resume for structure, ATS compatibility, and impact.
@@ -59,7 +61,18 @@ class ResumeCriticAgent(BaseAgent):
                     input_preview=input_text[:100] + "..." if len(input_text) > 100 else input_text)
         
         try:
-            raw_result = self.call_gemini(input_text, context)
+            raw_result = None
+            if self.USE_MOCK_RESPONSE:
+                raw_result = self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
+                if raw_result is None:
+                    logger.warning(
+                        "ResumeCriticAgent mock enabled but response key not found",
+                        session_id=session_id,
+                        mock_response_key=self.MOCK_RESPONSE_KEY,
+                    )
+
+            if raw_result is None:
+                raw_result = self.call_gemini(input_text, context)
             parsed_result = parse_json_object(raw_result)
             structured_result = self._normalize_structural_assessment(parsed_result)
             processing_time = time.time() - processing_start_time
