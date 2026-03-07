@@ -1,6 +1,6 @@
 """Chat endpoint for interacting with the agentic system."""
 
-from typing import Any, Dict
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.concurrency import run_in_threadpool
@@ -16,11 +16,11 @@ from app.utils.json_parser import parse_json_payload
 router = APIRouter()
 
 
-@router.post("", response_model=ChatApiResponse)
+@router.post("")
 async def chat_endpoint(
     request: ChatRequest,
-    session_id: str = Query(..., alias="sessionId"),
-    current_user: dict = Depends(get_current_user),
+    session_id: Annotated[str, Query(alias="sessionId")],
+    current_user: Annotated[dict[str, Any], Depends(get_current_user)],
 ) -> ChatApiResponse:
     """Run orchestration for the chat message within a user-owned session."""
     user_id = str(
@@ -66,7 +66,7 @@ async def chat_endpoint(
         ) from exc
 
 
-def _extract_api_payload(response: AgentResponse) -> Dict[str, Any] | list[Any] | str:
+def _extract_api_payload(response: AgentResponse) -> dict[str, Any] | list[Any] | str:
     """Convert internal AgentResponse content into external API payload."""
     content = (response.content or "").strip()
     if not content:
@@ -79,7 +79,7 @@ def _extract_api_payload(response: AgentResponse) -> Dict[str, Any] | list[Any] 
     return content
 
 
-def _parse_json_payload(content: str) -> Dict[str, Any] | list[Any] | None:
+def _parse_json_payload(content: str) -> dict[str, Any] | list[Any] | None:
     """Parse JSON payload from raw content or fenced markdown code block."""
     parsed = parse_json_payload(content, allow_array=True)
     if isinstance(parsed, (dict, list)):

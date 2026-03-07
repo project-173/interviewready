@@ -1,6 +1,6 @@
 """Session endpoints for retrieving persisted session state."""
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 
@@ -11,10 +11,10 @@ from app.models.resume import Resume
 router = APIRouter()
 
 
-@router.get("/{session_id}/resume", response_model=Resume)
+@router.get("/{session_id}/resume")
 async def get_session_resume(
-    session_id: str = Path(...),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    session_id: Annotated[str, Path()],
+    current_user: Annotated[dict[str, Any], Depends(get_current_user)],
 ) -> Resume:
     """Return parsed resume JSON currently persisted for a session."""
     user_id = str(

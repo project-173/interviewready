@@ -55,7 +55,7 @@ class ResumeCriticAgent(BaseAgent):
         processing_start_time = time.time()
         
         # Log processing start
-        logger.debug(f"ResumeCriticAgent processing started", 
+        logger.debug("ResumeCriticAgent processing started", 
                     session_id=session_id, 
                     input_length=len(input_text),
                     input_preview=input_text[:100] + "..." if len(input_text) > 100 else input_text)
@@ -78,7 +78,7 @@ class ResumeCriticAgent(BaseAgent):
             processing_time = time.time() - processing_start_time
             
             # Log processing completion
-            logger.debug(f"ResumeCriticAgent processing completed", 
+            logger.debug("ResumeCriticAgent processing completed", 
                         session_id=session_id, 
                         processing_time_ms=round(processing_time * 1000, 2),
                         result_length=len(raw_result),
@@ -107,7 +107,7 @@ class ResumeCriticAgent(BaseAgent):
             )
             
             # Log response creation
-            logger.debug(f"ResumeCriticAgent response created", 
+            logger.debug("ResumeCriticAgent response created", 
                         session_id=session_id, 
                         confidence_score=self.CONFIDENCE_SCORE,
                         analysis_type="resume_critique",
@@ -118,7 +118,7 @@ class ResumeCriticAgent(BaseAgent):
         except Exception as e:
             processing_time = time.time() - processing_start_time
             logger.log_agent_error(agent_name, e, session_id)
-            logger.error(f"ResumeCriticAgent processing failed", 
+            logger.error("ResumeCriticAgent processing failed", 
                         session_id=session_id, 
                         processing_time_ms=round(processing_time * 1000, 2),
                         error_type=type(e).__name__,
