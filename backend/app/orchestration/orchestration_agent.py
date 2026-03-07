@@ -15,9 +15,9 @@ from app.agents.gemini_service import GeminiService
 from app.core.logging import logger
 from app.governance.sharp_governance_service import SharpGovernanceService
 from app.models.agent import AgentResponse, ChatRequest
+from app.models.resume import Resume
 from app.models.session import SessionContext
-from app.utils.pdf_parser import process_pdf_input, create_pdf_processing_prompt
-
+from app.utils.json_parser import parse_json_object
 
 class OrchestrationState(TypedDict):
     """Workflow state used by LangGraph orchestration."""
@@ -28,7 +28,6 @@ class OrchestrationState(TypedDict):
     agent_sequence: list[str]
     current_index: int
     current_response: AgentResponse | None
-
 
 class OrchestrationAgent:
     """Routes user input to one or more specialist agents."""
@@ -78,7 +77,12 @@ Respond with ONLY the JSON array, no other text.
         
         # Extract intent from request and build input text for agents
         intent = request.intent
-        resume_data = request.resumeData or {}
+        resume_model = self._resolve_resume_data(request, context)
+        resume_data = (
+            resume_model.model_dump(exclude_none=True)
+            if resume_model is not None
+            else {}
+        )
         job_description = request.jobDescription or ""
         message_history = request.messageHistory or []
         
@@ -355,18 +359,7 @@ Respond with ONLY the JSON array, no other text.
     def _build_agent_input(self, intent: str, resume_data: dict, job_description: str, message_history: list) -> str:
         """Build input text for agents based on intent and available data."""
         if intent == "RESUME_CRITIC":
-            # Check if this is a PDF file upload
-            if job_description and ("file data:" in job_description.lower() or "resume text:" in job_description.lower()):
-                # Try to parse PDF if present
-                extracted_text = process_pdf_input(job_description)
-                if extracted_text:
-                    return create_pdf_processing_prompt(extracted_text)
-                else:
-                    # PDF parsing failed, fall back to original instruction
-                    return job_description
-            else:
-                # Regular resume critique
-                return f"Analyze this resume: {json.dumps(resume_data, indent=2)}"
+            return f"Analyze this resume: {json.dumps(resume_data, indent=2)}"
         
         elif intent == "CONTENT_STRENGTH":
             return f"Analyze the content strength and skills of this resume using STAR/XYZ methodology: {json.dumps(resume_data, indent=2)}"
@@ -381,6 +374,101 @@ Respond with ONLY the JSON array, no other text.
         else:
             # Fallback
             return f"Process this request: {json.dumps(resume_data, indent=2)}"
+
+    def _resolve_resume_data(self, request: ChatRequest, context: SessionContext) -> Resume | None:
+        """Resolve resume input with strict precedence: resumeData first, then resumeFile."""
+        session_id = getattr(context, "session_id", "unknown")
+        if request.resumeData is not None:
+            if self._has_resume_content(request.resumeData):
+                logger.debug(
+                    "Orchestrator using resumeData payload",
+                    session_id=session_id,
+                    source="resumeData",
+                )
+                self._store_resume_in_context(request.resumeData, context)
+                return request.resumeData
+            logger.debug(
+                "resumeData payload is empty, checking resumeFile fallback",
+                session_id=session_id,
+                source="resumeData",
+            )
+
+        if request.resumeFile is not None:
+            logger.debug(
+                "Orchestrator invoking ExtractorAgent for resumeFile",
+                session_id=session_id,
+                source="resumeFile",
+            )
+            resume = self._extract_resume_from_file(request.resumeFile.model_dump(), context)
+            self._store_resume_in_context(resume, context)
+            return resume
+
+        memory_resume = self._resume_from_context(context)
+        if memory_resume is not None:
+            logger.debug(
+                "Orchestrator using resume from shared session memory",
+                session_id=session_id,
+                source="shared_memory",
+            )
+            return memory_resume
+
+        logger.debug("No resume input provided in request", session_id=session_id)
+        return None
+
+    def _extract_resume_from_file(
+        self, resume_file_payload: dict[str, Any], context: SessionContext
+    ) -> Resume:
+        extractor = self.agents.get("ExtractorAgent")
+        if extractor is None:
+            raise RuntimeError("ExtractorAgent is required when resumeFile is provided.")
+
+        response = extractor.process(json.dumps(resume_file_payload), context)
+        parsed = parse_json_object(response.content or "")
+        if not parsed:
+            raise ValueError("ExtractorAgent returned invalid JSON for resumeFile payload.")
+
+        resume = Resume.model_validate(parsed)
+        trace = list(context.decision_trace or [])
+        trace.append(
+            "Orchestrator: Used ExtractorAgent for resumeFile after missing resumeData."
+        )
+        context.decision_trace = trace
+        return resume
+
+    @staticmethod
+    def _has_resume_content(resume: Resume) -> bool:
+        """Check whether resumeData has meaningful content beyond defaults."""
+        data = resume.model_dump(exclude_none=True)
+        if not data:
+            return False
+        for value in data.values():
+            if isinstance(value, list) and value:
+                return True
+            if isinstance(value, str) and value.strip():
+                return True
+            if isinstance(value, bool) and value:
+                return True
+            if isinstance(value, dict) and value:
+                return True
+        return False
+
+    @staticmethod
+    def _store_resume_in_context(resume: Resume, context: SessionContext) -> None:
+        shared_memory = dict(context.shared_memory or {})
+        shared_memory["current_resume"] = resume.model_dump(exclude_none=True)
+        context.shared_memory = shared_memory
+
+    @staticmethod
+    def _resume_from_context(context: SessionContext) -> Resume | None:
+        memory = context.shared_memory or {}
+        raw_resume = memory.get("current_resume")
+        if not isinstance(raw_resume, dict) or not raw_resume:
+            return None
+        try:
+            resume = Resume.model_validate(raw_resume)
+        except Exception:
+            return None
+        return resume if OrchestrationAgent._has_resume_content(resume) else None
 
     def _map_intent_to_agents(self, intent: str) -> list[str]:
         """Map intent directly to agent sequence."""
