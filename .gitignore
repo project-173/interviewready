@@ -102,3 +102,6 @@ temp/
 # Python cache
 __pycache__
 .pyc
+
+# Roam code
+.roam/

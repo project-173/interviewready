@@ -225,11 +225,17 @@ export enum WorkflowStatus {
   COMPLETED = 'COMPLETED'
 }
 
+export interface ResumeFile {
+  data: string;
+  fileType: 'pdf';
+}
+
 export interface ChatRequest {
   intent: 'RESUME_CRITIC' | 'CONTENT_STRENGTH' | 'ALIGNMENT' | 'INTERVIEW_COACH';
-  resumeData: ResumeSchema;
+  resumeData?: ResumeSchema | null;
   jobDescription: string;
   messageHistory: InterviewMessage[];
+  resumeFile?: ResumeFile;
 }
 
 export interface InterviewMessage {

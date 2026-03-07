@@ -1,17 +1,19 @@
 """Resume Critic Agent implementation."""
 
 import json
-import re
 import time
 from typing import Dict, Any
 from .base import BaseAgent
 from ..core.logging import logger
 from ..models.agent import AgentResponse, StructuralAssessment
 from ..models.session import SessionContext
+from ..utils.json_parser import parse_json_object
 
 
 class ResumeCriticAgent(BaseAgent):
     """Agent for analyzing resume structure, ATS compatibility, and impact."""
+    USE_MOCK_RESPONSE = True
+    MOCK_RESPONSE_KEY = "ResumeCriticAgent"
 
     SYSTEM_PROMPT = """
     You are an expert Resume Critic. Analyze the resume for structure, ATS compatibility, and impact.
@@ -53,19 +55,30 @@ class ResumeCriticAgent(BaseAgent):
         processing_start_time = time.time()
         
         # Log processing start
-        logger.debug(f"ResumeCriticAgent processing started", 
+        logger.debug("ResumeCriticAgent processing started", 
                     session_id=session_id, 
                     input_length=len(input_text),
                     input_preview=input_text[:100] + "..." if len(input_text) > 100 else input_text)
         
         try:
-            raw_result = self.call_gemini(input_text, context)
-            parsed_result = self._parse_json(raw_result)
+            raw_result = None
+            if self.USE_MOCK_RESPONSE:
+                raw_result = self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
+                if raw_result is None:
+                    logger.warning(
+                        "ResumeCriticAgent mock enabled but response key not found",
+                        session_id=session_id,
+                        mock_response_key=self.MOCK_RESPONSE_KEY,
+                    )
+
+            if raw_result is None:
+                raw_result = self.call_gemini(input_text, context)
+            parsed_result = parse_json_object(raw_result)
             structured_result = self._normalize_structural_assessment(parsed_result)
             processing_time = time.time() - processing_start_time
             
             # Log processing completion
-            logger.debug(f"ResumeCriticAgent processing completed", 
+            logger.debug("ResumeCriticAgent processing completed", 
                         session_id=session_id, 
                         processing_time_ms=round(processing_time * 1000, 2),
                         result_length=len(raw_result),
@@ -94,7 +107,7 @@ class ResumeCriticAgent(BaseAgent):
             )
             
             # Log response creation
-            logger.debug(f"ResumeCriticAgent response created", 
+            logger.debug("ResumeCriticAgent response created", 
                         session_id=session_id, 
                         confidence_score=self.CONFIDENCE_SCORE,
                         analysis_type="resume_critique",
@@ -105,42 +118,12 @@ class ResumeCriticAgent(BaseAgent):
         except Exception as e:
             processing_time = time.time() - processing_start_time
             logger.log_agent_error(agent_name, e, session_id)
-            logger.error(f"ResumeCriticAgent processing failed", 
+            logger.error("ResumeCriticAgent processing failed", 
                         session_id=session_id, 
                         processing_time_ms=round(processing_time * 1000, 2),
                         error_type=type(e).__name__,
                         error_message=str(e))
             raise
-
-    def _parse_json(self, text: str) -> Dict[str, Any]:
-        """Parse JSON from raw or fenced markdown text."""
-        if not text:
-            return {}
-
-        try:
-            return json.loads(text)
-        except Exception:
-            pass
-
-        fenced_match = re.search(
-            r"```(?:json)?\s*(\{[\s\S]*\})\s*```",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if fenced_match:
-            try:
-                return json.loads(fenced_match.group(1).strip())
-            except Exception:
-                return {}
-
-        json_match = re.search(r"\{[\s\S]*\}", text)
-        if json_match:
-            try:
-                return json.loads(json_match.group(0).strip())
-            except Exception:
-                return {}
-
-        return {}
 
     def _normalize_structural_assessment(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize parsed content into StructuralAssessment schema."""
