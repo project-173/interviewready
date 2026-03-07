@@ -2,6 +2,7 @@
 
 from typing import Optional, List, Dict, Any, Literal
 from pydantic import BaseModel, Field
+from .resume import Resume
 
 
 class AgentResponse(BaseModel):
@@ -29,11 +30,19 @@ class InterviewMessage(BaseModel):
     text: Optional[str] = None
 
 
+class ResumeFile(BaseModel):
+    """Uploaded resume file payload."""
+
+    data: str
+    fileType: Literal["pdf"] = "pdf"
+
+
 class ChatRequest(BaseModel):
     """Chat request model with rich JSON structure."""
     
     intent: str  # 'RESUME_CRITIC' | 'CONTENT_STRENGTH' | 'ALIGNMENT' | 'INTERVIEW_COACH'
-    resumeData: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    resumeData: Optional[Resume] = None
+    resumeFile: Optional[ResumeFile] = None
     jobDescription: Optional[str] = ""
     messageHistory: Optional[List[InterviewMessage]] = Field(default_factory=list)
 

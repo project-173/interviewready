@@ -89,13 +89,10 @@ Agent output expectations in `AgentResponse.content`:
 
 ## Mock Responses File Format
 
-Set in backend `.env`:
+Mocking is now controlled inline in each agent class via:
 
-```bash
-MOCK_GEMINI=true
-MOCK_RESPONSES_FILE=./mock_responses.json
-LOG_MOCK_CALLS=true
-```
+- `USE_MOCK_RESPONSE = True|False`
+- `MOCK_RESPONSE_KEY = "<AgentName>"`
 
 Example file is included at:
 
@@ -105,48 +102,12 @@ Supported schema:
 
 ```json
 {
-  "agents": {
-    "ContentStrengthAgent": {
-      "default": {
-        "response_json": {}
-      }
-    },
-    "ResumeCriticAgent": {
-      "default": {
-        "response_text": "..."
-      }
-    },
-    "InterviewCoachAgent": {
-      "rules": [
-        {
-          "when": {
-            "user_input_contains_any": ["question", "answer"]
-          },
-          "response_text": "..."
-        }
-      ],
-      "default": {
-        "response_text": "..."
-      }
-    },
-    "JobAlignmentAgent": {
-      "default": {
-        "response_json": {}
-      }
-    }
-  },
-  "fallback": {
-    "response_text": "..."
-  }
+  "ResumeCriticAgent": {},
+  "ContentStrengthAgent": {},
+  "JobAlignmentAgent": {},
+  "InterviewCoachAgent": "text response"
 }
 ```
-
-Rule behavior:
-
-- `rules` are evaluated in order, first match wins.
-- `when.user_input_contains_any` matches if any listed term appears in the user message (case-insensitive).
-- `response_json` is serialized to JSON text and returned to agents.
-- `response_text` is returned as-is.
 
 ### Containerization
 

@@ -82,7 +82,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
 
         {activeTab === 'experience' && (
           <div className="space-y-10 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {(resume.experience || resume.experiences || []).map((exp: any, idx) => (
+            {resume.experiences.map((exp, idx) => (
               <div key={idx} className="group">
                 <div className="flex justify-between items-baseline mb-3">
                   <h4 className="text-base font-bold text-slate-900">{exp.role || exp.title || 'Unknown Role'}</h4>
@@ -104,7 +104,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
 
         {activeTab === 'education' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {(resume.education || resume.educations || []).map((edu: any, idx) => (
+            {resume.educations.map((edu, idx) => (
               <div key={idx} className="p-6 bg-white border border-slate-200 rounded-xl hover:shadow-md transition-shadow">
                 <h4 className="font-bold text-slate-900 mb-1.5 text-sm">{edu.degree || 'Unknown Degree'}</h4>
                 <p className="text-xs font-semibold text-slate-500 mb-4">{edu.institution || edu.school || 'Unknown Institution'}</p>

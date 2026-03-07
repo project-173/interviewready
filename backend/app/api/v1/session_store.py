@@ -27,3 +27,15 @@ class SessionStore:
                 raise PermissionError("Unauthorized access to session")
 
             return context
+
+    def get(self, session_id: str, user_id: str) -> SessionContext | None:
+        """Return existing session context for the requesting user, if any."""
+        with self._lock:
+            context = self._sessions.get(session_id)
+            if context is None:
+                return None
+
+            if context.user_id != user_id:
+                raise PermissionError("Unauthorized access to session")
+
+            return context

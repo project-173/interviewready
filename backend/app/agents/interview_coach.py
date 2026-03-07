@@ -2,11 +2,9 @@
 
 import os
 import time
-from typing import List, Dict, Any, Optional
+from typing import Optional
 from .base import BaseAgent
 from .gemini_service import GeminiLiveService
-from .mock_config import MockConfig
-from .mock_gemini_service import MockGeminiLiveService
 from ..core.langfuse_client import trace_agent_process, observe
 from ..core.logging import logger
 from ..models.agent import AgentResponse
@@ -15,6 +13,8 @@ from ..models.session import SessionContext
 
 class InterviewCoachAgent(BaseAgent):
     """Agent for providing interview coaching and simulation."""
+    USE_MOCK_RESPONSE = False
+    MOCK_RESPONSE_KEY = "InterviewCoachAgent"
     
     SYSTEM_PROMPT = "You are an expert Interview Coach. Provide feedback and simulation for interview preparation."
     CONFIDENCE_SCORE = 0.85
@@ -32,9 +32,8 @@ class InterviewCoachAgent(BaseAgent):
             name="InterviewCoachAgent"
         )
         
-        # Initialize appropriate service based on mock mode
-        if MockConfig.is_mock_enabled():
-            self.gemini_live_service = MockGeminiLiveService()
+        if self.USE_MOCK_RESPONSE:
+            self.gemini_live_service = None
         else:
             self.gemini_live_service = GeminiLiveService()
             
@@ -70,29 +69,45 @@ class InterviewCoachAgent(BaseAgent):
                     input_preview=input_text[:100] + "..." if len(input_text) > 100 else input_text)
         
         try:
-            # Try to use Gemini Live first, fallback to regular Gemini
-            gemini_live_available = hasattr(self.gemini_live_service, 'connected') and self.gemini_live_service.connected
-            logger.debug(f"InterviewCoachAgent checking Gemini Live availability", 
-                        session_id=session_id, 
-                        gemini_live_available=gemini_live_available)
-            
-            if gemini_live_available:
-                logger.debug(f"InterviewCoachAgent using Gemini Live", session_id=session_id)
-                result = self._call_gemini_live(input_text)
-                if not result or result.startswith("Error"):
-                    logger.warning(f"InterviewCoachAgent Gemini Live failed, falling back to standard Gemini", 
-                                 session_id=session_id, 
-                                 result_preview=result[:100] if result else "No result")
-                    # Fallback to regular Gemini
+            if self.USE_MOCK_RESPONSE:
+                result = self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
+                if result is None:
+                    logger.warning(
+                        "InterviewCoachAgent mock enabled but response key not found",
+                        session_id=session_id,
+                        mock_response_key=self.MOCK_RESPONSE_KEY,
+                    )
                     result = self.call_gemini(input_text, context)
                     method_used = "standard_gemini_fallback"
                 else:
-                    method_used = "gemini_live"
+                    method_used = "mock_response_file"
             else:
-                logger.debug(f"InterviewCoachAgent using standard Gemini (Live unavailable)", session_id=session_id)
-                # Fallback to regular Gemini
-                result = self.call_gemini(input_text, context)
-                method_used = "standard_gemini"
+            # Try to use Gemini Live first, fallback to regular Gemini
+                gemini_live_available = (
+                    hasattr(self.gemini_live_service, 'connected')
+                    and self.gemini_live_service.connected
+                )
+                logger.debug(f"InterviewCoachAgent checking Gemini Live availability", 
+                            session_id=session_id, 
+                            gemini_live_available=gemini_live_available)
+                
+                if gemini_live_available:
+                    logger.debug(f"InterviewCoachAgent using Gemini Live", session_id=session_id)
+                    result = self._call_gemini_live(input_text)
+                    if not result or result.startswith("Error"):
+                        logger.warning(f"InterviewCoachAgent Gemini Live failed, falling back to standard Gemini", 
+                                     session_id=session_id, 
+                                     result_preview=result[:100] if result else "No result")
+                        # Fallback to regular Gemini
+                        result = self.call_gemini(input_text, context)
+                        method_used = "standard_gemini_fallback"
+                    else:
+                        method_used = "gemini_live"
+                else:
+                    logger.debug(f"InterviewCoachAgent using standard Gemini (Live unavailable)", session_id=session_id)
+                    # Fallback to regular Gemini
+                    result = self.call_gemini(input_text, context)
+                    method_used = "standard_gemini"
             
             processing_time = time.time() - processing_start_time
             logger.debug(f"InterviewCoachAgent processing completed", 
@@ -112,6 +127,8 @@ class InterviewCoachAgent(BaseAgent):
             # Add method used to trace
             if method_used == "gemini_live":
                 decision_trace.append("InterviewCoachAgent: Used Gemini Live for real-time response")
+            elif method_used == "mock_response_file":
+                decision_trace.append("InterviewCoachAgent: Used mock response from backend/mock_responses.json")
             else:
                 decision_trace.append("InterviewCoachAgent: Used standard Gemini API (fallback)")
             
@@ -119,7 +136,7 @@ class InterviewCoachAgent(BaseAgent):
             sharp_metadata = {
                 "analysis_type": "interview_coaching",
                 "confidence_score": self.CONFIDENCE_SCORE,
-                "gemini_live_available": gemini_live_available,
+                "gemini_live_available": (method_used == "gemini_live"),
                 "method_used": method_used
             }
             

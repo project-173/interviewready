@@ -23,13 +23,7 @@ export interface ExtractorFileData {
 
 interface ChatResponse {
   agent?: string;
-  payload?: any;
-  agent_name?: string;
-  content?: string;
-  reasoning?: string;
-  confidence_score?: number;
-  decision_trace?: string[];
-  sharp_metadata?: Record<string, any>;
+  payload?: Record<string, any> | any[] | string;
 }
 
 class BackendService {
@@ -41,6 +35,15 @@ class BackendService {
 
   private generateSessionId(): string {
     return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  private hasResumeContent(resume?: Resume | null): boolean {
+    if (!resume) return false;
+    return Object.keys(resume).length > 0;
+  }
+
+  getSessionId(): string {
+    return this.sessionId;
   }
 
   async callChatEndpoint(request: ChatRequest): Promise<ChatResponse> {
@@ -60,6 +63,28 @@ class BackendService {
     return await response.json();
   }
 
+  async fetchCurrentResume(): Promise<Resume | null> {
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/sessions/${this.sessionId}/resume`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.getAuthToken()}`,
+        },
+      }
+    );
+
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error(`Backend API error: ${response.status} ${response.statusText}`);
+    }
+
+    return (await response.json()) as Resume;
+  }
+
   private getAuthToken(): string {
     // This should be implemented based on your auth strategy
     // For now, returning a placeholder
@@ -75,62 +100,47 @@ class BackendService {
     };
     
     const response = await this.callChatEndpoint(request);
-    
-    try {
-      if (response.payload && typeof response.payload === 'object') {
-        return response.payload;
-      }
-      return JSON.parse(response.content || '{}');
-    } catch (error) {
-      console.error('Failed to parse resume critic response:', error);
-      throw new Error('Invalid response from resume critic agent');
+    const payload = response.payload;
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      return payload as StructuralAssessment;
     }
+    throw new Error('Invalid response from resume critic agent');
   }
 
-  async contentStrengthAgent(resume: Resume): Promise<ContentAnalysisReport> {
+  async contentStrengthAgent(resume?: Resume | null): Promise<ContentAnalysisReport> {
     const request: ChatRequest = {
       intent: 'CONTENT_STRENGTH',
-      resumeData: resume,
       jobDescription: '',
       messageHistory: []
     };
+    if (this.hasResumeContent(resume)) request.resumeData = resume;
     
     const response = await this.callChatEndpoint(request);
-    
-    try {
-      if (response.payload && typeof response.payload === 'object') {
-        return response.payload;
-      }
-      return JSON.parse(response.content || '{}');
-    } catch (error) {
-      console.error('Failed to parse content strength response:', error);
-      throw new Error('Invalid response from content strength agent');
+    const payload = response.payload;
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      return payload as ContentAnalysisReport;
     }
+    throw new Error('Invalid response from content strength agent');
   }
 
-  async alignmentAgent(resume: Resume, jd: string): Promise<AlignmentReport> {
+  async alignmentAgent(resume: Resume | null | undefined, jd: string): Promise<AlignmentReport> {
     const request: ChatRequest = {
       intent: 'ALIGNMENT',
-      resumeData: resume,
       jobDescription: jd,
       messageHistory: []
     };
+    if (this.hasResumeContent(resume)) request.resumeData = resume;
     
     const response = await this.callChatEndpoint(request);
-    
-    try {
-      let data = response.payload;
-      if (!data || typeof data !== 'object') {
-        data = JSON.parse(response.content || '{}');
-      }
-      return {
-        ...data,
-        sources: data.sources || []
-      };
-    } catch (error) {
-      console.error('Failed to parse alignment response:', error);
+    const payload = response.payload;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
       throw new Error('Invalid response from alignment agent');
     }
+    const data = payload as Record<string, any>;
+    return {
+      ...data,
+      sources: data.sources || []
+    } as AlignmentReport;
   }
 
   async interviewCoachAgent(
@@ -168,7 +178,9 @@ class BackendService {
     };
     
     const response = await this.callChatEndpoint(request);
-    return (response.payload && typeof response.payload === 'string' ? response.payload : response.content) || "I'm sorry, I couldn't generate a response.";
+    return typeof response.payload === 'string'
+      ? response.payload
+      : "I'm sorry, I couldn't generate a response.";
   }
 }
 
@@ -176,6 +188,6 @@ export const backendService = new BackendService();
 
 // Export individual functions for backward compatibility
 export const resumeCriticAgent = (resume: Resume) => backendService.resumeCriticAgent(resume);
-export const contentStrengthAgent = (resume: Resume) => backendService.contentStrengthAgent(resume);
-export const alignmentAgent = (resume: Resume, jd: string) => backendService.alignmentAgent(resume, jd);
+export const contentStrengthAgent = (resume?: Resume | null) => backendService.contentStrengthAgent(resume);
+export const alignmentAgent = (resume: Resume | null | undefined, jd: string) => backendService.alignmentAgent(resume, jd);
 export const interviewCoachAgent = (alignment: AlignmentReport, history: { role: 'user' | 'agent'; text: string }[]) => backendService.interviewCoachAgent(alignment, history);

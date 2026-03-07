@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from app.agents.base import BaseAgentProtocol
 from app.agents.content_strength import ContentStrengthAgent
+from app.agents.extractor import ExtractorAgent
 from app.agents.interview_coach import InterviewCoachAgent
 from app.agents.job_alignment import JobAlignmentAgent
 from app.agents.resume_critic import ResumeCriticAgent
@@ -17,6 +18,7 @@ class AgentRegistry:
 
     def __init__(self) -> None:
         self._factories: dict[str, Callable[[object], BaseAgentProtocol]] = {
+            "ExtractorAgent": lambda gemini_service: ExtractorAgent(gemini_service),
             "ResumeCriticAgent": lambda gemini_service: ResumeCriticAgent(gemini_service),
             "ContentStrengthAgent": lambda gemini_service: ContentStrengthAgent(gemini_service),
             "JobAlignmentAgent": lambda gemini_service: JobAlignmentAgent(gemini_service),
@@ -25,7 +27,7 @@ class AgentRegistry:
 
     def configured_names(self) -> list[str]:
         """Return normalized agent names from configuration."""
-        raw = "ResumeCriticAgent,ContentStrengthAgent,JobAlignmentAgent,InterviewCoachAgent"
+        raw = "ExtractorAgent,ResumeCriticAgent,ContentStrengthAgent,JobAlignmentAgent,InterviewCoachAgent"
         names = [part.strip() for part in raw.split(",") if part.strip()]
         return names or list(self._factories.keys())
 
