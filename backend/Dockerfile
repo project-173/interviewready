@@ -1,0 +1,34 @@
+# Use a Python image with uv pre-installed
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder
+
+# Set the working directory
+WORKDIR /app
+
+# Enable bytecode compilation
+ENV UV_COMPILE_BYTECODE=1
+
+# Copy project files
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies
+RUN uv sync --frozen --no-install-project --no-dev
+
+# Final stage
+FROM python:3.11-slim-bookworm
+
+WORKDIR /app
+
+# Copy the environment from the builder
+COPY --from=builder /app/.venv /app/.venv
+
+# Add .venv/bin to PATH
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Copy the application code
+COPY . .
+
+# Expose the port
+EXPOSE 8080
+
+# Run the application
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

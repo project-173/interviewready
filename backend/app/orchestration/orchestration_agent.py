@@ -73,26 +73,33 @@ Respond with ONLY the JSON array, no other text.
     def orchestrate(self, request: ChatRequest, context: SessionContext) -> AgentResponse:
         """Run intent analysis and execute selected agent sequence."""
         start_time = time.time()
-        session_id = getattr(context, 'session_id', 'unknown')
-        user_id = getattr(context, 'user_id', None)
-        
+        session_id = getattr(context, "session_id", "unknown")
+        user_id = getattr(context, "user_id", None)
+
         # Extract intent from request and build input text for agents
         intent = request.intent
         resume_data = request.resumeData or {}
         job_description = request.jobDescription or ""
         message_history = request.messageHistory or []
-        
+
         # Build input text based on intent and available data
-        input_text = self._build_agent_input(intent, resume_data, job_description, message_history)
-        
+        input_text = self._build_agent_input(
+            intent, resume_data, job_description, message_history
+        )
+
         # Log orchestration start
         logger.log_orchestration_start(input_text, session_id, user_id)
-        
+
         try:
-            # Map intent to agent sequence directly
-            agent_sequence = self._map_intent_to_agents(intent)
-            
-            logger.log_intent_analysis(input_text, agent_sequence, "intent_based", session_id)
+            # DYNAMIC INTENT ANALYSIS: Use LLM if available and requested intent is general/missing
+            if self.intent_gemini_service and (not intent or intent == "GENERAL"):
+                logger.debug("Using dynamic LLM intent analysis", session_id=session_id)
+                agent_sequence = self._analyze_intent_with_llm(input_text, context)
+            else:
+                # Map intent to agent sequence directly (legacy/explicit mode)
+                agent_sequence = self._map_intent_to_agents(intent)
+
+            logger.log_intent_analysis(input_text, agent_sequence, "hybrid_routing", session_id)
             
             state: OrchestrationState = {
                 "original_input": input_text,
@@ -175,6 +182,12 @@ Respond with ONLY the JSON array, no other text.
         response.decision_trace = trace
 
         audited_response = self.governance.audit(response, current_input)
+
+        # ADD SHAP METADATA TO LANGFUSE (Mocked if langfuse not enabled)
+        if hasattr(audited_response, 'scores') and audited_response.scores:
+            logger.debug("Attaching SHAP scores to decision trace", session_id=session_id)
+            trace.append(f"SHAP Analysis: {json.dumps(audited_response.scores)}")
+
         context.add_to_history(audited_response)
         context.decision_trace = trace
         

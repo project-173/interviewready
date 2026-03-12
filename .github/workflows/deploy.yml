@@ -1,0 +1,79 @@
+name: Deploy to Google Cloud Run
+
+on:
+  push:
+    branches:
+      - CICD
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: asia-southeast1
+  BACKEND_SERVICE_NAME: interviewready-backend
+  FRONTEND_SERVICE_NAME: interviewready-frontend
+  REPOSITORY_NAME: interviewready-repo
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCP
+        run: gcloud auth configure-docker $REGION-docker.pkg.dev
+
+      # Build and Push Backend
+      - name: Build and Push Backend
+        run: |
+          docker build --platform linux/amd64 -t $REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$BACKEND_SERVICE_NAME:${{ github.sha }} ./backend
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$BACKEND_SERVICE_NAME:${{ github.sha }}
+
+      # Build and Push Frontend
+      - name: Build and Push Frontend
+        run: |
+          # First, we need to know the backend URL to inject into the frontend build
+          # If this is the first deploy, we might not have it yet.
+          # We can assume it follows the standard Cloud Run naming convention or use a fixed custom domain.
+          # We use --format='value(status.url)' and handle potential errors if service doesn't exist yet
+          BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE_NAME --platform managed --region $REGION --format='value(status.url)' 2>/dev/null || echo "")
+          echo "Detected Backend URL: $BACKEND_URL"
+          docker build --platform linux/amd64 -t $REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$FRONTEND_SERVICE_NAME:${{ github.sha }} \
+            --build-arg VITE_API_BASE_URL=$BACKEND_URL \
+            ./frontend
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$FRONTEND_SERVICE_NAME:${{ github.sha }}
+
+      # Deploy Backend to Cloud Run
+      - name: Deploy Backend
+        id: deploy-backend
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.BACKEND_SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          image: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.BACKEND_SERVICE_NAME }}:${{ github.sha }}
+          env_vars: |
+            FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}
+            GOOGLE_AI_API_KEY=${{ secrets.GOOGLE_AI_API_KEY }}
+            LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}
+            LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}
+            LANGFUSE_HOST=${{ secrets.LANGFUSE_HOST }}
+
+      # Deploy Frontend to Cloud Run
+      - name: Deploy Frontend
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.FRONTEND_SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          image: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.FRONTEND_SERVICE_NAME }}:${{ github.sha }}
+          flags: --allow-unauthenticated

@@ -26,6 +26,7 @@ dependencies = [
     "psycopg2-binary>=2.9.0",
     "python-dotenv>=1.0.0",
     "PyPDF2>=3.0.0",
+    "langfuse>=2.0.0",
 ]
 requires-python = ">=3.11"
 readme = "README.md"

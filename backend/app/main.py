@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from langfuse.callback import CallbackHandler
 
 from app.core.config import settings
 from app.core.firebase import init_firebase
@@ -36,6 +37,13 @@ app.add_middleware(
 
 # Include API routes
 app.include_router(api_router, prefix="/api/v1")
+
+# Initialize Langfuse Callback Handler
+langfuse_handler = CallbackHandler(
+    public_key=settings.LANGFUSE_PUBLIC_KEY,
+    secret_key=settings.LANGFUSE_SECRET_KEY,
+    host=settings.LANGFUSE_HOST
+) if settings.LANGFUSE_PUBLIC_KEY else None
 
 
 @app.get("/health")
