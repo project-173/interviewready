@@ -7,12 +7,8 @@ from fastapi.testclient import TestClient
 os.environ["DEBUG"] = "false"
 os.environ.setdefault("GEMINI_API_KEY", "test-gemini-api-key")
 
-from app.core.auth import get_current_user
 from app.main import app
 from app.models import AgentResponse, ChatRequest
-
-def fake_user():
-    return {"uid": "test-user-1"}
 
 
 class StubOrchestrator:
@@ -102,7 +98,6 @@ def _chat_request_payload(intent: str) -> dict:
 
 
 def test_agents_and_chat():
-    app.dependency_overrides[get_current_user] = fake_user
     client = TestClient(app)
 
     r1 = client.get("/api/v1/agents")
@@ -162,5 +157,3 @@ def test_agents_and_chat():
 
     assert interview_response.status_code == 200
     assert isinstance(interview_response.json()["payload"], str)
-
-    app.dependency_overrides.clear()

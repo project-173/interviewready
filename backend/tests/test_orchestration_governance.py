@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.governance import SharpGovernanceService
-from app.models.agent import AgentResponse
+from app.models.agent import AgentResponse, ChatRequest
 from app.models.session import SessionContext
 from app.orchestration import OrchestrationAgent
 
@@ -85,6 +85,7 @@ def test_governance_content_strength_audit_flags_unfaithful() -> None:
 
 
 def test_orchestration_chains_agents_for_first_resume_review() -> None:
+    """Test that first-time resume review chains ResumeCriticAgent -> ContentStrengthAgent."""
     governance = SharpGovernanceService()
     resume_agent = StubAgent("ResumeCriticAgent")
     content_agent = StubAgent("ContentStrengthAgent")
@@ -97,8 +98,15 @@ def test_orchestration_chains_agents_for_first_resume_review() -> None:
     )
 
     context = SessionContext(session_id="s1", user_id="u1")
-    result = orchestrator.orchestrate("Please analyze and review my resume", context)
+    request = ChatRequest(
+        intent="Please analyze and review my resume",
+        resumeData={},
+        jobDescription="",
+        messageHistory=[]
+    )
+    result = orchestrator.orchestrate(request, context)
 
+    # Both ResumeCriticAgent and ContentStrengthAgent should be called for first resume review
     assert result.agent_name == "ContentStrengthAgent"
     assert len(context.history or []) == 2
     assert resume_agent.inputs
@@ -119,8 +127,15 @@ def test_orchestration_routes_job_alignment_keyword() -> None:
     )
 
     context = SessionContext(session_id="s2", user_id="u2")
-    result = orchestrator.orchestrate("How does my profile match this job?", context)
+    request = ChatRequest(
+        intent="How does my profile match this job?",
+        resumeData={},
+        jobDescription="",
+        messageHistory=[]
+    )
+    result = orchestrator.orchestrate(request, context)
 
     assert result.agent_name == "JobAlignmentAgent"
     assert len(context.history or []) == 1
+    assert job_agent.inputs
     assert len(job_agent.inputs) == 1

@@ -18,7 +18,7 @@ dependencies = [
     "google-genai==1.67.0",
     "langgraph==0.0.40",
     "python-dotenv>=1.0.0",
-    "PyPDF2>=3.0.0",
+    "pypdf>=3.0.0",
 ]
 requires-python = ">=3.11"
 readme = "README.md"
@@ -54,7 +54,6 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [dependency-groups]

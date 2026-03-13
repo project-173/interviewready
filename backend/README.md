@@ -148,6 +148,7 @@ backend/
 Enable mock responses for development and testing:
 - Set `USE_MOCK_RESPONSE = True` in individual agent classes
 - Uses predefined responses from `mock_responses.json`
+- Set `MOCK_RESPONSE_KEY` to specify which mock response to use, for example `MOCK_RESPONSE_KEY = "ResumeCriticAgent"`
 - Allows development without API keys
 
 ### Structured Logging

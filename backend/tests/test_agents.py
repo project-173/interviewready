@@ -1,7 +1,7 @@
 """Test script for agent implementations."""
 
-import os
 from dotenv import load_dotenv
+from app.core.config import settings
 from app.agents import (
     ResumeCriticAgent, 
     ContentStrengthAgent, 
@@ -18,7 +18,7 @@ def test_agents():
     """Test all agent implementations."""
     
     # Check if API key is available
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = settings.GEMINI_API_KEY
     if not api_key:
         print("Error: GEMINI_API_KEY environment variable is not set")
         print("Please set it in your .env file")

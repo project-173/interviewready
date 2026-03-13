@@ -1,10 +1,10 @@
 """Interview Coach Agent implementation."""
 
-import os
 import time
 from typing import Optional
 from .base import BaseAgent
 from .gemini_service import GeminiLiveService
+from ..core.config import settings
 from ..core.logging import logger
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
@@ -37,7 +37,7 @@ class InterviewCoachAgent(BaseAgent):
             self.gemini_live_service = GeminiLiveService()
             
             # Try to connect to Gemini Live if API key is available
-            api_key = os.getenv("GEMINI_API_KEY")
+            api_key = settings.GEMINI_API_KEY
             if api_key and api_key.strip():
                 try:
                     self.gemini_live_service.connect(api_key, self.DEFAULT_MODEL)
