@@ -52,33 +52,10 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
         <div className="flex justify-between items-start mb-8">
           <div>
             <h2 className="text-2xl font-bold tracking-tight text-slate-900">
-              {resume.name}
+              Resume Preview
             </h2>
             <div className="flex gap-4 mt-2 text-xs font-medium text-slate-400">
-              <span className="flex items-center gap-1.5">
-                <svg
-                  className="w-3 h-3"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                </svg>
-                {resume.email}
-              </span>
-              {resume.phone && (
-                <span className="flex items-center gap-1.5">
-                  <svg
-                    className="w-3 h-3"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path>
-                  </svg>
-                  {resume.phone}
-                </span>
-              )}
+              <span>Core resume sections only</span>
             </div>
           </div>
           <button className="text-[11px] font-bold text-slate-500 border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all flex items-center gap-2 shadow-sm">
@@ -114,29 +91,12 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
       <div className="flex-1 overflow-y-auto p-10 max-w-4xl mx-auto w-full">
         {activeTab === "basics" && (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em] mb-6">
-              Profile Narrative
-            </h3>
-            <div className="p-8 bg-slate-50 border border-slate-200 rounded-2xl relative">
-              <div className="absolute top-4 left-4 text-slate-200">
-                <svg
-                  className="w-8 h-8"
-                  fill="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.154c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z" />
-                </svg>
-              </div>
-              <p className="text-slate-700 leading-relaxed text-sm relative z-10 font-medium">
-                {resume.summary || "No professional summary provided."}
-              </p>
-            </div>
           </div>
         )}
 
         {activeTab === "experience" && (
           <div className="space-y-10 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {resume.experiences.map((exp) => (
+            {resume.experiences?.map((exp) => (
               <div key={`${exp.company}-${exp.role}`} className="group">
                 <div className="flex justify-between items-baseline mb-3">
                   <h4 className="text-base font-bold text-slate-900">
@@ -169,7 +129,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
 
         {activeTab === "education" && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {resume.educations.map((edu) => (
+            {resume.educations?.map((edu) => (
               <div
                 key={`${edu.institution}-${edu.degree}`}
                 className="p-6 bg-white border border-slate-200 rounded-xl hover:shadow-md transition-shadow"

@@ -149,19 +149,6 @@ class BackendService {
   ): Promise<string> {
     // Create a minimal resume object for the interview coach
     const resume: Resume = {
-      title: '',
-      summary: '',
-      isMaster: false,
-      contact: {
-        fullName: '',
-        email: '',
-        phone: '',
-        city: '',
-        country: '',
-        linkedin: '',
-        github: '',
-        portfolio: ''
-      },
       skills: [],
       experiences: [],
       educations: [],

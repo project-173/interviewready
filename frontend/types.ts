@@ -33,35 +33,12 @@ export interface Award {
 }
 
 export interface ResumeSchema {
-  id?: string;
-  name?: string;
-  email?: string;
-  phone?: string;
-  location?: string;
-  summary?: string;
   skills?: string[];
-  experience?: Experience[];
-  education?: Education[];
+  experiences?: Experience[];
+  educations?: Education[];
   projects?: Project[];
   certifications?: Certification[];
   awards?: Award[];
-  timestamp?: string;
-  // Backward compatibility properties
-  title?: string;
-  isMaster?: boolean;
-  contact?: {
-    fullName: string;
-    email: string;
-    phone: string;
-    city: string;
-    country: string;
-    linkedin: string;
-    github: string;
-    portfolio: string;
-  };
-  // Plural forms for backward compatibility
-  experiences?: Experience[];
-  educations?: Education[];
 }
 
 // Backward compatibility alias
@@ -151,19 +128,12 @@ const awardSchema = z.object({
 });
 
 export const resumeJsonSchema = zodToJsonSchema(z.object({
-  id: z.string(),
-  name: z.string(),
-  email: z.string(),
-  phone: z.string().optional(),
-  location: z.string().optional(),
-  summary: z.string().optional(),
   skills: z.array(z.string()),
-  experience: z.array(experienceSchema),
-  education: z.array(educationSchema),
+  experiences: z.array(experienceSchema),
+  educations: z.array(educationSchema),
   projects: z.array(projectSchema),
   certifications: z.array(certificationSchema),
   awards: z.array(awardSchema),
-  timestamp: z.string(),
 }), 'resumeSchema');
 
 export const structuralAssessmentJsonSchema = zodToJsonSchema(z.object({

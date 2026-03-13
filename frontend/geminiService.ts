@@ -44,19 +44,6 @@ export const extractorAgent = async (input: string | ExtractorFileData): Promise
 
   const data = JSON.parse(response.text || '{}');
   return {
-    title: data.title || 'Untitled Resume',
-    summary: data.summary || '',
-    isMaster: false,
-    contact: data.contact || {
-      fullName: '',
-      email: '',
-      phone: '',
-      city: '',
-      country: '',
-      linkedin: '',
-      github: '',
-      portfolio: ''
-    },
     skills: data.skills || [],
     experiences: data.experiences || [],
     educations: data.educations || [],
