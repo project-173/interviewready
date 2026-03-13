@@ -6,10 +6,10 @@ from typing import Optional, Dict, Any
 import io
 
 try:
-    import PyPDF2
-    PYPDF2_AVAILABLE = True
+    import pypdf
+    PYPDF_AVAILABLE = True
 except ImportError:
-    PYPDF2_AVAILABLE = False
+    PYPDF_AVAILABLE = False
 
 from ..core.logging import logger
 
@@ -60,7 +60,7 @@ def extract_base64_from_text(text: str) -> Optional[str]:
 
 
 def parse_pdf_base64(base64_data: str) -> Optional[str]:
-    """Parse PDF from base64 data and extract text.
+    """Parse PDF from base64 encoded data.
     
     Args:
         base64_data: Base64 encoded PDF data
@@ -68,19 +68,17 @@ def parse_pdf_base64(base64_data: str) -> Optional[str]:
     Returns:
         Extracted text content if successful, None otherwise
     """
-    if not PYPDF2_AVAILABLE:
-        logger.warning("PyPDF2 not available, cannot parse PDF")
+    if not PYPDF_AVAILABLE:
+        logger.warning("pypdf not available, cannot parse PDF")
         return None
     
     try:
         # Decode base64
         pdf_bytes = base64.b64decode(base64_data)
-        
-        # Create PDF file object
         pdf_file = io.BytesIO(pdf_bytes)
         
         # Read PDF
-        pdf_reader = PyPDF2.PdfReader(pdf_file)
+        pdf_reader = pypdf.PdfReader(pdf_file)
         
         # Extract text from all pages
         text_content = ""

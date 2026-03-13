@@ -9,7 +9,7 @@ from app.api.v1.services import (
     get_or_create_session_context,
     get_orchestration_agent,
 )
-from app.core.auth import get_current_user
+from app.core.config import settings
 from app.models import AgentResponse, ChatApiResponse, ChatRequest
 from app.utils.json_parser import parse_json_payload
 
@@ -20,20 +20,9 @@ router = APIRouter()
 async def chat_endpoint(
     request: ChatRequest,
     session_id: Annotated[str, Query(alias="sessionId")],
-    current_user: Annotated[dict[str, Any], Depends(get_current_user)],
 ) -> ChatApiResponse:
     """Run orchestration for the chat message within a user-owned session."""
-    user_id = str(
-        current_user.get("uid")
-        or current_user.get("user_id")
-        or current_user.get("sub")
-        or ""
-    )
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing user identity in authentication token",
-        )
+    user_id = settings.AUTH_DISABLED_USER_ID
 
     try:
         context = get_or_create_session_context(session_id=session_id, user_id=user_id)

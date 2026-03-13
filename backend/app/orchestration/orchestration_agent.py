@@ -89,12 +89,15 @@ Respond with ONLY the JSON array, no other text.
         # Build input text based on intent and available data
         input_text = self._build_agent_input(intent, resume_data, job_description, message_history)
         
+        # For intent analysis, use the original request text, not the processed intent
+        original_input = request.intent or ""
+        
         # Log orchestration start
         logger.log_orchestration_start(input_text, session_id, user_id)
         
         try:
             # Map intent to agent sequence directly
-            agent_sequence = self._map_intent_to_agents(intent)
+            agent_sequence = self._analyze_intent(original_input, context)
             
             logger.log_intent_analysis(input_text, agent_sequence, "intent_based", session_id)
             
@@ -218,7 +221,7 @@ Respond with ONLY the JSON array, no other text.
         lower_input = input_text.lower()
         
         # Log keyword-based intent analysis
-        logger.debug("Starting keyword-based intent analysis", session_id=session_id, input_length=len(input_text))
+        logger.debug("Starting keyword-based intent analysis", session_id=session_id, input_length=len(input_text), input_text=input_text, lower_input=lower_input)
 
         if any(
             keyword in lower_input
