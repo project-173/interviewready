@@ -9,7 +9,7 @@ from app.api.v1.services import (
     get_or_create_session_context,
     get_orchestration_agent,
 )
-from app.core.auth import get_current_user
+from app.core.config import settings
 from app.core.langfuse_client import langfuse
 from app.models import AgentResponse, ChatApiResponse, ChatRequest
 from app.utils.json_parser import parse_json_payload
@@ -21,15 +21,9 @@ router = APIRouter()
 async def chat_endpoint(
     request: ChatRequest,
     session_id: Annotated[str, Query(alias="sessionId")],
-    current_user: Annotated[dict[str, Any], Depends(get_current_user)],
 ) -> ChatApiResponse:
     """Run orchestration for the chat message within a user-owned session."""
-    user_id = str(
-        current_user.get("uid")
-        or current_user.get("user_id")
-        or current_user.get("sub")
-        or ""
-    )
+    user_id = settings.AUTH_DISABLED_USER_ID
 
     with langfuse.trace(
         name="chat_api_request",
@@ -47,46 +41,46 @@ async def chat_endpoint(
                 detail="Missing user identity in authentication token",
             )
 
-    try:
-        context = get_or_create_session_context(session_id=session_id, user_id=user_id)
-    except PermissionError as exc:
-        trace.update(output={"error": "permission_denied", "reason": str(exc)})
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=str(exc),
-        ) from exc
+        try:
+            context = get_or_create_session_context(session_id=session_id, user_id=user_id)
+        except PermissionError as exc:
+            trace.update(output={"error": "permission_denied", "reason": str(exc)})
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=str(exc),
+            ) from exc
 
-    try:
-        orchestrator = get_orchestration_agent()
-    except Exception as exc:
-        trace.update(output={"error": "orchestrator_unavailable", "reason": str(exc)})
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Orchestration service unavailable: {exc}",
-        ) from exc
+        try:
+            orchestrator = get_orchestration_agent()
+        except Exception as exc:
+            trace.update(output={"error": "orchestrator_unavailable", "reason": str(exc)})
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Orchestration service unavailable: {exc}",
+            ) from exc
 
-    try:
-        internal_response = await run_in_threadpool(
-            orchestrator.orchestrate, request, context
-        )
-        result = ChatApiResponse(
-            agent=internal_response.agent_name,
-            payload=_extract_api_payload(internal_response),
-        )
-        trace.update(
-            output={
-                "success": True,
-                "agent": internal_response.agent_name,
-                "response_length": len(str(result.payload)),
-            }
-        )
-        return result
-    except Exception as exc:
-        trace.update(output={"error": "orchestration_failed", "reason": str(exc)})
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process chat request: {exc}",
-        ) from exc
+        try:
+            internal_response = await run_in_threadpool(
+                orchestrator.orchestrate, request, context
+            )
+            result = ChatApiResponse(
+                agent=internal_response.agent_name,
+                payload=_extract_api_payload(internal_response),
+            )
+            trace.update(
+                output={
+                    "success": True,
+                    "agent": internal_response.agent_name,
+                    "response_length": len(str(result.payload)),
+                }
+            )
+            return result
+        except Exception as exc:
+            trace.update(output={"error": "orchestration_failed", "reason": str(exc)})
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to process chat request: {exc}",
+            ) from exc
 
 
 def _extract_api_payload(response: AgentResponse) -> dict[str, Any] | list[Any] | str:

@@ -5,7 +5,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
-from app.core.firebase import init_firebase
 from app.api.v1 import api_router
 
 # Safe import for Langfuse
@@ -20,29 +19,13 @@ except ImportError:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    print(f"Starting {settings.APP_NAME} v{settings.VERSION} (env={settings.APP_ENV})...")
-    
-    # Initialize Firebase with error handling to prevent startup crashes
-    try:
-        if settings.FIREBASE_ENABLED:
-            print("Initializing Firebase...")
-            init_firebase()
-            print("Firebase initialized successfully.")
-        else:
-            print("Firebase is disabled via configuration.")
-    except Exception as e:
-        print(f"CRITICAL ERROR during Firebase initialization: {e}")
-        # We don't re-raise here to allow the container to start and serve health checks
-        # even if Firebase fails, allowing us to debug via logs.
-    
-    print(f"{settings.APP_NAME} lifespan startup complete.")
     yield
     print(f"Shutting down {settings.APP_NAME}...")
 
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Production-Ready Multi-Agent AI Backend with Gemini and Firebase",
+    description="Production-Ready Multi-Agent AI Backend with Gemini",
     version=settings.VERSION,
     lifespan=lifespan,
     redirect_slashes=False,
@@ -109,7 +92,7 @@ async def app_info():
     return {
         "name": settings.APP_NAME,
         "version": settings.VERSION,
-        "debug": settings.DEBUG,
+        "log_level": settings.LOG_LEVEL,
         "environment": settings.APP_ENV,
     }
 
@@ -129,5 +112,5 @@ if __name__ == "__main__":
         "app.main:app",
         host="0.0.0.0",
         port=settings.SERVER_PORT,
-        reload=settings.DEBUG,
+        reload=settings.LOG_LEVEL == "DEBUG",
     )

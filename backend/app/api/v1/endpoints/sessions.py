@@ -2,10 +2,10 @@
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, HTTPException, Path, status
 
 from app.api.v1.services import get_session_context
-from app.core.auth import get_current_user
+from app.core.config import settings
 from app.models.resume import Resume
 
 router = APIRouter()
@@ -14,20 +14,9 @@ router = APIRouter()
 @router.get("/{session_id}/resume")
 async def get_session_resume(
     session_id: Annotated[str, Path()],
-    current_user: Annotated[dict[str, Any], Depends(get_current_user)],
 ) -> Resume:
     """Return parsed resume JSON currently persisted for a session."""
-    user_id = str(
-        current_user.get("uid")
-        or current_user.get("user_id")
-        or current_user.get("sub")
-        or ""
-    )
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing user identity in authentication token",
-        )
+    user_id = settings.AUTH_DISABLED_USER_ID
 
     try:
         context = get_session_context(session_id=session_id, user_id=user_id)

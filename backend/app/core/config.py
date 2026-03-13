@@ -1,6 +1,6 @@
 """Application configuration settings."""
 
-from pydantic import field_validator
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 from typing import List, Optional, Union
 import os
@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./test.db"  # Use SQLite by default to ensure startup without Postgres
     
     # Google Cloud / Vertex AI Configuration
-    GOOGLE_PROJECT_ID: str = "aaas-490414"
+    GOOGLE_PROJECT_ID: str = "your-project-id"
     GOOGLE_LOCATION: str = "asia-southeast1"
     GOOGLE_CREDENTIALS_URI: Optional[str] = None
     
@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     MOCK_GEMINI: bool = False
     LOG_MOCK_CALLS: bool = False
+    
     
     # Firebase Configuration
     FIREBASE_ENABLED: bool = False
@@ -47,8 +48,6 @@ class Settings(BaseSettings):
     FIREBASE_TOKEN_URI: str = "https://oauth2.googleapis.com/token"
     
     # Security
-    SECURITY_FILTER_ORDER: int = 5
-    AUTH_ENABLED: bool = False
     AUTH_DISABLED_USER_ID: str = "dev-user"
     GOOGLE_AI_API_KEY: Optional[str] = None # Added for compatibility with user's secret name
     
@@ -82,17 +81,10 @@ class Settings(BaseSettings):
     ENABLE_INFO_ENDPOINT: bool = True
     ENABLE_METRICS_ENDPOINT: bool = True
     
-    # LangGraph
-    LANGGRAPH_API_KEY: Optional[str] = None
-
-    # Langfuse
-    LANGFUSE_PUBLIC_KEY: Optional[str] = None
-    LANGFUSE_SECRET_KEY: Optional[str] = None
-    LANGFUSE_HOST: Optional[str] = "https://cloud.langfuse.com"
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=True
+    )
 
 
 # Create settings instance
