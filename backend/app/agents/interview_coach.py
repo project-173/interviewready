@@ -60,13 +60,13 @@ class InterviewCoachAgent(BaseAgent):
         agent_name = self.get_name()
         processing_start_time = time.time()
         
-        # Log processing start
-        logger.debug(f"InterviewCoachAgent processing started", 
+        logger.debug("InterviewCoachAgent processing started", 
                     session_id=session_id, 
                     input_length=len(input_text),
                     input_preview=input_text[:100] + "..." if len(input_text) > 100 else input_text)
         
         try:
+            result = None
             if self.USE_MOCK_RESPONSE:
                 result = self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
                 if result is None:
@@ -75,25 +75,22 @@ class InterviewCoachAgent(BaseAgent):
                         session_id=session_id,
                         mock_response_key=self.MOCK_RESPONSE_KEY,
                     )
-                    result = self.call_gemini(input_text, context)
-                    method_used = "standard_gemini_fallback"
-                else:
-                    method_used = "mock_response_file"
-            else:
-            # Try to use Gemini Live first, fallback to regular Gemini
+            
+            if result is None:
+                # Try to use Gemini Live first, fallback to regular Gemini
                 gemini_live_available = (
                     hasattr(self.gemini_live_service, 'connected')
                     and self.gemini_live_service.connected
                 )
-                logger.debug(f"InterviewCoachAgent checking Gemini Live availability", 
+                logger.debug("InterviewCoachAgent checking Gemini Live availability", 
                             session_id=session_id, 
                             gemini_live_available=gemini_live_available)
                 
                 if gemini_live_available:
-                    logger.debug(f"InterviewCoachAgent using Gemini Live", session_id=session_id)
+                    logger.debug("InterviewCoachAgent using Gemini Live", session_id=session_id)
                     result = self._call_gemini_live(input_text)
                     if not result or result.startswith("Error"):
-                        logger.warning(f"InterviewCoachAgent Gemini Live failed, falling back to standard Gemini", 
+                        logger.warning("InterviewCoachAgent Gemini Live failed, falling back to standard Gemini", 
                                      session_id=session_id, 
                                      result_preview=result[:100] if result else "No result")
                         # Fallback to regular Gemini
@@ -102,16 +99,18 @@ class InterviewCoachAgent(BaseAgent):
                     else:
                         method_used = "gemini_live"
                 else:
-                    logger.debug(f"InterviewCoachAgent using standard Gemini (Live unavailable)", session_id=session_id)
+                    logger.debug("InterviewCoachAgent using standard Gemini (Live unavailable)", session_id=session_id)
                     # Fallback to regular Gemini
                     result = self.call_gemini(input_text, context)
                     method_used = "standard_gemini"
             
-            processing_time = time.time() - processing_start_time
-            logger.debug(f"InterviewCoachAgent processing completed", 
+            # Validate that we got a meaningful response
+            if not result or not result.strip():
+                raise ValueError("Empty response received from Gemini API")
+            
+            logger.debug("InterviewCoachAgent processing completed", 
                         session_id=session_id, 
                         processing_time_ms=round(processing_time * 1000, 2),
-                        method_used=method_used,
                         result_length=len(result),
                         result_preview=result[:100] + "..." if len(result) > 100 else result)
             
