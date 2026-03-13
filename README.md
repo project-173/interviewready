@@ -172,9 +172,8 @@ The pipeline will automatically build and deploy both services to Cloud Run on e
 ## Technical Stack
 
 - **Orchestration**: LangGraph (stateful graph cycles)
-- **Parsing**: LlamaParse (Markdown-centric PDF parsing)
-- **Database**: PostgreSQL + pgvector for vector similarity
-- **LLMs**: GPT-4o or Claude 3.5 Sonnet
+- **Parsing**: PyPDF2 (Markdown-centric PDF parsing)
+- **LLMs**: Google Gemini
 - **Embeddings**: sentence-transformers/all-MiniLM-L6-v2
 - **Explainability**: SHAP KernelExplainer
 - **Validation**: DeBERTa-v3-large-mnli (NLI)
@@ -218,6 +217,6 @@ The pipeline will automatically build and deploy both services to Cloud Run on e
 - **CI Pipeline**: Lint, format, type check, automated testing
 
 ## Issues
-**Problem**: When using `uv` commands, `warning: Failed to hardlink files; falling back to full copy.`
-**Analysis**: `uv` tries to hardlink files from its cache into your virtual environment (for speed). This almost always happens when the cache or project directory is inside a cloud-synced filesystem (e.g., OneDrive). Cloud file providers often block or virtualize hardlinks.
-**Solution**: You can point cache somewhere not cloud-managed: `$env:UV_CACHE_DIR="C:\uv-cache"`
+1. When using `uv` commands, `warning: Failed to hardlink files; falling back to full copy.`
+- **Analysis**: `uv` tries to hardlink files from its cache into your virtual environment (for speed). This almost always happens when the cache or project directory is inside a cloud-synced filesystem (e.g., OneDrive). Cloud file providers often block or virtualize hardlinks.
+- **Solution**: You can point cache somewhere not cloud-managed: `$env:UV_CACHE_DIR="C:\uv-cache"`
