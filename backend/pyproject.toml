@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "interviewready-backend"
 version = "1.0.0"
-description = "Production-Ready Multi-Agent AI Backend with Gemini and Firebase"
+description = "Production-Ready Multi-Agent AI Backend with Gemini"
 authors = [
     {name = "InterviewReady Team", email = "team@interviewready.com"},
 ]
@@ -15,13 +15,8 @@ dependencies = [
     "pydantic>=2.4.0",
     "pydantic-settings>=2.0.0",
     "sqlalchemy>=2.0.0",
-    "alembic>=1.12.0",
     "google-genai==1.67.0",
-    "firebase-admin>=6.0.0",
-    "python-jose[cryptography]>=3.3.0",
-    "python-multipart>=0.0.6",
     "langgraph==0.0.40",
-    "psycopg2-binary>=2.9.0",
     "python-dotenv>=1.0.0",
     "PyPDF2>=3.0.0",
 ]
