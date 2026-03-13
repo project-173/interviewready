@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import Any
+from typing import Any, Union
 from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -22,8 +22,8 @@ from app.utils.json_parser import parse_json_object
 class OrchestrationState(TypedDict):
     """Workflow state used by LangGraph orchestration."""
 
-    original_input: str
-    current_input: str
+    original_input: Union[str, bytes]
+    current_input: Union[str, bytes]
     context: SessionContext
     agent_sequence: list[str]
     current_index: int
@@ -87,10 +87,10 @@ Respond with ONLY the JSON array, no other text.
         message_history = request.messageHistory or []
         
         # Build input text based on intent and available data
-        input_text = self._build_agent_input(intent, resume_data, job_description, message_history)
+        input_data = self._build_agent_input(intent, resume_data, job_description, message_history, request.audioData)
         
         # Log orchestration start
-        logger.log_orchestration_start(input_text, session_id, user_id)
+        logger.log_orchestration_start(str(input_data) if isinstance(input_data, bytes) else input_data, session_id, user_id)
         
         try:
             # Map intent to agent sequence directly
@@ -99,8 +99,8 @@ Respond with ONLY the JSON array, no other text.
             logger.log_intent_analysis(input_text, agent_sequence, "intent_based", session_id)
             
             state: OrchestrationState = {
-                "original_input": input_text,
-                "current_input": input_text,
+                "original_input": input_data,
+                "current_input": input_data,
                 "context": context,
                 "agent_sequence": agent_sequence,
                 "current_index": 0,
@@ -356,8 +356,12 @@ Respond with ONLY the JSON array, no other text.
             "Continue analysis based on the above context."
         )
 
-    def _build_agent_input(self, intent: str, resume_data: dict, job_description: str, message_history: list) -> str:
+    def _build_agent_input(self, intent: str, resume_data: dict, job_description: str, message_history: list, audio_data: Optional[bytes] = None) -> Union[str, bytes]:
         """Build input text for agents based on intent and available data."""
+        if audio_data is not None and intent == "INTERVIEW_COACH":
+            # For interview coaching with audio, return the audio data directly
+            return audio_data
+        
         if intent == "RESUME_CRITIC":
             return f"Analyze this resume: {json.dumps(resume_data, indent=2)}"
         

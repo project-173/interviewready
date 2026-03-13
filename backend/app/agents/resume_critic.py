@@ -2,7 +2,7 @@
 
 import json
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Union
 from .base import BaseAgent
 from ..core.logging import logger
 from ..models.agent import AgentResponse, StructuralAssessment
@@ -40,14 +40,20 @@ class ResumeCriticAgent(BaseAgent):
             name="ResumeCriticAgent"
         )
     
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
+    def process(self, input_data: Union[str, bytes], context: SessionContext) -> AgentResponse:
         """Process resume text and provide critique.
         
         Args:
-            input_text: Resume text to analyze
+            input_data: Resume text to analyze (must be str)
             context: Session context
             
         Returns:
+            Agent response with resume critique
+        """
+        if isinstance(input_data, bytes):
+            raise ValueError("ResumeCriticAgent does not support audio input")
+        
+        input_text = input_data
             Agent response with critique and analysis
         """
         session_id = getattr(context, 'session_id', 'unknown')

@@ -2,7 +2,7 @@
 
 import json
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Union
 from .base import BaseAgent
 from ..core.logging import logger
 from ..models.agent import AgentResponse, ContentAnalysisReport
@@ -89,16 +89,20 @@ class ContentStrengthAgent(BaseAgent):
             name="ContentStrengthAgent"
         )
     
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
+    def process(self, input_data: Union[str, bytes], context: SessionContext) -> AgentResponse:
         """Process resume text and analyze content strength.
         
         Args:
-            input_text: Resume text to analyze
+            input_data: Resume text to analyze (must be str)
             context: Session context
             
         Returns:
             Agent response with content strength analysis
         """
+        if isinstance(input_data, bytes):
+            raise ValueError("ContentStrengthAgent does not support audio input")
+        
+        input_text = input_data
         session_id = getattr(context, 'session_id', 'unknown')
         agent_name = self.get_name()
         processing_start_time = time.time()

@@ -236,6 +236,7 @@ export interface ChatRequest {
   jobDescription: string;
   messageHistory: InterviewMessage[];
   resumeFile?: ResumeFile;
+  audioData?: Uint8Array | null;
 }
 
 export interface InterviewMessage {

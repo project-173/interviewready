@@ -218,59 +218,123 @@ export const AlignmentReportStep: React.FC<{ report: AlignmentReport; onStartInt
 export const InterviewStep: React.FC<{ 
   history: { role: 'user' | 'agent'; text: string }[]; 
   onSend: (msg: string) => void;
+  onSendAudio: (audio: Uint8Array) => void;
   isLoading: boolean;
   chatEndRef: React.RefObject<HTMLDivElement>;
-}> = ({ history, onSend, isLoading, chatEndRef }) => (
-  <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-[calc(100vh-340px)] flex flex-col">
-    <div className="flex-1 overflow-y-auto space-y-4 pr-3 mb-4 scrollbar-thin scrollbar-thumb-slate-200">
-      {history.map((msg, i) => (
-        <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-          <div className={`max-w-[88%] p-3.5 rounded-xl text-[13px] leading-relaxed shadow-sm transition-all ${
-            msg.role === 'user' ? 'bg-slate-900 text-white rounded-tr-none' : 'bg-white text-slate-800 rounded-tl-none border border-slate-200'
-          }`}>
-            {/* Wrap ReactMarkdown in a div to handle styling as className is restricted on the component itself in this context */}
-            <div className="prose prose-sm max-w-none prose-slate">
-              <ReactMarkdown 
-                components={{
-                  p: ({children}) => <p className="mb-2 last:mb-0">{children}</p>,
-                  ul: ({children}) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
-                  li: ({children}) => <li className="mb-0.5">{children}</li>,
-                  strong: ({children}) => <span className="font-bold">{children}</span>,
-                }}
-              >
-                {msg.text}
-              </ReactMarkdown>
+}> = ({ history, onSend, onSendAudio, isLoading, chatEndRef }) => {
+  const [isRecording, setIsRecording] = React.useState(false);
+  const [mediaRecorder, setMediaRecorder] = React.useState<MediaRecorder | null>(null);
+  const [audioChunks, setAudioChunks] = React.useState<Blob[]>([]);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const audioBlob = new Blob(chunks, { type: 'audio/wav' });
+        audioBlob.arrayBuffer().then(buffer => {
+          onSendAudio(new Uint8Array(buffer));
+        });
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      setMediaRecorder(recorder);
+      setAudioChunks(chunks);
+      recorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error('Error starting recording:', error);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder && isRecording) {
+      mediaRecorder.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const handleMicClick = () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  };
+
+  return (
+    <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-[calc(100vh-340px)] flex flex-col">
+      <div className="flex-1 overflow-y-auto space-y-4 pr-3 mb-4 scrollbar-thin scrollbar-thumb-slate-200">
+        {history.map((msg, i) => (
+          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[88%] p-3.5 rounded-xl text-[13px] leading-relaxed shadow-sm transition-all ${
+              msg.role === 'user' ? 'bg-slate-900 text-white rounded-tr-none' : 'bg-white text-slate-800 rounded-tl-none border border-slate-200'
+            }`}>
+              <div className="prose prose-sm max-w-none prose-slate">
+                <ReactMarkdown 
+                  components={{
+                    p: ({children}) => <p className="mb-2 last:mb-0">{children}</p>,
+                    ul: ({children}) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
+                    li: ({children}) => <li className="mb-0.5">{children}</li>,
+                    strong: ({children}) => <span className="font-bold">{children}</span>,
+                  }}
+                >
+                  {msg.text}
+                </ReactMarkdown>
+              </div>
             </div>
           </div>
-        </div>
-      ))}
-      <div ref={chatEndRef} />
-    </div>
-    
-    <form 
-      className="flex gap-2 pt-4 border-t border-slate-100"
-      onSubmit={(e) => {
-        e.preventDefault();
-        const input = (e.target as any).message;
-        if (!input.value.trim() || isLoading) return;
-        onSend(input.value);
-        input.value = '';
-      }}
-    >
-      <input 
-        name="message" 
-        autoFocus
-        autoComplete="off" 
-        placeholder="Draft your response..." 
-        className="flex-1 px-4 py-2.5 rounded-lg bg-white border border-slate-200 text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none transition-all placeholder:text-slate-400" 
-      />
-      <button 
-        type="submit" 
-        disabled={isLoading} 
-        className="bg-slate-900 text-white px-4 rounded-lg hover:bg-slate-800 disabled:opacity-50 flex items-center justify-center transition-all"
+        ))}
+        <div ref={chatEndRef} />
+      </div>
+      
+      <form 
+        className="flex gap-2 pt-4 border-t border-slate-100"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const input = (e.target as any).message;
+          if (!input.value.trim() || isLoading) return;
+          onSend(input.value);
+          input.value = '';
+        }}
       >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-      </button>
-    </form>
-  </div>
-);
+        <input 
+          name="message" 
+          autoFocus
+          autoComplete="off" 
+          placeholder="Draft your response..." 
+          className="flex-1 px-4 py-2.5 rounded-lg bg-white border border-slate-200 text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none transition-all placeholder:text-slate-400" 
+        />
+        <button 
+          type="button"
+          onClick={handleMicClick}
+          disabled={isLoading}
+          className={`px-4 py-2.5 rounded-lg border transition-all flex items-center justify-center ${
+            isRecording 
+              ? 'bg-red-500 border-red-500 text-white animate-pulse' 
+              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+          } disabled:opacity-50`}
+        >
+          <svg className="w-4 h-4" fill={isRecording ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
+          </svg>
+        </button>
+        <button 
+          type="submit" 
+          disabled={isLoading} 
+          className="bg-slate-900 text-white px-4 rounded-lg hover:bg-slate-800 disabled:opacity-50 flex items-center justify-center transition-all"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+        </button>
+      </form>
+    </div>
+  );
+};

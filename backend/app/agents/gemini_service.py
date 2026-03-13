@@ -113,24 +113,36 @@ class GeminiLiveService:
             self.connected = False
             raise Exception(f"Failed to connect to Gemini Live: {str(e)}")
     
-    def send_textAndWaitResponse(self, text: str, timeout_ms: int = 10000) -> Optional[str]:
-        """Send text and wait for response.
+    def send_audio_and_wait_response(self, audio_data: bytes, system_prompt: str, mime_type: str = "audio/wav", text_prompt: str = "", timeout_ms: int = 10000) -> Optional[str]:
+        """Send audio data and wait for response.
         
         Args:
-            text: Text to send
+            audio_data: Audio data as bytes
+            system_prompt: System prompt for the model
+            mime_type: MIME type of the audio (default: audio/wav)
+            text_prompt: Optional text prompt to accompany audio
             timeout_ms: Timeout in milliseconds
             
         Returns:
-            Response text or None if timeout/error
+            Response text or None if error
         """
         if not self.connected or not self.client:
             return None
         
         try:
+            from google.genai import types
+            audio_part = types.Part.from_bytes(data=audio_data, mime_type=mime_type)
+            contents = [audio_part]
+            if text_prompt:
+                contents.insert(0, text_prompt)
+            
             response = self.client.models.generate_content(
                 model=self.model_name,
-                contents=text,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                )
             )
             return response.text
         except Exception as e:
-            return f"Error in Gemini Live: {str(e)}"
+            return f"Error in Gemini Live Audio: {str(e)}"

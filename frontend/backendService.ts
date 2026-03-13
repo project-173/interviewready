@@ -47,6 +47,10 @@ class BackendService {
   }
 
   async callChatEndpoint(request: ChatRequest): Promise<ChatResponse> {
+    const requestBody = {
+      ...request,
+      audioData: request.audioData ? btoa(String.fromCharCode(...request.audioData)) : null,
+    };
     const response = await fetch(`${API_BASE_URL}/api/v1/chat?sessionId=${this.sessionId}`, {
       method: 'POST',
       headers: {

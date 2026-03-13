@@ -2,7 +2,7 @@
 
 import json
 import time
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 
 from .base import BaseAgent
 from ..core.logging import logger
@@ -93,16 +93,20 @@ class JobAlignmentAgent(BaseAgent):
             )
             return fallback.model_dump()
 
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
+    def process(self, input_data: Union[str, bytes], context: SessionContext) -> AgentResponse:
         """Process resume and job description to evaluate alignment.
 
         Args:
-            input_text: Resume text (also used as job description placeholder here)
+            input_data: Resume text (must be str)
             context: Session context
 
         Returns:
             Agent response with alignment evaluation
         """
+        if isinstance(input_data, bytes):
+            raise ValueError("JobAlignmentAgent does not support audio input")
+        
+        input_text = input_data
         session_id = getattr(context, "session_id", "unknown")
         agent_name = self.get_name()
         processing_start_time = time.time()
