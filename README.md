@@ -12,7 +12,6 @@ InterviewReady is a high-integrity AI system that converts unstructured resumes 
 
 - **LangGraph State Machine**: Persistent orchestration with checkpoint-based recovery
 - **Multi-Agent Pipeline**: 7 specialized agents for resume analysis and optimization
-- **PostgreSQL + pgvector**: Vector similarity search and structured data storage
 - **LangFuse Observability**: End-to-end tracing and monitoring
 - **Human-in-the-Loop**: Strategic interrupts for user approval at critical points
 
@@ -29,13 +28,17 @@ InterviewReady is a high-integrity AI system that converts unstructured resumes 
 ## Quick Start
 
 ### Prerequisites
-
-- Java 17 (for Backend)
 - Node.js 20+ (for Frontend)
-- Docker & Docker Compose (for Containerization)
-- Google Cloud SDK (for GCP Deployment)
+- Python 3.11+ (for Backend)
+- Uvicorn (for Backend)
 
 ### Local Development
+#### Roam
+1. Install globally `pip install roam-code`.
+2. `AGENTS.md` is already set up for detection by AI agents. If not, run `roam describe --write`
+
+For more information, refer to [Roam documentation](https://github.com/Cranot/roam-code).
+
 #### Backend Setup
 1. `cd backend`
 2. Copy `.env.example` to `.env` and replace placeholder values.
@@ -213,3 +216,8 @@ The pipeline will automatically build and deploy both services to Cloud Run on e
 - **Integration Tests**: State flow, database operations
 - **Golden Set E2E**: Regression testing with predefined resume/JD pairs
 - **CI Pipeline**: Lint, format, type check, automated testing
+
+## Issues
+**Problem**: When using `uv` commands, `warning: Failed to hardlink files; falling back to full copy.`
+**Analysis**: `uv` tries to hardlink files from its cache into your virtual environment (for speed). This almost always happens when the cache or project directory is inside a cloud-synced filesystem (e.g., OneDrive). Cloud file providers often block or virtualize hardlinks.
+**Solution**: You can point cache somewhere not cloud-managed: `$env:UV_CACHE_DIR="C:\uv-cache"`
