@@ -8,7 +8,16 @@ from typing import Any
 
 from app.agents.base import BaseAgent
 from app.core.logging import logger
-from app.models import AgentResponse, Award, Certification, Education, Experience, Project, Resume
+from app.models import (
+    AgentResponse,
+    Award,
+    Certification,
+    Education,
+    Experience,
+    Project,
+    Resume,
+    ResumeDocument,
+)
 from app.models.session import SessionContext
 from app.utils.pdf_parser import parse_pdf_base64
 from app.utils.json_parser import parse_json_object
@@ -94,10 +103,18 @@ class ExtractorAgent(BaseAgent):
             raise ValueError("Failed to extract text from resume PDF payload")
 
         resume = self._extract_resume_with_llm(extracted_text)
+        if not resume.summary:
+            resume.summary = extracted_text
+        resume_document = ResumeDocument(
+            source="resumeFile",
+            raw_text=extracted_text,
+            parse_confidence=0.95,
+        )
         metadata = {
             "source": "resumeFile",
             "fileType": "pdf",
             "extractedTextLength": len(extracted_text),
+            "resume_document": resume_document.model_dump(exclude_none=True),
         }
         trace = ["ExtractorAgent: Used LLM to parse resume PDF and extract structured data"]
         elapsed_ms = round((time.time() - start_time) * 1000, 2)

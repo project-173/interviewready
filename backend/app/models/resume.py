@@ -8,6 +8,7 @@ from .base import Contact, Experience, Education, Project, Certification, Award
 class Resume(BaseModel):
     """Resume model containing core resume sections."""
 
+    summary: Optional[str] = None
     skills: List[str] = Field(default_factory=list)
     experiences: List[Experience] = Field(default_factory=list)
     educations: List[Education] = Field(default_factory=list)

@@ -8,78 +8,33 @@ os.environ["DEBUG"] = "false"
 os.environ.setdefault("GEMINI_API_KEY", "test-gemini-api-key")
 
 from app.main import app
-from app.models import AgentResponse, ChatRequest
+from app.models import ActionPlan, AgentResponse, ChatRequest
 
 
 class StubOrchestrator:
     """Deterministic orchestrator stub for endpoint schema tests."""
 
     def orchestrate(self, request: ChatRequest, context) -> AgentResponse:  # noqa: ANN001
+        action_plan = ActionPlan(
+            summary="Synthesis completed.",
+            actions=["Apply the recommended edits."],
+            priority="MEDIUM",
+            no_change=False,
+        )
         if request.intent == "RESUME_CRITIC":
             return AgentResponse(
-                agent_name="ResumeCriticAgent",
-                content=json.dumps(
-                    {
-                        "score": 88,
-                        "readability": "Clear and concise",
-                        "formattingRecommendations": [
-                            "Use consistent date format",
-                        ],
-                        "suggestions": [
-                            "Quantify outcomes in experience bullets",
-                        ],
-                    }
-                ),
+                agent_name="EditPlanAgent",
+                content=json.dumps(action_plan.model_dump()),
             )
         if request.intent == "CONTENT_STRENGTH":
             return AgentResponse(
-                agent_name="ContentStrengthAgent",
-                content=json.dumps(
-                    {
-                        "skills": [
-                            {
-                                "name": "Python",
-                                "category": "Technical",
-                                "confidenceScore": 0.91,
-                                "evidenceStrength": "HIGH",
-                                "evidence": "Built backend services with Python",
-                            }
-                        ],
-                        "achievements": [
-                            {
-                                "description": "Reduced API latency",
-                                "impact": "HIGH",
-                                "quantifiable": True,
-                                "confidenceScore": 0.89,
-                                "originalText": "Reduced API latency by 30%",
-                            }
-                        ],
-                        "suggestions": [
-                            {
-                                "original": "Improved performance",
-                                "suggested": "Reduced API latency by 30%",
-                                "rationale": "Adds measurable impact",
-                                "faithful": True,
-                                "confidenceScore": 0.84,
-                            }
-                        ],
-                        "hallucinationRisk": 0.15,
-                        "summary": "Strong evidence-backed profile.",
-                    }
-                ),
+                agent_name="EditPlanAgent",
+                content=json.dumps(action_plan.model_dump()),
             )
         if request.intent == "ALIGNMENT":
             return AgentResponse(
-                agent_name="JobAlignmentAgent",
-                content=json.dumps(
-                    {
-                        "skillsMatch": ["Python", "FastAPI"],
-                        "missingSkills": ["Kubernetes"],
-                        "experienceMatch": "Strong backend alignment",
-                        "fitScore": 82,
-                        "reasoning": "Good core skill overlap with one cloud gap.",
-                    }
-                ),
+                agent_name="EditPlanAgent",
+                content=json.dumps(action_plan.model_dump()),
             )
 
         return AgentResponse(
@@ -131,29 +86,27 @@ def test_agents_and_chat():
 
     assert resume_response.status_code == 200
     resume_payload = resume_response.json()["payload"]
-    assert {"score", "readability", "formattingRecommendations", "suggestions"} <= set(
-        resume_payload.keys()
-    )
+    assert {"summary", "actions", "priority", "no_change"} <= set(resume_payload.keys())
 
     assert content_response.status_code == 200
     content_payload = content_response.json()["payload"]
-    assert {
-        "skills",
-        "achievements",
-        "suggestions",
-        "hallucinationRisk",
-        "summary",
-    } <= set(content_payload.keys())
+    assert {"summary", "actions", "priority", "no_change"} <= set(content_payload.keys())
 
     assert alignment_response.status_code == 200
     alignment_payload = alignment_response.json()["payload"]
-    assert {
-        "skillsMatch",
-        "missingSkills",
-        "experienceMatch",
-        "fitScore",
-        "reasoning",
-    } <= set(alignment_payload.keys())
+    assert {"summary", "actions", "priority", "no_change"} <= set(alignment_payload.keys())
 
     assert interview_response.status_code == 200
     assert isinstance(interview_response.json()["payload"], str)
+
+
+def test_chat_rejects_invalid_intent():
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/chat",
+        params={"sessionId": "s-invalid"},
+        json=_chat_request_payload("UNKNOWN_INTENT"),
+    )
+
+    assert response.status_code == 422
