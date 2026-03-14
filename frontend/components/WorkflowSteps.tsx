@@ -37,9 +37,9 @@ export const CriticStep: React.FC<{ report: StructuralAssessment; onApprove: () 
     </div>
 
     <div className="space-y-3">
-      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Actionable Insights</h4>
+      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Formatting Recommendations</h4>
       <div className="space-y-2">
-        {report.formattingRecommendations.slice(0, 3).map((rec, i) => (
+        {report.formattingRecommendations.map((rec, i) => (
           <div key={i} className="flex items-start gap-3 p-3 bg-white border border-slate-200 rounded-lg text-xs text-slate-600 transition-colors hover:border-slate-300">
             <div className="mt-0.5 w-1.5 h-1.5 rounded-full bg-slate-400 flex-none"></div>
             {rec}
@@ -47,9 +47,23 @@ export const CriticStep: React.FC<{ report: StructuralAssessment; onApprove: () 
         ))}
       </div>
     </div>
+
+    {report.suggestions && report.suggestions.length > 0 && (
+      <div className="space-y-3">
+        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Content Suggestions</h4>
+        <div className="space-y-2">
+          {report.suggestions.map((suggestion, i) => (
+            <div key={i} className="flex items-start gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-slate-600 transition-colors hover:border-blue-300">
+              <div className="mt-0.5 w-1.5 h-1.5 rounded-full bg-blue-400 flex-none"></div>
+              {suggestion}
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
     
     <button onClick={onApprove} className="w-full bg-slate-900 text-white text-[13px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 active:scale-[0.98] transition-all">
-      Apply & Run Deep Analysis
+      Run Content Strength Analysis
     </button>
   </div>
 );

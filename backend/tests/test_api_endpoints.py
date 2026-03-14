@@ -8,33 +8,72 @@ os.environ["DEBUG"] = "false"
 os.environ.setdefault("GEMINI_API_KEY", "test-gemini-api-key")
 
 from app.main import app
-from app.models import ActionPlan, AgentResponse, ChatRequest
+from app.models import AgentResponse, ChatRequest
 
 
 class StubOrchestrator:
     """Deterministic orchestrator stub for endpoint schema tests."""
 
     def orchestrate(self, request: ChatRequest, context) -> AgentResponse:  # noqa: ANN001
-        action_plan = ActionPlan(
-            summary="Synthesis completed.",
-            actions=["Apply the recommended edits."],
-            priority="MEDIUM",
-            no_change=False,
-        )
         if request.intent == "RESUME_CRITIC":
+            payload = {
+                "score": 88,
+                "readability": "Clear and concise.",
+                "formattingRecommendations": ["Align dates consistently."],
+                "suggestions": ["Add more quantified impact."],
+            }
             return AgentResponse(
-                agent_name="EditPlanAgent",
-                content=json.dumps(action_plan.model_dump()),
+                agent_name="ResumeCriticAgent",
+                content=json.dumps(payload),
             )
         if request.intent == "CONTENT_STRENGTH":
+            payload = {
+                "skills": [
+                    {
+                        "name": "Python",
+                        "category": "Technical",
+                        "confidenceScore": 0.9,
+                        "evidenceStrength": "HIGH",
+                        "evidence": "Built ETL pipelines.",
+                    }
+                ],
+                "achievements": [
+                    {
+                        "description": "Reduced latency by 25%.",
+                        "impact": "HIGH",
+                        "quantifiable": True,
+                        "confidenceScore": 0.8,
+                        "originalText": "Improved performance.",
+                    }
+                ],
+                "suggestions": [
+                    {
+                        "original": "Worked on APIs",
+                        "suggested": "Designed REST APIs serving 10k rps",
+                        "rationale": "Adds scale and impact",
+                        "faithful": True,
+                        "confidenceScore": 0.7,
+                    }
+                ],
+                "hallucinationRisk": 0.1,
+                "summary": "Strong technical evidence.",
+            }
             return AgentResponse(
-                agent_name="EditPlanAgent",
-                content=json.dumps(action_plan.model_dump()),
+                agent_name="ContentStrengthAgent",
+                content=json.dumps(payload),
             )
         if request.intent == "ALIGNMENT":
+            payload = {
+                "skillsMatch": ["Python", "SQL"],
+                "missingSkills": ["Kubernetes"],
+                "experienceMatch": "Strong backend alignment.",
+                "fitScore": 82,
+                "reasoning": "Most core skills are present.",
+                "sources": [],
+            }
             return AgentResponse(
-                agent_name="EditPlanAgent",
-                content=json.dumps(action_plan.model_dump()),
+                agent_name="JobAlignmentAgent",
+                content=json.dumps(payload),
             )
 
         return AgentResponse(
@@ -86,15 +125,32 @@ def test_agents_and_chat():
 
     assert resume_response.status_code == 200
     resume_payload = resume_response.json()["payload"]
-    assert {"summary", "actions", "priority", "no_change"} <= set(resume_payload.keys())
+    assert {
+        "score",
+        "readability",
+        "formattingRecommendations",
+        "suggestions",
+    } <= set(resume_payload.keys())
 
     assert content_response.status_code == 200
     content_payload = content_response.json()["payload"]
-    assert {"summary", "actions", "priority", "no_change"} <= set(content_payload.keys())
+    assert {
+        "skills",
+        "achievements",
+        "suggestions",
+        "hallucinationRisk",
+        "summary",
+    } <= set(content_payload.keys())
 
     assert alignment_response.status_code == 200
     alignment_payload = alignment_response.json()["payload"]
-    assert {"summary", "actions", "priority", "no_change"} <= set(alignment_payload.keys())
+    assert {
+        "skillsMatch",
+        "missingSkills",
+        "experienceMatch",
+        "fitScore",
+        "reasoning",
+    } <= set(alignment_payload.keys())
 
     assert interview_response.status_code == 200
     assert isinstance(interview_response.json()["payload"], str)

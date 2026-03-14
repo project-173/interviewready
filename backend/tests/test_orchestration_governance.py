@@ -88,12 +88,11 @@ def test_orchestration_routes_resume_critic_intent() -> None:
     """Test that ResumeCritic intent routes to ResumeCriticAgent."""
     governance = SharpGovernanceService()
     resume_agent = StubAgent("ResumeCriticAgent")
-    edit_plan_agent = StubAgent("EditPlanAgent")
     content_agent = StubAgent("ContentStrengthAgent")
     job_agent = StubAgent("JobAlignmentAgent")
     interview_agent = StubAgent("InterviewCoachAgent")
     orchestrator = OrchestrationAgent(
-        [resume_agent, edit_plan_agent, content_agent, job_agent, interview_agent],
+        [resume_agent, content_agent, job_agent, interview_agent],
         governance=governance,
     )
 
@@ -106,22 +105,21 @@ def test_orchestration_routes_resume_critic_intent() -> None:
     )
     result = orchestrator.orchestrate(request, context)
 
-    assert result.agent_name == "EditPlanAgent"
-    assert len(context.history or []) == 2
+    assert result.agent_name == "ResumeCriticAgent"
+    assert len(context.history or []) == 1
     assert resume_agent.inputs
     assert not content_agent.inputs
-    assert context.decision_trace[-1].startswith("Orchestrator: Routed to EditPlanAgent")
+    assert context.decision_trace[-1].startswith("Orchestrator: Routed to ResumeCriticAgent")
 
 
 def test_orchestration_routes_alignment_intent() -> None:
     governance = SharpGovernanceService()
     resume_agent = StubAgent("ResumeCriticAgent")
-    edit_plan_agent = StubAgent("EditPlanAgent")
     content_agent = StubAgent("ContentStrengthAgent")
     job_agent = StubAgent("JobAlignmentAgent")
     interview_agent = StubAgent("InterviewCoachAgent")
     orchestrator = OrchestrationAgent(
-        [resume_agent, edit_plan_agent, content_agent, job_agent, interview_agent],
+        [resume_agent, content_agent, job_agent, interview_agent],
         governance=governance,
     )
 
@@ -134,8 +132,8 @@ def test_orchestration_routes_alignment_intent() -> None:
     )
     result = orchestrator.orchestrate(request, context)
 
-    assert result.agent_name == "EditPlanAgent"
-    assert len(context.history or []) == 2
+    assert result.agent_name == "JobAlignmentAgent"
+    assert len(context.history or []) == 1
     assert job_agent.inputs
     assert len(job_agent.inputs) == 1
     artifacts = (context.shared_memory or {}).get("artifacts")

@@ -199,21 +199,21 @@ class OrchestrationAgent:
     def _build_agent_input(self, intent: str, resume_data: dict, job_description: str, message_history: list) -> str:
         """Build input text for agents based on intent and available data."""
         if intent == "RESUME_CRITIC":
-            return f"Analyze this resume: {json.dumps(resume_data, indent=2)}"
+            return f"Resume data: {json.dumps(resume_data, indent=2)}"
         
         elif intent == "CONTENT_STRENGTH":
-            return f"Analyze the content strength and skills of this resume using STAR/XYZ methodology: {json.dumps(resume_data, indent=2)}"
+            return f"Resume data: {json.dumps(resume_data, indent=2)}"
         
         elif intent == "ALIGNMENT":
-            return f"Analyze the fit between this resume and the Job Description. Use Google Search to research the company or specific technology trends if necessary.\nResume: {json.dumps(resume_data, indent=2)}\nJD: {job_description}"
+            return f"Resume data: {json.dumps(resume_data, indent=2)}\nJob Description: {job_description}"
         
         elif intent == "INTERVIEW_COACH":
             history_str = json.dumps([{"role": msg.role, "text": msg.text} for msg in message_history], indent=2)
-            return f"You are a high-stakes Interview Coach. Based on this alignment data: {job_description}, conduct a realistic mock interview. Ask one targeted question at a time. History: {history_str}"
+            return f"Alignment data: {job_description}\nConversation history: {history_str}"
         
         else:
             # Fallback
-            return f"Process this request: {json.dumps(resume_data, indent=2)}"
+            return f"Request data: {json.dumps(resume_data, indent=2)}"
 
     def _normalize_resume(
         self, request: ChatRequest, context: SessionContext
@@ -442,9 +442,9 @@ class OrchestrationAgent:
     def _map_intent_to_agents(self, intent: str) -> list[str]:
         """Map intent directly to agent sequence."""
         intent_mapping = {
-            "RESUME_CRITIC": ["ResumeCriticAgent", "EditPlanAgent"],
-            "CONTENT_STRENGTH": ["ContentStrengthAgent", "EditPlanAgent"],
-            "ALIGNMENT": ["JobAlignmentAgent", "EditPlanAgent"],
+            "RESUME_CRITIC": ["ResumeCriticAgent"],
+            "CONTENT_STRENGTH": ["ContentStrengthAgent"],
+            "ALIGNMENT": ["JobAlignmentAgent"],
             "INTERVIEW_COACH": ["InterviewCoachAgent"]
         }
         
