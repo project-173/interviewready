@@ -4,7 +4,7 @@ Date: 2026-03-14
 Status: Draft (no code changes yet)
 
 ## Scope
-Address intent routing split-brain, add a minimal Normalize->Analyze->Synthesize pipeline, preserve current agents, and introduce structured artifacts and a bounded synthesizer step (EditPlanAgent). No tool integrations or ATS scoring in this phase.
+Address intent routing split-brain, add a minimal Normalize->Analyze pipeline, preserve current agents, and introduce structured artifacts. No tool integrations or ATS scoring in this phase.
 
 ## Assumptions
 - `ChatRequest.intent` is the source of truth for routing.
@@ -82,7 +82,7 @@ Tests:
 
 ### 4a) Store Structured Artifacts in OrchestrationState
 - Add `artifacts: list[AnalysisArtifact]` to state.
-- Store each agent’s structured result separately (no chained text blobs).
+- Store each agentâ€™s structured result separately (no chained text blobs).
 
 Files:
 - `backend/app/orchestration/orchestration_agent.py`
@@ -101,21 +101,7 @@ Files:
 Tests:
 - `backend/tests/test_orchestration_governance.py`
 
-### 5) Add EditPlanAgent (Synthesize Stage)
-- Create `EditPlanAgent` to merge artifacts into one `ActionPlan`.
-- Apply prioritization rules (e.g., alignment issues > structure issues if JD present).
-- If no issues, return a no-change ActionPlan.
-
-Files:
-- `backend/app/agents/edit_plan.py` (new)
-- `backend/app/agents/registry.py`
-- `backend/app/orchestration/orchestration_agent.py`
-- `backend/app/models/agent.py` (ActionPlan model)
-
-Tests:
-- Add tests to validate synthesis output and no-change outcome.
-
-### 6) Governance Hooks (Bounded)
+### 5) Governance Hooks (Bounded)
 - Keep governance audit per artifact.
 - Optionally add a single retry for parse failures with strict budget (if required).
 - Log governance outcomes into ActionPlan metadata.
@@ -145,6 +131,5 @@ Tests:
 
 ## Exit Criteria
 - Intent routing is deterministic and validated.
-- Normalize->Analyze->Synthesize pipeline runs end-to-end.
-- ActionPlan returned for both normal and no-change cases.
+- Normalize->Analyze pipeline runs end-to-end.
 - Governance metadata preserved.

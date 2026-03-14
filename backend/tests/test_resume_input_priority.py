@@ -60,9 +60,8 @@ def test_orchestrator_prefers_resume_data_over_resume_file() -> None:
     governance = SharpGovernanceService()
     extractor = StubExtractorAgent()
     resume_agent = StubAgent("ResumeCriticAgent")
-    edit_plan_agent = StubAgent("EditPlanAgent")
     orchestrator = OrchestrationAgent(
-        [extractor, resume_agent, edit_plan_agent],
+        [extractor, resume_agent],
         governance=governance,
     )
     context = SessionContext(session_id="s1", user_id="u1")
@@ -83,9 +82,8 @@ def test_orchestrator_uses_extractor_when_resume_data_missing() -> None:
     governance = SharpGovernanceService()
     extractor = StubExtractorAgent()
     resume_agent = StubAgent("ResumeCriticAgent")
-    edit_plan_agent = StubAgent("EditPlanAgent")
     orchestrator = OrchestrationAgent(
-        [extractor, resume_agent, edit_plan_agent],
+        [extractor, resume_agent],
         governance=governance,
     )
     context = SessionContext(session_id="s2", user_id="u2")
@@ -105,9 +103,8 @@ def test_orchestrator_uses_extractor_when_resume_data_is_empty() -> None:
     governance = SharpGovernanceService()
     extractor = StubExtractorAgent()
     resume_agent = StubAgent("ResumeCriticAgent")
-    edit_plan_agent = StubAgent("EditPlanAgent")
     orchestrator = OrchestrationAgent(
-        [extractor, resume_agent, edit_plan_agent],
+        [extractor, resume_agent],
         governance=governance,
     )
     context = SessionContext(session_id="s-empty", user_id="u-empty")
