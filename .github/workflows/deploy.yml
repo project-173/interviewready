@@ -71,7 +71,7 @@ jobs:
 
   build-frontend:
     name: Build Frontend
-    needs: build-backend
+    needs: deploy-backend
     runs-on: ubuntu-latest
     permissions:
       contents: read
