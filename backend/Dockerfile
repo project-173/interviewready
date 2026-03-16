@@ -11,7 +11,9 @@ ENV UV_COMPILE_BYTECODE=1
 COPY pyproject.toml uv.lock ./
 
 # Install dependencies
-RUN uv sync --frozen --no-install-project --no-dev
+# We remove --frozen to allow uv to update the environment based on pyproject.toml
+# if the lock file is out of sync.
+RUN uv sync --no-install-project --no-dev
 
 # Final stage
 FROM python:3.11-slim-bookworm
