@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     SERVER_PORT: int = 8080
     
     # Database
-    DATABASE_URL: str = "postgresql://user:password@localhost/interviewready"
+    DATABASE_URL: str = "sqlite:///./test.db"  # Use SQLite by default to ensure startup without Postgres
     
     # Google Cloud / Vertex AI Configuration
     GOOGLE_PROJECT_ID: str = "architecting-ai-systems-e71af"

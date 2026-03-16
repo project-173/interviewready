@@ -13,10 +13,24 @@ from app.api.v1 import api_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    # Initialize Firebase
-    init_firebase()
+    print(f"Starting {settings.APP_NAME} v{settings.VERSION}...")
+    
+    # Initialize Firebase with error handling to prevent startup crashes
+    try:
+        if settings.FIREBASE_ENABLED:
+            print("Initializing Firebase...")
+            init_firebase()
+            print("Firebase initialized successfully.")
+        else:
+            print("Firebase is disabled via configuration.")
+    except Exception as e:
+        print(f"CRITICAL ERROR during Firebase initialization: {e}")
+        # We don't re-raise here to allow the container to start and serve health checks
+        # even if Firebase fails, allowing us to debug via logs.
+    
+    print(f"{settings.APP_NAME} lifespan startup complete.")
     yield
-    # Cleanup can be added here
+    print(f"Shutting down {settings.APP_NAME}...")
 
 
 app = FastAPI(
