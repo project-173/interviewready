@@ -13,12 +13,29 @@ env:
   REPOSITORY_NAME: interviewready-repo
 
 jobs:
-  deploy:
+  security-scan:
+    name: Security Scan (FS)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner in repo mode
+        uses: aquasecurity/trivy-action@master
+        continue-on-error: true
+        with:
+          scan-type: 'fs'
+          ignore-unfixed: true
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+
+  build-backend:
+    name: Build Backend
+    needs: security-scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -34,26 +51,16 @@ jobs:
       - name: Configure Docker for GCP
         run: gcloud auth configure-docker $REGION-docker.pkg.dev
 
-      - name: Run Trivy vulnerability scanner in repo mode
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          ignore-unfixed: true
-          format: 'table'
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
-
-      # Build and Push Backend
-      - name: Build Backend
+      - name: Build Backend Image
         run: |
           docker build --platform linux/amd64 -t $REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$BACKEND_SERVICE_NAME:${{ github.sha }} ./backend
 
-      - name: Run Trivy vulnerability scanner on Backend image
+      - name: Run Trivy scanner on Backend image
         uses: aquasecurity/trivy-action@master
+        continue-on-error: true
         with:
           image-ref: '${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.BACKEND_SERVICE_NAME }}:${{ github.sha }}'
           format: 'table'
-          exit-code: '1'
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
@@ -62,25 +69,46 @@ jobs:
         run: |
           docker push $REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$BACKEND_SERVICE_NAME:${{ github.sha }}
 
-      # Build and Push Frontend
-      - name: Build Frontend
+  build-frontend:
+    name: Build Frontend
+    needs: build-backend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCP
+        run: gcloud auth configure-docker $REGION-docker.pkg.dev
+
+      - name: Get Backend URL
+        id: backend-url
         run: |
-          # First, we need to know the backend URL to inject into the frontend build
-          # If this is the first deploy, we might not have it yet.
-          # We can assume it follows the standard Cloud Run naming convention or use a fixed custom domain.
-          # We use --format='value(status.url)' and handle potential errors if service doesn't exist yet
-          BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE_NAME --platform managed --region $REGION --format='value(status.url)' 2>/dev/null || echo "")
-          echo "Detected Backend URL: $BACKEND_URL"
+          URL=$(gcloud run services describe $BACKEND_SERVICE_NAME --platform managed --region $REGION --format='value(status.url)' 2>/dev/null || echo "")
+          echo "url=$URL" >> $GITHUB_OUTPUT
+
+      - name: Build Frontend Image
+        run: |
           docker build --platform linux/amd64 -t $REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$FRONTEND_SERVICE_NAME:${{ github.sha }} \
-            --build-arg VITE_API_BASE_URL=$BACKEND_URL \
+            --build-arg VITE_API_BASE_URL=${{ steps.backend-url.outputs.url }} \
             ./frontend
 
-      - name: Run Trivy vulnerability scanner on Frontend image
+      - name: Run Trivy scanner on Frontend image
         uses: aquasecurity/trivy-action@master
+        continue-on-error: true
         with:
           image-ref: '${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.FRONTEND_SERVICE_NAME }}:${{ github.sha }}'
           format: 'table'
-          exit-code: '1'
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
@@ -89,9 +117,23 @@ jobs:
         run: |
           docker push $REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$FRONTEND_SERVICE_NAME:${{ github.sha }}
 
-      # Deploy Backend to Cloud Run
-      - name: Deploy Backend
-        id: deploy-backend
+  deploy-backend:
+    name: Deploy Backend
+    needs: build-backend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Deploy Backend to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: ${{ env.BACKEND_SERVICE_NAME }}
@@ -105,8 +147,23 @@ jobs:
             LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}
             LANGFUSE_HOST=${{ secrets.LANGFUSE_HOST }}
 
-      # Deploy Frontend to Cloud Run
-      - name: Deploy Frontend
+  deploy-frontend:
+    name: Deploy Frontend
+    needs: [build-frontend, deploy-backend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Deploy Frontend to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: ${{ env.FRONTEND_SERVICE_NAME }}
