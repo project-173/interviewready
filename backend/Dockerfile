@@ -27,6 +27,10 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Copy the application code
 COPY . .
 
+# Verify that all dependencies are installed, including Langfuse
+# This step will fail the build if a core dependency is missing
+RUN python -c "import langfuse; print('Langfuse version:', langfuse.__version__)"
+
 # Expose the port
 EXPOSE 8080
 
