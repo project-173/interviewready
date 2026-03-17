@@ -1,8 +1,10 @@
 """Application configuration settings."""
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
-from typing import List, Optional
+from typing import List, Optional, Union
 import os
+import json
 
 
 class Settings(BaseSettings):
@@ -46,7 +48,7 @@ class Settings(BaseSettings):
     AUTH_DISABLED_USER_ID: str = "dev-user"
     
     # CORS
-    ALLOWED_HOSTS: List[str] = [
+    ALLOWED_HOSTS: Union[str, List[str]] = [
         "http://localhost:3000", 
         "http://127.0.0.1:3000", 
         "http://localhost:5173", 
@@ -54,6 +56,18 @@ class Settings(BaseSettings):
         "https://interviewready-frontend-266623940622.asia-southeast1.run.app",
         "*" # In production Cloud Run, we can further restrict this to the actual frontend URL
     ]
+
+    @field_validator("ALLOWED_HOSTS", mode="before")
+    @classmethod
+    def assemble_allowed_hosts(cls, v: Union[str, List[str]]) -> List[str]:
+        if isinstance(v, str):
+            if v.strip().startswith("["):
+                try:
+                    return json.loads(v.replace("'", '"'))
+                except Exception:
+                    pass
+            return [i.strip() for i in v.split(",") if i.strip()]
+        return v
     
     # Logging & Monitoring
     LOG_LEVEL: str = "DEBUG"
