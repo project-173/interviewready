@@ -49,7 +49,11 @@ app = FastAPI(
 
 # Configure CORS
 # When allow_credentials=True, origins must be explicit (no wildcard)
-origins = [origin for origin in settings.ALLOWED_HOSTS if origin != "*"]
+origins = []
+if isinstance(settings.ALLOWED_HOSTS, list):
+    origins = [o for o in settings.ALLOWED_HOSTS if o != "*"]
+else:
+    origins = [settings.ALLOWED_HOSTS] if settings.ALLOWED_HOSTS != "*" else []
 
 # Ensure frontend is always in the list
 frontend_url = "https://interviewready-frontend-266623940622.asia-southeast1.run.app"
