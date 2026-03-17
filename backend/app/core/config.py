@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./test.db"  # Use SQLite by default to ensure startup without Postgres
     
     # Google Cloud / Vertex AI Configuration
-    GOOGLE_PROJECT_ID: str = "architecting-ai-systems-e71af"
+    GOOGLE_PROJECT_ID: str = "aaas-490414"
     GOOGLE_LOCATION: str = "asia-southeast1"
     GOOGLE_CREDENTIALS_URI: Optional[str] = None
     
