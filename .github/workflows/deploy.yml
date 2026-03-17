@@ -151,6 +151,7 @@ jobs:
             FRONTEND_URL=${{ steps.frontend-url.outputs.url }}
             BACKEND_URL=https://interviewready-backend-266623940622.asia-southeast1.run.app
             GOOGLE_AI_API_KEY=${{ secrets.GOOGLE_AI_API_KEY }}
+            GEMINI_API_KEY=${{ secrets.GOOGLE_AI_API_KEY }}
             LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}
             LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}
             LANGFUSE_HOST=${{ secrets.LANGFUSE_HOST }}
