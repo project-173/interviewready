@@ -142,7 +142,7 @@ const App: React.FC = () => {
         // Parse the structured JSON response from backend
         let responseData;
         try {
-          responseData = JSON.parse(response.content || '{}');
+          responseData = response.payload || JSON.parse(response.content || '{}');
         } catch (error) {
           console.error('Failed to parse backend response:', error);
           throw new Error('Invalid response from backend');
@@ -224,7 +224,7 @@ const App: React.FC = () => {
           // Parse the structured JSON response from backend
           let responseData;
           try {
-            responseData = JSON.parse(response.content || '{}');
+            responseData = response.payload || JSON.parse(response.content || '{}');
           } catch (error) {
             console.error('Failed to parse backend response:', error);
             throw new Error('Invalid response from backend');

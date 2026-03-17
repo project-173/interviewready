@@ -22,6 +22,8 @@ export interface ExtractorFileData {
 }
 
 interface ChatResponse {
+  agent?: string;
+  payload?: any;
   agent_name?: string;
   content?: string;
   reasoning?: string;
