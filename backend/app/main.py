@@ -49,16 +49,21 @@ app = FastAPI(
 
 # Configure CORS
 # When allow_credentials=True, origins must be explicit (no wildcard)
-# We filter out any wildcard from ALLOWED_HOSTS for compatibility
 origins = [origin for origin in settings.ALLOWED_HOSTS if origin != "*"]
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+cors_kwargs = {
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+    "allow_credentials": True,
+}
+
+if "*" in settings.ALLOWED_HOSTS:
+    # If wildcard is present, allow all origins via regex to support credentials
+    cors_kwargs["allow_origin_regex"] = ".*"
+else:
+    cors_kwargs["allow_origins"] = origins
+
+app.add_middleware(CORSMiddleware, **cors_kwargs)
 
 # Include API routes
 app.include_router(api_router, prefix="/api/v1")
