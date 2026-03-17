@@ -61,15 +61,12 @@ frontend_url = "https://interviewready-frontend-266623940622.asia-southeast1.run
 if frontend_url not in origins:
     origins.append(frontend_url)
 
-# Temporary permissive CORS for debugging Cloud Run issues
-# NOTE: allow_credentials=True cannot be used with allow_origins=["*"]
-# So we use a custom allow_origins logic that reflects the requested origin
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    allow_credentials=False, # Temporarily set to False to allow wildcard origins for debugging
 )
 
 # Middleware for logging requests (useful for Cloud Run debugging)
