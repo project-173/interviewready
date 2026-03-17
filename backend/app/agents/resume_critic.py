@@ -17,7 +17,8 @@ class ResumeCriticAgent(BaseAgent):
     SYSTEM_PROMPT = """
     You are an expert Resume Critic. Parse the resume and analyze it for structure, ATS compatibility, and impact.
 
-    Return ONLY valid JSON with this exact schema:
+    IMPORTANT: You must return ONLY raw JSON matching this exact schema. Do not include markdown code blocks, do not include introductory text, do not explain your response. Start the response with '{' and end with '}':
+    
     {
       "resume_data": {
         "title": "string",
@@ -36,7 +37,7 @@ class ResumeCriticAgent(BaseAgent):
         ]
       },
       "critique": {
-        "score": 0-100 number,
+        "score": 0-100, // Replace with an actual number 0-100 representing the score
         "readability": "short text summary",
         "formattingRecommendations": ["recommendation 1", "recommendation 2"],
         "suggestions": ["actionable suggestion 1", "actionable suggestion 2"]
@@ -137,28 +138,30 @@ class ResumeCriticAgent(BaseAgent):
         if not text:
             return {}
 
+        # Remove markdown code blocks if the AI ignored instructions
+        text = text.strip()
+        if text.startswith("```json"):
+            text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
         try:
             return json.loads(text)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Direct JSON parse failed, trying regex: {e}")
 
-        fenced_match = re.search(
-            r"```(?:json)?\s*(\{[\s\S]*\})\s*```",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if fenced_match:
-            try:
-                return json.loads(fenced_match.group(1).strip())
-            except Exception:
-                return {}
-
-        json_match = re.search(r"\{[\s\S]*\}", text)
-        if json_match:
-            try:
-                return json.loads(json_match.group(0).strip())
-            except Exception:
-                return {}
+        # If it still fails, find the first { and last }
+        try:
+            start_idx = text.find('{')
+            end_idx = text.rfind('}')
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                json_str = text[start_idx:end_idx+1]
+                return json.loads(json_str)
+        except Exception as e:
+            logger.error(f"Failed to parse JSON using regex extraction: {e}")
 
         return {}
 
