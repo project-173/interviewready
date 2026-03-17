@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     SECURITY_FILTER_ORDER: int = 5
     AUTH_ENABLED: bool = False
     AUTH_DISABLED_USER_ID: str = "dev-user"
+    GOOGLE_AI_API_KEY: Optional[str] = None # Added for compatibility with user's secret name
     
     # CORS
     ALLOWED_HOSTS: Union[str, List[str]] = [
@@ -90,5 +91,9 @@ class Settings(BaseSettings):
         case_sensitive = True
 
 
-# Create settings instance
-settings = Settings()
+    # Create settings instance
+    settings = Settings()
+
+    # Sync Gemini API key if GOOGLE_AI_API_KEY is provided
+    if not settings.GEMINI_API_KEY and settings.GOOGLE_AI_API_KEY:
+        settings.GEMINI_API_KEY = settings.GOOGLE_AI_API_KEY

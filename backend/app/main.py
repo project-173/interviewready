@@ -45,6 +45,7 @@ app = FastAPI(
     description="Production-Ready Multi-Agent AI Backend with Gemini and Firebase",
     version=settings.VERSION,
     lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 # Configure CORS
@@ -68,6 +69,16 @@ cors_kwargs = {
 }
 
 app.add_middleware(CORSMiddleware, **cors_kwargs)
+
+# Middleware for logging requests (useful for Cloud Run debugging)
+@app.middleware("http")
+async def log_requests(request, call_next):
+    import time
+    start_time = time.time()
+    response = await call_next(request)
+    duration = time.time() - start_time
+    print(f"DEBUG: {request.method} {request.url.path} status={response.status_code} duration={duration:.2f}s")
+    return response
 
 # Include API routes
 app.include_router(api_router, prefix="/api/v1")
