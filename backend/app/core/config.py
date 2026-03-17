@@ -91,9 +91,9 @@ class Settings(BaseSettings):
         case_sensitive = True
 
 
-    # Create settings instance
-    settings = Settings()
+# Create settings instance
+settings = Settings()
 
-    # Sync Gemini API key if GOOGLE_AI_API_KEY is provided
-    if not settings.GEMINI_API_KEY and settings.GOOGLE_AI_API_KEY:
-        settings.GEMINI_API_KEY = settings.GOOGLE_AI_API_KEY
+# Sync Gemini API key if GOOGLE_AI_API_KEY is provided
+if not settings.GEMINI_API_KEY and settings.GOOGLE_AI_API_KEY:
+    settings.GEMINI_API_KEY = settings.GOOGLE_AI_API_KEY
