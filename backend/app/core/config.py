@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     VERSION: str = "1.0.0"
     SERVER_PORT: int = 8080
+
+    # Deployment environment (helps to distinguish local dev vs cloud)
+    # Set via env var `APP_ENV` (e.g. local, staging, prod)
+    APP_ENV: str = "local"
     
     # Database
     DATABASE_URL: str = "sqlite:///./test.db"  # Use SQLite by default to ensure startup without Postgres
