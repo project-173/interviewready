@@ -39,7 +39,7 @@ export const CriticStep: React.FC<{ report: StructuralAssessment; onApprove: () 
     <div className="space-y-3">
       <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Actionable Insights</h4>
       <div className="space-y-2">
-        {report.formattingRecommendations.slice(0, 3).map((rec, i) => (
+        {(report.formattingRecommendations || []).slice(0, 3).map((rec, i) => (
           <div key={i} className="flex items-start gap-3 p-3 bg-white border border-slate-200 rounded-lg text-xs text-slate-600 transition-colors hover:border-slate-300">
             <div className="mt-0.5 w-1.5 h-1.5 rounded-full bg-slate-400 flex-none"></div>
             {rec}
@@ -79,7 +79,7 @@ export const ContentStep: React.FC<{ report: ContentAnalysisReport; onApprove: (
       <div className="p-6 bg-white border border-slate-200 rounded-2xl">
         <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Key Achievements</h4>
         <div className="space-y-3">
-          {report.achievements.slice(0, 3).map((ach, i) => (
+          {(report.achievements || []).slice(0, 3).map((ach, i) => (
             <div key={i} className="text-[11px] text-slate-600 border-l-2 border-slate-200 pl-3">
               <p className="font-medium text-slate-900">{ach.description}</p>
               <div className="flex gap-2 mt-1">
@@ -95,7 +95,7 @@ export const ContentStep: React.FC<{ report: ContentAnalysisReport; onApprove: (
     <div className="space-y-3">
        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Extracted Skills & Evidence</h4>
        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-         {report.skills.slice(0, 6).map((skill, i) => (
+         {(report.skills || []).slice(0, 6).map((skill, i) => (
            <div key={i} className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
              <div className="flex justify-between items-start mb-1">
                <span className="text-[11px] font-bold text-slate-900">{skill.name}</span>
@@ -110,7 +110,7 @@ export const ContentStep: React.FC<{ report: ContentAnalysisReport; onApprove: (
     <div className="space-y-3">
        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Phrasing Suggestions</h4>
        <div className="space-y-2">
-         {report.suggestions.slice(0, 2).map((sug, i) => (
+         {(report.suggestions || []).slice(0, 2).map((sug, i) => (
            <div key={i} className="p-4 bg-amber-50/30 border border-amber-100 rounded-xl">
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                <div>
@@ -179,7 +179,7 @@ export const AlignmentReportStep: React.FC<{ report: AlignmentReport; onStartInt
        <div className="p-3.5 bg-white border border-slate-200 rounded-xl">
           <p className="text-[9px] font-bold text-slate-400 uppercase mb-2 tracking-widest">Matched Skills</p>
           <div className="flex flex-wrap gap-1">
-            {report.skillsMatch.slice(0, 8).map((k, i) => (
+            {(report.skillsMatch || []).slice(0, 8).map((k, i) => (
               <span key={i} className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200 font-medium">{k}</span>
             ))}
           </div>
@@ -187,7 +187,7 @@ export const AlignmentReportStep: React.FC<{ report: AlignmentReport; onStartInt
        <div className="p-3.5 bg-white border border-slate-200 rounded-xl">
           <p className="text-[9px] font-bold text-slate-400 uppercase mb-2 tracking-widest">Missing Skills</p>
           <div className="flex flex-wrap gap-1">
-            {report.missingSkills.slice(0, 8).map((k, i) => (
+            {(report.missingSkills || []).slice(0, 8).map((k, i) => (
               <span key={i} className="text-[10px] bg-red-50 text-red-600 px-2 py-0.5 rounded border border-red-100 font-medium">{k}</span>
             ))}
           </div>

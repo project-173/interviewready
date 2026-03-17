@@ -77,6 +77,9 @@ class BackendService {
     const response = await this.callChatEndpoint(request);
     
     try {
+      if (response.payload && typeof response.payload === 'object') {
+        return response.payload;
+      }
       return JSON.parse(response.content || '{}');
     } catch (error) {
       console.error('Failed to parse resume critic response:', error);
@@ -95,6 +98,9 @@ class BackendService {
     const response = await this.callChatEndpoint(request);
     
     try {
+      if (response.payload && typeof response.payload === 'object') {
+        return response.payload;
+      }
       return JSON.parse(response.content || '{}');
     } catch (error) {
       console.error('Failed to parse content strength response:', error);
@@ -113,7 +119,10 @@ class BackendService {
     const response = await this.callChatEndpoint(request);
     
     try {
-      const data = JSON.parse(response.content || '{}');
+      let data = response.payload;
+      if (!data || typeof data !== 'object') {
+        data = JSON.parse(response.content || '{}');
+      }
       return {
         ...data,
         sources: data.sources || []
@@ -159,7 +168,7 @@ class BackendService {
     };
     
     const response = await this.callChatEndpoint(request);
-    return response.content || "I'm sorry, I couldn't generate a response.";
+    return (response.payload && typeof response.payload === 'string' ? response.payload : response.content) || "I'm sorry, I couldn't generate a response.";
   }
 }
 
