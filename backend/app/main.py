@@ -20,7 +20,7 @@ except ImportError:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    print(f"Starting {settings.APP_NAME} v{settings.VERSION}...")
+    print(f"Starting {settings.APP_NAME} v{settings.VERSION} (env={settings.APP_ENV})...")
     
     # Initialize Firebase with error handling to prevent startup crashes
     try:
@@ -109,7 +109,8 @@ async def app_info():
     return {
         "name": settings.APP_NAME,
         "version": settings.VERSION,
-        "debug": settings.DEBUG
+        "debug": settings.DEBUG,
+        "environment": settings.APP_ENV,
     }
 
 
