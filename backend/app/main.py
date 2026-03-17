@@ -51,17 +51,17 @@ app = FastAPI(
 # When allow_credentials=True, origins must be explicit (no wildcard)
 origins = [origin for origin in settings.ALLOWED_HOSTS if origin != "*"]
 
+# Ensure frontend is always in the list
+frontend_url = "https://interviewready-frontend-266623940622.asia-southeast1.run.app"
+if frontend_url not in origins:
+    origins.append(frontend_url)
+
 cors_kwargs = {
     "allow_methods": ["*"],
     "allow_headers": ["*"],
     "allow_credentials": True,
+    "allow_origins": origins,
 }
-
-if "*" in settings.ALLOWED_HOSTS:
-    # If wildcard is present, allow all origins via regex to support credentials
-    cors_kwargs["allow_origin_regex"] = ".*"
-else:
-    cors_kwargs["allow_origins"] = origins
 
 app.add_middleware(CORSMiddleware, **cors_kwargs)
 
