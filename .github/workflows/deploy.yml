@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - CICD
+      - langfuse
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
