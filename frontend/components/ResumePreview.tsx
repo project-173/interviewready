@@ -82,15 +82,15 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
 
         {activeTab === 'experience' && (
           <div className="space-y-10 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {resume.experience.map((exp, idx) => (
+            {(resume.experience || resume.experiences || []).map((exp: any, idx) => (
               <div key={idx} className="group">
                 <div className="flex justify-between items-baseline mb-3">
-                  <h4 className="text-base font-bold text-slate-900">{exp.role}</h4>
-                  <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-1 rounded border border-slate-200">{exp.duration}</span>
+                  <h4 className="text-base font-bold text-slate-900">{exp.role || exp.title || 'Unknown Role'}</h4>
+                  <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-1 rounded border border-slate-200">{exp.duration || (exp.start_date && exp.end_date ? `${exp.start_date} - ${exp.end_date}` : '')}</span>
                 </div>
-                <p className="text-xs font-semibold text-slate-500 mb-4">{exp.company}</p>
+                <p className="text-xs font-semibold text-slate-500 mb-4">{exp.company || 'Unknown Company'}</p>
                 <ul className="space-y-2.5">
-                  {exp.achievements.map((ach, aidx) => (
+                  {(exp.achievements || (exp.description ? exp.description.split('\n') : [])).map((ach: string, aidx: number) => (
                     <li key={aidx} className="text-[13px] text-slate-600 flex gap-3 leading-relaxed">
                       <span className="text-slate-300 font-bold shrink-0">•</span>
                       {ach}
@@ -104,12 +104,12 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
 
         {activeTab === 'education' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {resume.education.map((edu, idx) => (
+            {(resume.education || resume.educations || []).map((edu: any, idx) => (
               <div key={idx} className="p-6 bg-white border border-slate-200 rounded-xl hover:shadow-md transition-shadow">
-                <h4 className="font-bold text-slate-900 mb-1.5 text-sm">{edu.degree}</h4>
-                <p className="text-xs font-semibold text-slate-500 mb-4">{edu.institution}</p>
+                <h4 className="font-bold text-slate-900 mb-1.5 text-sm">{edu.degree || 'Unknown Degree'}</h4>
+                <p className="text-xs font-semibold text-slate-500 mb-4">{edu.institution || edu.school || 'Unknown Institution'}</p>
                 <div className="flex items-center gap-2">
-                   <div className="px-2 py-0.5 bg-slate-50 text-[10px] text-slate-400 border border-slate-100 rounded font-bold uppercase">{edu.year}</div>
+                   <div className="px-2 py-0.5 bg-slate-50 text-[10px] text-slate-400 border border-slate-100 rounded font-bold uppercase">{edu.year || (edu.start_date && edu.end_date ? `${edu.start_date} - ${edu.end_date}` : '')}</div>
                 </div>
               </div>
             ))}
@@ -118,9 +118,9 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
 
         {activeTab === 'skills' && (
           <div className="flex flex-wrap gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {resume.skills.map((skill, idx) => (
+            {(resume.skills || []).map((skill, idx) => (
               <span key={idx} className="bg-white border border-slate-200 text-slate-700 px-3.5 py-1.5 rounded-lg text-[11px] font-semibold hover:border-slate-400 transition-colors shadow-sm">
-                {skill}
+                {typeof skill === 'string' ? skill : (skill as any).name || ''}
               </span>
             ))}
           </div>

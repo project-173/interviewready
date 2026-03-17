@@ -166,8 +166,10 @@ const App: React.FC = () => {
             portfolio: ''
           },
           skills: resumeData.skills || [],
-          experiences: resumeData.experiences || [],
-          educations: resumeData.educations || [],
+          experience: resumeData.experiences || resumeData.experience || [],
+          education: resumeData.educations || resumeData.education || [],
+          experiences: resumeData.experiences || resumeData.experience || [],
+          educations: resumeData.educations || resumeData.education || [],
           projects: resumeData.projects || [],
           certifications: resumeData.certifications || [],
           awards: resumeData.awards || []
@@ -248,8 +250,10 @@ const App: React.FC = () => {
               portfolio: ''
             },
             skills: resumeData.skills || [],
-            experiences: resumeData.experiences || [],
-            educations: resumeData.educations || [],
+            experience: resumeData.experiences || resumeData.experience || [],
+            education: resumeData.educations || resumeData.education || [],
+            experiences: resumeData.experiences || resumeData.experience || [],
+            educations: resumeData.educations || resumeData.education || [],
             projects: resumeData.projects || [],
             certifications: resumeData.certifications || [],
             awards: resumeData.awards || []

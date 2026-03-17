@@ -15,14 +15,33 @@ class ResumeCriticAgent(BaseAgent):
     """Agent for analyzing resume structure, ATS compatibility, and impact."""
 
     SYSTEM_PROMPT = """
-    You are an expert Resume Critic. Analyze the resume for structure, ATS compatibility, and impact.
+    You are an expert Resume Critic. Parse the resume and analyze it for structure, ATS compatibility, and impact.
 
-    Return ONLY valid JSON with this exact schema:
+    IMPORTANT: You must return ONLY raw JSON matching this exact schema. Do not include markdown code blocks, do not include introductory text, do not explain your response. Start the response with '{' and end with '}':
+    
     {
-      "score": 0-100 number,
-      "readability": "short text summary",
-      "formattingRecommendations": ["recommendation 1", "recommendation 2"],
-      "suggestions": ["actionable suggestion 1", "actionable suggestion 2"]
+      "resume_data": {
+        "title": "string",
+        "summary": "string",
+        "contact": {
+          "fullName": "string",
+          "email": "string",
+          "phone": "string"
+        },
+        "skills": ["skill 1", "skill 2"],
+        "experiences": [
+          {"title": "role", "company": "company", "start_date": "date", "end_date": "date", "description": "achievements or description"}
+        ],
+        "educations": [
+          {"school": "institution", "degree": "degree", "start_date": "date", "end_date": "date"}
+        ]
+      },
+      "critique": {
+        "score": 0-100, // Replace with an actual number 0-100 representing the score
+        "readability": "short text summary",
+        "formattingRecommendations": ["recommendation 1", "recommendation 2"],
+        "suggestions": ["actionable suggestion 1", "actionable suggestion 2"]
+      }
     }
     """
     CONFIDENCE_SCORE = 0.9
@@ -119,28 +138,30 @@ class ResumeCriticAgent(BaseAgent):
         if not text:
             return {}
 
+        # Remove markdown code blocks if the AI ignored instructions
+        text = text.strip()
+        if text.startswith("```json"):
+            text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
         try:
             return json.loads(text)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Direct JSON parse failed, trying regex: {e}")
 
-        fenced_match = re.search(
-            r"```(?:json)?\s*(\{[\s\S]*\})\s*```",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if fenced_match:
-            try:
-                return json.loads(fenced_match.group(1).strip())
-            except Exception:
-                return {}
-
-        json_match = re.search(r"\{[\s\S]*\}", text)
-        if json_match:
-            try:
-                return json.loads(json_match.group(0).strip())
-            except Exception:
-                return {}
+        # If it still fails, find the first { and last }
+        try:
+            start_idx = text.find('{')
+            end_idx = text.rfind('}')
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                json_str = text[start_idx:end_idx+1]
+                return json.loads(json_str)
+        except Exception as e:
+            logger.error(f"Failed to parse JSON using regex extraction: {e}")
 
         return {}
 
@@ -151,25 +172,33 @@ class ResumeCriticAgent(BaseAgent):
             "Add measurable impact statements for key achievements.",
         ]
 
-        result = {
-            "score": self._as_float(parsed.get("score"), 70.0),
+        # Handle the case where the AI returns the flat critique vs nested critique
+        critique_data = parsed.get("critique", parsed)
+
+        critique = {
+            "score": self._as_float(critique_data.get("score"), 70.0),
             "readability": self._as_str(
-                parsed.get("readability"),
+                critique_data.get("readability"),
                 "Resume analyzed. Improve clarity and consistency for stronger ATS performance.",
             ),
             "formattingRecommendations": self._as_str_list(
-                parsed.get("formattingRecommendations")
+                critique_data.get("formattingRecommendations")
             ),
-            "suggestions": self._as_str_list(parsed.get("suggestions")),
+            "suggestions": self._as_str_list(critique_data.get("suggestions")),
         }
 
-        if not result["formattingRecommendations"]:
-            result["formattingRecommendations"] = fallback_suggestions
-        if not result["suggestions"]:
-            result["suggestions"] = fallback_suggestions
+        if not critique["formattingRecommendations"]:
+            critique["formattingRecommendations"] = fallback_suggestions
+        if not critique["suggestions"]:
+            critique["suggestions"] = fallback_suggestions
 
-        validated = StructuralAssessment.model_validate(result)
-        return validated.model_dump()
+        validated_critique = StructuralAssessment.model_validate(critique)
+        
+        # We need to return the combined structure expected by the frontend
+        return {
+            "resume_data": parsed.get("resume_data", {}),
+            "critique": validated_critique.model_dump()
+        }
 
     @staticmethod
     def _as_float(value: Any, fallback: float) -> float:
