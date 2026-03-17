@@ -51,6 +51,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000", 
         "http://localhost:5173", 
         "http://127.0.0.1:5173",
+        "https://interviewready-frontend-266623940622.asia-southeast1.run.app",
         "*" # In production Cloud Run, we can further restrict this to the actual frontend URL
     ]
     

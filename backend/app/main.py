@@ -48,9 +48,13 @@ app = FastAPI(
 )
 
 # Configure CORS
+# When allow_credentials=True, origins must be explicit (no wildcard)
+# We filter out any wildcard from ALLOWED_HOSTS for compatibility
+origins = [origin for origin in settings.ALLOWED_HOSTS if origin != "*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_HOSTS,
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
