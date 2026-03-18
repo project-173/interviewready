@@ -8,6 +8,7 @@ from typing import Any
 
 from app.agents.base import BaseAgent
 from app.core.logging import logger
+from app.core.security_constants import ANTI_JAILBREAK_DIRECTIVE
 from app.models import AgentResponse, Resume, ResumeDocument
 from app.models.session import SessionContext
 from app.utils.pdf_parser import parse_pdf_base64
@@ -18,7 +19,8 @@ from app.utils.validators import is_valid_url, is_full_url, is_valid_date
 class ExtractorAgent(BaseAgent):
     """LLM-powered resume extraction agent with structured output."""
 
-    SYSTEM_PROMPT = """You are an expert resume parser. Extract structured information from resume text and return it as JSON.
+    SYSTEM_PROMPT = (
+        """You are an expert resume parser. Extract structured information from resume text and return it as JSON.
 
     Instructions:
     1. Parse the resume text carefully - ONLY extract information that is explicitly stated in the text
@@ -144,6 +146,8 @@ class ExtractorAgent(BaseAgent):
             }
         ]
     }"""
+        + ANTI_JAILBREAK_DIRECTIVE
+    )
 
     def __init__(self, gemini_service: object):
         super().__init__(

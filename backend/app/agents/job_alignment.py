@@ -12,13 +12,17 @@ from ..models.session import SessionContext
 from ..utils.json_parser import parse_json_object
 
 
+from ..core.security_constants import ANTI_JAILBREAK_DIRECTIVE
+
+
 class JobAlignmentAgent(BaseAgent):
     """Agent for evaluating how well a resume matches a specific job description."""
 
     USE_MOCK_RESPONSE = False
     MOCK_RESPONSE_KEY = "JobAlignmentAgent"
 
-    SYSTEM_PROMPT = """
+    SYSTEM_PROMPT = (
+        """
         You are a Job Description Alignment Agent.
 
         Compare the candidate resume against the job description.
@@ -30,6 +34,8 @@ class JobAlignmentAgent(BaseAgent):
         - fitScore (0-100 integer)
         - reasoning (short explanation)
     """
+        + ANTI_JAILBREAK_DIRECTIVE
+    )
 
     def __init__(self, gemini_service):
         """Initialize Job Alignment Agent.
@@ -78,8 +84,12 @@ class JobAlignmentAgent(BaseAgent):
                 if isinstance(parsed.get("experienceMatch"), str)
                 else ""
             ),
-            "fitScore": int(parsed.get("fitScore", 50)) if str(parsed.get("fitScore", "")).strip() else 50,
-            "reasoning": parsed.get("reasoning") if isinstance(parsed.get("reasoning"), str) else "No reasoning provided.",
+            "fitScore": int(parsed.get("fitScore", 50))
+            if str(parsed.get("fitScore", "")).strip()
+            else 50,
+            "reasoning": parsed.get("reasoning")
+            if isinstance(parsed.get("reasoning"), str)
+            else "No reasoning provided.",
         }
         try:
             validated = AlignmentReport.model_validate(data)
@@ -109,10 +119,14 @@ class JobAlignmentAgent(BaseAgent):
         agent_name = self.get_name()
         processing_start_time = time.time()
 
-        logger.debug("JobAlignmentAgent processing started", 
-                    session_id=session_id, 
-                    input_length=len(input_text),
-                    input_preview=input_text[:100] + "..." if len(input_text) > 100 else input_text)
+        logger.debug(
+            "JobAlignmentAgent processing started",
+            session_id=session_id,
+            input_length=len(input_text),
+            input_preview=input_text[:100] + "..."
+            if len(input_text) > 100
+            else input_text,
+        )
 
         try:
             raw_output = None
@@ -127,7 +141,7 @@ class JobAlignmentAgent(BaseAgent):
 
             if raw_output is None:
                 raw_output = self.call_gemini(input_text, context)
-            
+
             # Validate that we got a meaningful response
             if not raw_output or not raw_output.strip():
                 raise ValueError("Empty response received from Gemini API")
@@ -141,11 +155,13 @@ class JobAlignmentAgent(BaseAgent):
             )
 
             parsed = self._parse_json(raw_output)
-            
+
             # Validate that parsing succeeded
             if not parsed:
-                raise ValueError(f"Failed to parse valid JSON from Gemini response: {raw_output[:200]}...")
-            
+                raise ValueError(
+                    f"Failed to parse valid JSON from Gemini response: {raw_output[:200]}..."
+                )
+
             normalized = self._normalize_alignment_output(parsed)
 
             logger.debug(
@@ -203,11 +219,15 @@ class JobAlignmentAgent(BaseAgent):
                 sharp_metadata=metadata,
             )
 
-            logger.debug("JobAlignmentAgent processing completed", 
-                        session_id=session_id, 
-                        processing_time_ms=round(processing_time * 1000, 2),
-                        result_length=len(raw_output),
-                        result_preview=raw_output[:100] + "..." if len(raw_output) > 100 else raw_output)
+            logger.debug(
+                "JobAlignmentAgent processing completed",
+                session_id=session_id,
+                processing_time_ms=round(processing_time * 1000, 2),
+                result_length=len(raw_output),
+                result_preview=raw_output[:100] + "..."
+                if len(raw_output) > 100
+                else raw_output,
+            )
 
             return response
 

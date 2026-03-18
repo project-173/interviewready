@@ -91,8 +91,14 @@ const App: React.FC = () => {
     setState(prev => ({ ...prev, status: targetStatus }));
   }, [state.currentResume, state.criticReport, state.contentReport, state.alignmentReport]);
 
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
+      if (file.size > MAX_FILE_SIZE) {
+        reject(new Error(`File size exceeds ${MAX_FILE_SIZE / (1024 * 1024)}MB limit`));
+        return;
+      }
       const reader = new FileReader();
       reader.readAsDataURL(file);
       reader.onload = () => resolve((reader.result as string).split(',')[1]);

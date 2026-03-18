@@ -7,13 +7,15 @@ from .resume import Resume
 
 class AgentResponse(BaseModel):
     """Agent response model with SHARP compliance data."""
-    
+
     agent_name: Optional[str] = None
     content: Optional[str] = None
     reasoning: Optional[str] = None  # Explainability
     confidence_score: Optional[float] = None  # Confidence Indicator
     decision_trace: Optional[List[str]] = Field(default_factory=list)  # Auditability
-    sharp_metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)  # SHARP Compliance Data
+    sharp_metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict
+    )  # SHARP Compliance Data
 
 
 class ChatApiResponse(BaseModel):
@@ -25,21 +27,21 @@ class ChatApiResponse(BaseModel):
 
 class InterviewMessage(BaseModel):
     """Interview coaching message."""
-    
-    role: Optional[str] = None
-    text: Optional[str] = None
+
+    role: Optional[str] = Field(default=None, max_length=50)
+    text: Optional[str] = Field(default=None, max_length=4000)
 
 
 class ResumeFile(BaseModel):
     """Uploaded resume file payload."""
 
-    data: str
+    data: str = Field(..., max_length=15000000)
     fileType: Literal["pdf"] = "pdf"
 
 
 class ChatRequest(BaseModel):
     """Chat request model with rich JSON structure."""
-    
+
     intent: Literal[
         "RESUME_CRITIC",
         "CONTENT_STRENGTH",
@@ -48,7 +50,7 @@ class ChatRequest(BaseModel):
     ]
     resumeData: Optional[Resume] = None
     resumeFile: Optional[ResumeFile] = None
-    jobDescription: Optional[str] = ""
+    jobDescription: Optional[str] = Field(default="", max_length=20000)
     messageHistory: Optional[List[InterviewMessage]] = Field(default_factory=list)
 
 
@@ -153,7 +155,7 @@ class StructuralAssessment(BaseModel):
 
 class WorkflowStatus(BaseModel):
     """Workflow execution status."""
-    
+
     session_id: Optional[str] = None
     current_agent: Optional[str] = None
     status: Optional[str] = None  # PENDING, IN_PROGRESS, COMPLETED, FAILED

@@ -20,6 +20,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pypdf>=6.9.1",
     "langfuse>=2.0.0",
+    "llm-guard>=0.3.0",
 ]
 requires-python = ">=3.11"
 readme = "README.md"
