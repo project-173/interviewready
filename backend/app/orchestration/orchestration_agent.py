@@ -373,10 +373,15 @@ class OrchestrationAgent:
 
     @staticmethod
     def _build_resume_document_from_resume(resume: Resume, source: str) -> ResumeDocument:
-        raw_text = resume.summary.strip() if isinstance(resume.summary, str) else ""
+        data = resume.model_dump(exclude_none=True)
+        raw_text = (
+            json.dumps(data, indent=2)
+            if OrchestrationAgent._has_resume_content(resume)
+            else ""
+        )
         warnings: list[str] = []
         if not raw_text:
-            warnings.append("resume.summary is empty; raw_text unavailable")
+            warnings.append("resume content is empty; raw_text unavailable")
         return ResumeDocument(
             source=source,
             raw_text=raw_text or None,

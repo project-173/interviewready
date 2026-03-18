@@ -44,12 +44,12 @@ export const extractorAgent = async (input: string | ExtractorFileData): Promise
 
   const data = JSON.parse(response.text || '{}');
   return {
+    work: data.work || [],
+    education: data.education || [],
+    awards: data.awards || [],
+    certificates: data.certificates || [],
     skills: data.skills || [],
-    experiences: data.experiences || [],
-    educations: data.educations || [],
-    projects: data.projects || [],
-    certifications: data.certifications || [],
-    awards: data.awards || []
+    projects: data.projects || []
   };
 };
 

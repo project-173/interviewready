@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from app.agents.extractor import ExtractorAgent
 from app.governance import SharpGovernanceService
-from app.models import AgentResponse, ChatRequest, Resume, ResumeFile, SessionContext
+from app.models import AgentResponse, ChatRequest, Resume, ResumeFile, SessionContext, Work
 from app.orchestration import OrchestrationAgent
 
 
@@ -48,7 +48,7 @@ class StubExtractorAgent(StubAgent):
         self.inputs.append(input_text)
         return AgentResponse(
             agent_name=self._name,
-            content=json.dumps({"summary": "Extracted from PDF"}),
+            content=json.dumps({"work": [{"name": "Extracted from PDF"}]}),
             reasoning="stub extract",
             confidence_score=1.0,
             decision_trace=[],
@@ -67,7 +67,7 @@ def test_orchestrator_prefers_resume_data_over_resume_file() -> None:
     context = SessionContext(session_id="s1", user_id="u1")
     request = ChatRequest(
         intent="RESUME_CRITIC",
-        resumeData=Resume(summary="Structured resume input"),
+        resumeData=Resume(work=[Work(name="Structured resume input")]),
         resumeFile=ResumeFile(data="ignored", fileType="pdf"),
     )
 
@@ -126,12 +126,15 @@ def test_extractor_agent_extracts_pdf_payload() -> None:
     context = SessionContext(session_id="s3", user_id="u3")
     payload = json.dumps({"data": "any-base64", "fileType": "pdf"})
 
-    with patch("app.agents.extractor.parse_pdf_base64", return_value="Jane Doe Resume Text"):
+    with patch("app.agents.extractor.parse_pdf_base64", return_value="Jane Doe Resume Text"), patch(
+        "app.agents.extractor.ExtractorAgent._extract_resume_with_llm",
+        return_value=Resume(work=[Work(name="Jane Doe Resume Text")]),
+    ):
         response = agent.process(payload, context)
 
     parsed = json.loads(response.content or "{}")
     assert response.agent_name == "ExtractorAgent"
-    assert parsed.get("summary") == "Jane Doe Resume Text"
+    assert parsed.get("work")[0].get("name") == "Jane Doe Resume Text"
 
 
 def test_normalization_failure_returns_action_plan() -> None:
