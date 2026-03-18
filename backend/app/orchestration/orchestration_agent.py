@@ -10,7 +10,6 @@ from langgraph.graph import END, StateGraph
 from langfuse import get_client, observe, propagate_attributes
 
 from app.agents.base import BaseAgentProtocol
-from app.agents.gemini_service import GeminiService
 from app.core.logging import logger
 from app.governance.sharp_governance_service import SharpGovernanceService
 from app.models.agent import (
@@ -26,6 +25,7 @@ from app.models.session import SessionContext
 from app.utils.json_parser import parse_json_object, parse_json_payload
 
 langfuse = get_client()
+
 
 class OrchestrationState(TypedDict):
     """Workflow state used by LangGraph orchestration."""
@@ -50,14 +50,13 @@ class OrchestrationAgent:
         self.agents = {agent.get_name(): agent for agent in agent_list}
         self.governance = governance
         self.workflow = self._build_workflow()
-        self.intent_gemini_service = None  # Could be initialized later if needed
 
     @observe(name="orchestration_execution")
     def orchestrate(self, request: ChatRequest, context: SessionContext) -> AgentResponse:
         """Run intent analysis and execute selected agent sequence."""
         start_time = time.time()
-        session_id = getattr(context, "session_id", "unknown")
-        user_id = getattr(context, "user_id", None)
+        session_id = getattr(context, 'session_id', 'unknown')
+        user_id = getattr(context, 'user_id', None)
 
         with propagate_attributes(session_id=session_id):
             langfuse.update_current_span(
@@ -67,6 +66,7 @@ class OrchestrationAgent:
                 }
             )
 
+            # Extract intent from request and build input text for agents
             intent = request.intent
             if intent not in {"RESUME_CRITIC", "CONTENT_STRENGTH", "ALIGNMENT", "INTERVIEW_COACH"}:
                 raise ValueError(f"Unsupported intent: {intent}")
@@ -84,27 +84,29 @@ class OrchestrationAgent:
 
             resume_model, _resume_document = normalization_result
             resume_data = (
-                resume_model.model_dump(exclude_none=True) if resume_model is not None else {}
+                resume_model.model_dump(exclude_none=True)
+                if resume_model is not None
+                else {}
             )
             job_description = request.jobDescription or ""
             message_history = request.messageHistory or []
 
+            # Build input text based on intent and available data
             input_text = self._build_agent_input(intent, resume_data, job_description, message_history)
-            original_input = request.intent or ""
 
+            # Log orchestration start
             logger.log_orchestration_start(input_text, session_id, user_id)
 
             try:
-                if self.intent_gemini_service and (not intent or intent == "GENERAL"):
-                    logger.debug("Using dynamic LLM intent analysis", session_id=session_id)
-                    agent_sequence = self._analyze_intent_with_llm(input_text, context)
-                else:
-                    agent_sequence = self._analyze_intent(original_input, context)
+                # Map intent to agent sequence directly
+                agent_sequence = self._map_intent_to_agents(intent)
 
                 langfuse.update_current_span(
                     output={"agent_sequence": agent_sequence}
                 )
-                logger.log_intent_analysis(input_text, agent_sequence, "hybrid_routing", session_id)
+
+                logger.log_state_transition("normalize_resume", "route_agents", session_id)
+                logger.log_intent_analysis(input_text, agent_sequence, "intent_direct", session_id)
 
                 state: OrchestrationState = {
                     "original_input": input_text,
@@ -113,6 +115,7 @@ class OrchestrationAgent:
                     "agent_sequence": agent_sequence,
                     "current_index": 0,
                     "current_response": None,
+                    "artifacts": [],
                 }
 
                 logger.log_state_transition(
@@ -141,7 +144,7 @@ class OrchestrationAgent:
         """Expose registered agent map."""
         return self.agents
 
-    def _build_workflow(self):
+    def _build_workflow(self):  # type: ignore[no-untyped-def]
         workflow = StateGraph(OrchestrationState)
         workflow.add_node("execute_agent", self._execute_agent_node)
         workflow.set_entry_point("execute_agent")
@@ -156,7 +159,7 @@ class OrchestrationAgent:
         agent_sequence = state["agent_sequence"]
         current_index = state["current_index"]
         context = state["context"]
-        session_id = getattr(context, "session_id", "unknown")
+        session_id = getattr(context, 'session_id', 'unknown')
 
         if current_index >= len(agent_sequence):
             logger.debug(
@@ -180,13 +183,11 @@ class OrchestrationAgent:
         current_input = state["current_input"]
         logger.log_agent_execution_start(agent_name, current_input, session_id, current_index)
 
-        response = None
         agent_start_time = time.time()
-        
-        # Create explicit span context for this agent execution
+
         with langfuse.start_as_current_observation(
-            as_type="span", 
-            name=f"execute_{agent_name}"
+            as_type="span",
+            name=f"execute_{agent_name}",
         ):
             with propagate_attributes(session_id=session_id):
                 langfuse.update_current_span(
@@ -222,11 +223,6 @@ class OrchestrationAgent:
         response.decision_trace = trace
 
         audited_response = self.governance.audit(response, current_input)
-
-        if hasattr(audited_response, "scores") and audited_response.scores:
-            logger.debug("Attaching SHAP scores to decision trace", session_id=session_id)
-            trace.append(f"SHAP Analysis: {json.dumps(audited_response.scores)}")
-
         context.add_to_history(audited_response)
         context.decision_trace = trace
 
@@ -250,6 +246,157 @@ class OrchestrationAgent:
             "current_response": audited_response,
             "artifacts": artifacts,
         }
+
+    @staticmethod
+    def _route_next_step(state: OrchestrationState) -> str:
+        if state["current_index"] >= len(state["agent_sequence"]):
+            return "end"
+        return "continue"
+
+    def _build_agent_input(self, intent: str, resume_data: dict, job_description: str, message_history: list) -> str:
+        """Build input text for agents based on intent and available data."""
+        if intent == "RESUME_CRITIC":
+            return f"Resume data: {json.dumps(resume_data, indent=2)}"
+
+        elif intent == "CONTENT_STRENGTH":
+            return f"Resume data: {json.dumps(resume_data, indent=2)}"
+
+        elif intent == "ALIGNMENT":
+            return f"Resume data: {json.dumps(resume_data, indent=2)}\nJob Description: {job_description}"
+
+        elif intent == "INTERVIEW_COACH":
+            history_str = json.dumps(
+                [{"role": msg.role, "text": msg.text} for msg in message_history], indent=2
+            )
+            return f"Alignment data: {job_description}\nConversation history: {history_str}"
+
+        else:
+            return f"Request data: {json.dumps(resume_data, indent=2)}"
+
+    def _normalize_resume(
+        self, request: ChatRequest, context: SessionContext
+    ) -> tuple[Resume, ResumeDocument] | NormalizationFailure:
+        """Normalize resume inputs into a Resume + ResumeDocument pair."""
+        session_id = getattr(context, "session_id", "unknown")
+
+        if request.resumeData is not None:
+            if self._has_resume_content(request.resumeData):
+                logger.debug(
+                    "Orchestrator using resumeData payload",
+                    session_id=session_id,
+                    source="resumeData",
+                )
+                self._store_resume_in_context(request.resumeData, context)
+                resume_document = self._build_resume_document_from_resume(
+                    request.resumeData,
+                    source="resumeData",
+                )
+                self._store_resume_document_in_context(resume_document, context)
+                return request.resumeData, resume_document
+            logger.debug(
+                "resumeData payload is empty, checking resumeFile fallback",
+                session_id=session_id,
+                source="resumeData",
+            )
+
+        if request.resumeFile is not None:
+            logger.debug(
+                "Orchestrator invoking ExtractorAgent for resumeFile",
+                session_id=session_id,
+                source="resumeFile",
+            )
+            try:
+                resume = self._extract_resume_from_file(
+                    request.resumeFile.model_dump(), context
+                )
+            except Exception as exc:
+                return NormalizationFailure(
+                    reason="Failed to normalize resume file.",
+                    recovery_steps="Upload a valid PDF resume and ensure it is not password protected.",
+                    details=str(exc),
+                )
+            self._store_resume_in_context(resume, context)
+            resume_document = self._resume_document_from_context(context)
+            if resume_document is None:
+                resume_document = self._build_resume_document_from_resume(
+                    resume, source="resumeFile"
+                )
+                self._store_resume_document_in_context(resume_document, context)
+            return resume, resume_document
+
+        memory_resume = self._resume_from_context(context)
+        if memory_resume is not None:
+            logger.debug(
+                "Orchestrator using resume from shared session memory",
+                session_id=session_id,
+                source="shared_memory",
+            )
+            resume_document = self._resume_document_from_context(context)
+            if resume_document is None:
+                resume_document = self._build_resume_document_from_resume(
+                    memory_resume, source="shared_memory"
+                )
+                self._store_resume_document_in_context(resume_document, context)
+            return memory_resume, resume_document
+
+        logger.debug("No resume input provided in request", session_id=session_id)
+        return NormalizationFailure(
+            reason="No resume provided for normalization.",
+            recovery_steps="Upload a PDF resume or provide resumeData in the request payload.",
+        )
+
+    def _extract_resume_from_file(
+        self, resume_file_payload: dict[str, Any], context: SessionContext
+    ) -> Resume:
+        extractor = self.agents.get("ExtractorAgent")
+        if extractor is None:
+            raise RuntimeError("ExtractorAgent is required when resumeFile is provided.")
+
+        response = extractor.process(json.dumps(resume_file_payload), context)
+        if response.sharp_metadata:
+            resume_document = response.sharp_metadata.get("resume_document")
+            if isinstance(resume_document, dict):
+                shared_memory = dict(context.shared_memory or {})
+                shared_memory["resume_document"] = resume_document
+                context.shared_memory = shared_memory
+        parsed = parse_json_object(response.content or "")
+        if not parsed:
+            raise ValueError("ExtractorAgent returned invalid JSON for resumeFile payload.")
+
+        resume = Resume.model_validate(parsed)
+        trace = list(context.decision_trace or [])
+        trace.append(
+            "Orchestrator: Used ExtractorAgent for resumeFile after missing resumeData."
+        )
+        context.decision_trace = trace
+        return resume
+
+    def _build_normalization_failure_response(
+        self, failure: NormalizationFailure, context: SessionContext
+    ) -> AgentResponse:
+        actions = [failure.recovery_steps] if failure.recovery_steps else []
+        action_plan = ActionPlan(
+            summary="Resume normalization failed.",
+            actions=actions,
+            priority="HIGH",
+            no_change=False,
+            metadata={
+                "stage": "normalize_resume",
+                "failure_reason": failure.reason,
+                "details": failure.details,
+            },
+        )
+        trace = list(context.decision_trace or [])
+        trace.append("Orchestrator: Normalization failed, returning recovery ActionPlan.")
+        context.decision_trace = trace
+        return AgentResponse(
+            agent_name="NormalizeStage",
+            content=json.dumps(action_plan.model_dump(exclude_none=True), indent=2),
+            reasoning=failure.reason,
+            confidence_score=0.0,
+            decision_trace=trace,
+            sharp_metadata={"normalization_failed": True},
+        )
 
     @staticmethod
     def _build_artifact(
@@ -361,182 +508,9 @@ class OrchestrationAgent:
             "RESUME_CRITIC": ["ResumeCriticAgent"],
             "CONTENT_STRENGTH": ["ContentStrengthAgent"],
             "ALIGNMENT": ["JobAlignmentAgent"],
-            "INTERVIEW_COACH": ["InterviewCoachAgent"]
+            "INTERVIEW_COACH": ["InterviewCoachAgent"],
         }
-        
+
         if intent not in intent_mapping:
             raise ValueError(f"Unsupported intent: {intent}")
         return intent_mapping[intent]
-
-    def _normalize_resume(
-        self, request: ChatRequest, context: SessionContext
-    ) -> tuple[Resume, ResumeDocument] | NormalizationFailure:
-        """Normalize resume inputs into a Resume + ResumeDocument pair."""
-        session_id = getattr(context, "session_id", "unknown")
-
-        if request.resumeData is not None:
-            if self._has_resume_content(request.resumeData):
-                logger.debug(
-                    "Orchestrator using resumeData payload",
-                    session_id=session_id,
-                    source="resumeData",
-                )
-                self._store_resume_in_context(request.resumeData, context)
-                resume_document = self._build_resume_document_from_resume(
-                    request.resumeData,
-                    source="resumeData",
-                )
-                self._store_resume_document_in_context(resume_document, context)
-                return request.resumeData, resume_document
-            logger.debug(
-                "resumeData payload is empty, checking resumeFile fallback",
-                session_id=session_id,
-                source="resumeData",
-            )
-
-        if request.resumeFile is not None:
-            logger.debug(
-                "Orchestrator invoking ExtractorAgent for resumeFile",
-                session_id=session_id,
-                source="resumeFile",
-            )
-            try:
-                resume = self._extract_resume_from_file(
-                    request.resumeFile.model_dump(), context
-                )
-            except Exception as exc:
-                return NormalizationFailure(
-                    reason="Failed to normalize resume file.",
-                    recovery_steps="Upload a valid PDF resume and ensure it is not password protected.",
-                    details=str(exc),
-                )
-            self._store_resume_in_context(resume, context)
-            resume_document = self._resume_document_from_context(context)
-            if resume_document is None:
-                resume_document = self._build_resume_document_from_resume(
-                    resume, source="resumeFile"
-                )
-                self._store_resume_document_in_context(resume_document, context)
-            return resume, resume_document
-
-        memory_resume = self._resume_from_context(context)
-        if memory_resume is not None:
-            logger.debug(
-                "Orchestrator using resume from shared session memory",
-                session_id=session_id,
-                source="shared_memory",
-            )
-            resume_document = self._resume_document_from_context(context)
-            if resume_document is None:
-                resume_document = self._build_resume_document_from_resume(
-                    memory_resume, source="shared_memory"
-                )
-                self._store_resume_document_in_context(resume_document, context)
-            return memory_resume, resume_document
-
-        logger.debug("No resume input provided in request", session_id=session_id)
-        return NormalizationFailure(
-            reason="No resume provided for normalization.",
-            recovery_steps="Upload a PDF resume or provide resumeData in the request payload.",
-        )
-
-    def _extract_resume_from_file(
-        self, resume_file_payload: dict[str, Any], context: SessionContext
-    ) -> Resume:
-        extractor = self.agents.get("ExtractorAgent")
-        if extractor is None:
-            raise RuntimeError("ExtractorAgent is required when resumeFile is provided.")
-
-        response = extractor.process(json.dumps(resume_file_payload), context)
-        if response.sharp_metadata:
-            resume_document = response.sharp_metadata.get("resume_document")
-            if isinstance(resume_document, dict):
-                shared_memory = dict(context.shared_memory or {})
-                shared_memory["resume_document"] = resume_document
-                context.shared_memory = shared_memory
-        parsed = parse_json_object(response.content or "")
-        if not parsed:
-            raise ValueError("ExtractorAgent returned invalid JSON for resumeFile payload.")
-
-        resume = Resume.model_validate(parsed)
-        trace = list(context.decision_trace or [])
-        trace.append(
-            "Orchestrator: Used ExtractorAgent for resumeFile after missing resumeData."
-        )
-        context.decision_trace = trace
-        return resume
-
-    def _build_agent_input(self, intent: str, resume_data: dict, job_description: str, message_history: list) -> str:
-        """Build input text for agent processing."""
-        parts = [f"Intent: {intent}"]
-        
-        if resume_data:
-            parts.append(f"Resume Data: {json.dumps(resume_data, indent=2)}")
-        
-        if job_description:
-            parts.append(f"Job Description: {job_description}")
-        
-        if message_history:
-            parts.append(f"Message History: {json.dumps(message_history, indent=2)}")
-        
-        return "\n\n".join(parts)
-
-    def _analyze_intent(self, intent: str, context: SessionContext) -> list[str]:
-        """Analyze intent using keyword-based routing."""
-        return self._map_intent_to_agents(intent)
-
-    def _analyze_intent_with_llm(self, input_text: str, context: SessionContext) -> list[str]:
-        """Analyze intent using LLM-based routing."""
-        # For now, fall back to keyword-based routing
-        # This could be enhanced with actual LLM intent analysis later
-        session_id = getattr(context, "session_id", "unknown")
-        logger.debug("LLM intent analysis not implemented, falling back to keyword routing", session_id=session_id)
-        
-        # Extract intent from input_text or default to RESUME_CRITIC
-        if "RESUME_CRITIC" in input_text:
-            return self._map_intent_to_agents("RESUME_CRITIC")
-        elif "CONTENT_STRENGTH" in input_text:
-            return self._map_intent_to_agents("CONTENT_STRENGTH")
-        elif "ALIGNMENT" in input_text:
-            return self._map_intent_to_agents("ALIGNMENT")
-        elif "INTERVIEW_COACH" in input_text:
-            return self._map_intent_to_agents("INTERVIEW_COACH")
-        else:
-            return self._map_intent_to_agents("RESUME_CRITIC")
-
-    def _build_normalization_failure_response(
-        self, failure: NormalizationFailure, context: SessionContext
-    ) -> AgentResponse:
-        actions = [failure.recovery_steps] if failure.recovery_steps else []
-        action_plan = ActionPlan(
-            summary="Resume normalization failed.",
-            actions=actions,
-            priority="HIGH",
-            no_change=False,
-            metadata={
-                "stage": "normalize_resume",
-                "failure_reason": failure.reason,
-                "details": failure.details,
-            },
-        )
-        trace = list(context.decision_trace or [])
-        trace.append("Orchestrator: Normalization failed, returning recovery ActionPlan.")
-        context.decision_trace = trace
-        return AgentResponse(
-            agent_name="NormalizeStage",
-            content=json.dumps(action_plan.model_dump(exclude_none=True), indent=2),
-            reasoning=failure.reason,
-            confidence_score=0.0,
-            decision_trace=trace,
-            sharp_metadata={"normalization_failed": True},
-        )
-
-    def _route_next_step(self, state: OrchestrationState) -> str:
-        """Route to next step in workflow."""
-        current_index = state["current_index"]
-        agent_sequence = state["agent_sequence"]
-        
-        if current_index >= len(agent_sequence):
-            return "end"
-        
-        return "continue"

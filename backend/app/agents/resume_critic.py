@@ -16,33 +16,14 @@ class ResumeCriticAgent(BaseAgent):
     MOCK_RESPONSE_KEY = "ResumeCriticAgent"
 
     SYSTEM_PROMPT = """
-    You are an expert Resume Critic. Parse the resume and analyze it for structure, ATS compatibility, and impact.
+    You are an expert Resume Critic. Analyze the resume for structure, ATS compatibility, and impact.
 
-    IMPORTANT: You must return ONLY raw JSON matching this exact schema. Do not include markdown code blocks, do not include introductory text, do not explain your response. Start the response with '{' and end with '}':
-    
+    Return ONLY valid JSON with this exact schema:
     {
-      "resume_data": {
-        "title": "string",
-        "summary": "string",
-        "contact": {
-          "fullName": "string",
-          "email": "string",
-          "phone": "string"
-        },
-        "skills": ["skill 1", "skill 2"],
-        "experiences": [
-          {"title": "role", "company": "company", "start_date": "date", "end_date": "date", "description": "achievements or description"}
-        ],
-        "educations": [
-          {"school": "institution", "degree": "degree", "start_date": "date", "end_date": "date"}
-        ]
-      },
-      "critique": {
-        "score": 0-100, // Replace with an actual number 0-100 representing the score
-        "readability": "short text summary",
-        "formattingRecommendations": ["recommendation 1", "recommendation 2"],
-        "suggestions": ["actionable suggestion 1", "actionable suggestion 2"]
-      }
+      "score": 0-100 number,
+      "readability": "short text summary",
+      "formattingRecommendations": ["recommendation 1", "recommendation 2"],
+      "suggestions": ["actionable suggestion 1", "actionable suggestion 2"]
     }
     """
     CONFIDENCE_SCORE = 0.9
