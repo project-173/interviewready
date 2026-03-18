@@ -17,6 +17,11 @@ dist-ssr
 build
 **/dist
 **/build
+target/
+**/target/
+*.jar
+*.war
+*.ear
 *.local
 
 # Environment variables
@@ -26,12 +31,21 @@ build
 .env.test.local
 .env.production.local
 **/.env
+*.json
+!package.json
+!tsconfig.json
+!metadata.json
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
+*.iml
+.classpath
+.project
+.settings/
 .DS_Store
+
 *.suo
 *.ntvs*
 *.njsproj
@@ -84,3 +98,10 @@ coverage
 # Temporary folders
 tmp/
 temp/
+
+# Python cache
+__pycache__
+.pyc
+
+# Roam code
+.roam/

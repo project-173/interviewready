@@ -47,10 +47,10 @@ The system functions as a **InterviewReady**, combining automation with optional
 **3.3 Human-in-the-Loop (HITL)**
 
 - Critical steps trigger pauses for user approval:
-- **Confirmation Gate:** before ResumeCriticAgent/JobDescriptionAlignmentAgent.
+- **Confirmation Gate:** before ResumeCriticAgent/JobAlignmentAgent.
 - **Structure Review:** after ResumeCriticAgent formatting recommendations.
-- **Content Review:** after ContentStrengthSkillsReasoningAgent analysis.
-- **Alignment Review:** after JobDescriptionAlignmentAgent matching results.
+- **Content Review:** after ContentStrengthAgent analysis.
+- **Alignment Review:** after JobAlignmentAgent matching results.
 - **Interview Practice:** after InterviewCoachFeedbackAgent scenarios.
 - HITL updates state: state\['status'\] = 'AWAITING_USER_APPROVAL'.
 - UI displays pending suggestions for review/approval.
