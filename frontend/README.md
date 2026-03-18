@@ -45,7 +45,7 @@ cp .env.example .env
 
 3. Update `.env` with your backend URL:
 ```
-VITE_APP_API_URL=http://localhost:8080
+VITE_API_BASE_URL=http://localhost:8080
 ```
 
 ### Running the Application
@@ -190,7 +190,7 @@ describe('Component/Service Name', () => {
 
 ## Environment Variables
 
-- `VITE_APP_API_URL`: Backend API URL (default: `http://localhost:8080`)
+- `VITE_API_BASE_URL`: Backend API URL (default: `http://localhost:8080`)
 
 ## Troubleshooting
 

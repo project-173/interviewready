@@ -4,12 +4,11 @@ import json
 import time
 from typing import Dict, Any
 from .base import BaseAgent
-from ..core.langfuse_client import trace_agent_process
 from ..core.logging import logger
 from ..models.agent import AgentResponse, ContentAnalysisReport
 from ..models.session import SessionContext
 from ..utils.json_parser import parse_json_object
-
+from langfuse import observe
 
 class ContentStrengthAgent(BaseAgent):
     """Agent for analyzing content strength, skills reasoning, and evidence evaluation."""
@@ -90,7 +89,7 @@ class ContentStrengthAgent(BaseAgent):
             name="ContentStrengthAgent"
         )
     
-    @trace_agent_process
+    @observe
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process resume text and analyze content strength.
         

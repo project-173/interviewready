@@ -10,7 +10,6 @@ from app.agents.extractor import ExtractorAgent
 from app.agents.interview_coach import InterviewCoachAgent
 from app.agents.job_alignment import JobAlignmentAgent
 from app.agents.resume_critic import ResumeCriticAgent
-from app.core.config import settings
 
 
 class AgentRegistry:

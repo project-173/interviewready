@@ -169,11 +169,6 @@ class BackendService {
       console.error('Failed to parse alignment response:', error);
       throw new Error('Invalid response from alignment agent');
     }
-    const data = payload as Record<string, any>;
-    return {
-      ...data,
-      sources: data.sources || []
-    } as AlignmentReport;
   }
 
   async interviewCoachAgent(

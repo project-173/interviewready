@@ -3,9 +3,9 @@
 import json
 import time
 from typing import List, Dict, Any
+from langfuse import observe
 
 from .base import BaseAgent
-from ..core.langfuse_client import trace_agent_process
 from ..core.logging import logger
 from ..models.agent import AgentResponse, AlignmentReport
 from ..models.session import SessionContext
@@ -94,7 +94,7 @@ class JobAlignmentAgent(BaseAgent):
             )
             return fallback.model_dump()
 
-    @trace_agent_process
+    @observe
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process resume and job description to evaluate alignment.
 

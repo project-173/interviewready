@@ -26,20 +26,7 @@ class Settings(BaseSettings):
     # Gemini Model Configuration
     GEMINI_MODEL: str = "gemini-2.5-flash"
     GEMINI_API_KEY: str
-
-    MOCK_GEMINI: str
-    LOG_MOCK_CALLS: str
-    
-    # Firebase Configuration
-    FIREBASE_ENABLED: bool = False
-    FIREBASE_CONFIG_PATH: str = "classpath:architecting-ai-systems-e71af-firebase-adminsdk-fbsvc-0033ba2601.json"
-    FIREBASE_PROJECT_ID: str
-    FIREBASE_PRIVATE_KEY_ID: str
-    FIREBASE_PRIVATE_KEY: str
-    FIREBASE_CLIENT_EMAIL: str
-    FIREBASE_CLIENT_ID: str
-    FIREBASE_AUTH_URI: str = "https://accounts.google.com/o/oauth2/auth"
-    FIREBASE_TOKEN_URI: str = "https://oauth2.googleapis.com/token"
+    GOOGLE_AI_API_KEY: Optional[str] = None
     
     # Security
     SECURITY_FILTER_ORDER: int = 5
@@ -58,6 +45,14 @@ class Settings(BaseSettings):
     
     # LangGraph
     LANGGRAPH_API_KEY: Optional[str] = None
+    
+    # Langfuse
+    LANGFUSE_PUBLIC_KEY: Optional[str] = None
+    LANGFUSE_SECRET_KEY: Optional[str] = None
+    LANGFUSE_HOST: Optional[str] = None
+    
+    # Environment
+    APP_ENV: str = "development"
     
     class Config:
         env_file = ".env"
