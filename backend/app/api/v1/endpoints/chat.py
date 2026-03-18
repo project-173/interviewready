@@ -32,21 +32,22 @@ async def chat_endpoint(
         or ""
     )
 
-    with langfuse.trace(
-        name="chat_api_request",
-        session_id=session_id,
-        metadata={
-            "user_id": user_id,
-            "endpoint": "/api/v1/chat",
-            "method": "POST",
-        },
-    ) as trace:
-        if not user_id:
-            trace.update(output={"error": "missing_user_id"})
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing user identity in authentication token",
-            )
+    with langfuse.propagate_attributes(session_id=session_id):
+        with langfuse.trace(
+            name="chat_api_request",
+            session_id=session_id,
+            metadata={
+                "user_id": user_id,
+                "endpoint": "/api/v1/chat",
+                "method": "POST",
+            },
+        ) as trace:
+            if not user_id:
+                trace.update(output={"error": "missing_user_id"})
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Missing user identity in authentication token",
+                )
 
         try:
             context = get_or_create_session_context(session_id=session_id, user_id=user_id)
