@@ -10,10 +10,10 @@ import {
   alignmentReportJsonSchema
 } from './types';
 
-const API_BASE_URL = import.meta.env.VITE_APP_API_URL;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 if (!API_BASE_URL) {
-  throw new Error("API_BASE_URL is not defined")
+  console.warn("VITE_API_BASE_URL is not defined, falling back to empty string for relative paths or development");
 }
 
 export interface ExtractorFileData {
@@ -23,7 +23,13 @@ export interface ExtractorFileData {
 
 interface ChatResponse {
   agent?: string;
-  payload?: Record<string, any> | any[] | string;
+  payload?: any;
+  agent_name?: string;
+  content?: string;
+  reasoning?: string;
+  confidence_score?: number;
+  decision_trace?: string[];
+  sharp_metadata?: Record<string, any>;
 }
 
 class BackendService {
@@ -100,9 +106,15 @@ class BackendService {
     };
     
     const response = await this.callChatEndpoint(request);
-    const payload = response.payload;
-    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-      return payload as StructuralAssessment;
+    
+    try {
+      if (response.payload && typeof response.payload === 'object') {
+        return response.payload;
+      }
+      return JSON.parse(response.content || '{}');
+    } catch (error) {
+      console.error('Failed to parse resume critic response:', error);
+      throw new Error('Invalid response from resume critic agent');
     }
     throw new Error('Invalid response from resume critic agent');
   }
@@ -116,9 +128,15 @@ class BackendService {
     if (this.hasResumeContent(resume)) request.resumeData = resume;
     
     const response = await this.callChatEndpoint(request);
-    const payload = response.payload;
-    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-      return payload as ContentAnalysisReport;
+    
+    try {
+      if (response.payload && typeof response.payload === 'object') {
+        return response.payload;
+      }
+      return JSON.parse(response.content || '{}');
+    } catch (error) {
+      console.error('Failed to parse content strength response:', error);
+      throw new Error('Invalid response from content strength agent');
     }
     throw new Error('Invalid response from content strength agent');
   }
@@ -132,8 +150,18 @@ class BackendService {
     if (this.hasResumeContent(resume)) request.resumeData = resume;
     
     const response = await this.callChatEndpoint(request);
-    const payload = response.payload;
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    
+    try {
+      let data = response.payload;
+      if (!data || typeof data !== 'object') {
+        data = JSON.parse(response.content || '{}');
+      }
+      return {
+        ...data,
+        sources: data.sources || []
+      };
+    } catch (error) {
+      console.error('Failed to parse alignment response:', error);
       throw new Error('Invalid response from alignment agent');
     }
     const data = payload as Record<string, any>;
@@ -178,9 +206,7 @@ class BackendService {
     };
     
     const response = await this.callChatEndpoint(request);
-    return typeof response.payload === 'string'
-      ? response.payload
-      : "I'm sorry, I couldn't generate a response.";
+    return (response.payload && typeof response.payload === 'string' ? response.payload : response.content) || "I'm sorry, I couldn't generate a response.";
   }
 }
 

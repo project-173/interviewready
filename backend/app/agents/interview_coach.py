@@ -4,7 +4,9 @@ import time
 from typing import Optional
 from .base import BaseAgent
 from .gemini_service import GeminiLiveService
-from ..core.config import settings
+from .mock_config import MockConfig
+from .mock_gemini_service import MockGeminiLiveService
+from ..core.langfuse_client import trace_agent_process
 from ..core.logging import logger
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
@@ -46,6 +48,7 @@ class InterviewCoachAgent(BaseAgent):
             else:
                 print("GEMINI_API_KEY not set; Gemini Live will not be used.")
     
+    @trace_agent_process
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process interview coaching request.
         

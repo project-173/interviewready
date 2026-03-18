@@ -4,6 +4,7 @@ import json
 import time
 from typing import Dict, Any
 from .base import BaseAgent
+from ..core.langfuse_client import trace_agent_process
 from ..core.logging import logger
 from ..models.agent import AgentResponse, ContentAnalysisReport
 from ..models.session import SessionContext
@@ -89,6 +90,7 @@ class ContentStrengthAgent(BaseAgent):
             name="ContentStrengthAgent"
         )
     
+    @trace_agent_process
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process resume text and analyze content strength.
         
