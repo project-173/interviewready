@@ -16,70 +16,64 @@ class StubOrchestrator:
 
     def orchestrate(self, request: ChatRequest, context) -> AgentResponse:  # noqa: ANN001
         if request.intent == "RESUME_CRITIC":
+            payload = {
+                "score": 88,
+                "readability": "Clear and concise.",
+                "formattingRecommendations": ["Align dates consistently."],
+                "suggestions": ["Add more quantified impact."],
+            }
             return AgentResponse(
                 agent_name="ResumeCriticAgent",
-                content=json.dumps(
-                    {
-                        "score": 88,
-                        "readability": "Clear and concise",
-                        "formattingRecommendations": [
-                            "Use consistent date format",
-                        ],
-                        "suggestions": [
-                            "Quantify outcomes in experience bullets",
-                        ],
-                    }
-                ),
+                content=json.dumps(payload),
             )
         if request.intent == "CONTENT_STRENGTH":
+            payload = {
+                "skills": [
+                    {
+                        "name": "Python",
+                        "category": "Technical",
+                        "confidenceScore": 0.9,
+                        "evidenceStrength": "HIGH",
+                        "evidence": "Built ETL pipelines.",
+                    }
+                ],
+                "achievements": [
+                    {
+                        "description": "Reduced latency by 25%.",
+                        "impact": "HIGH",
+                        "quantifiable": True,
+                        "confidenceScore": 0.8,
+                        "originalText": "Improved performance.",
+                    }
+                ],
+                "suggestions": [
+                    {
+                        "original": "Worked on APIs",
+                        "suggested": "Designed REST APIs serving 10k rps",
+                        "rationale": "Adds scale and impact",
+                        "faithful": True,
+                        "confidenceScore": 0.7,
+                    }
+                ],
+                "hallucinationRisk": 0.1,
+                "summary": "Strong technical evidence.",
+            }
             return AgentResponse(
                 agent_name="ContentStrengthAgent",
-                content=json.dumps(
-                    {
-                        "skills": [
-                            {
-                                "name": "Python",
-                                "category": "Technical",
-                                "confidenceScore": 0.91,
-                                "evidenceStrength": "HIGH",
-                                "evidence": "Built backend services with Python",
-                            }
-                        ],
-                        "achievements": [
-                            {
-                                "description": "Reduced API latency",
-                                "impact": "HIGH",
-                                "quantifiable": True,
-                                "confidenceScore": 0.89,
-                                "originalText": "Reduced API latency by 30%",
-                            }
-                        ],
-                        "suggestions": [
-                            {
-                                "original": "Improved performance",
-                                "suggested": "Reduced API latency by 30%",
-                                "rationale": "Adds measurable impact",
-                                "faithful": True,
-                                "confidenceScore": 0.84,
-                            }
-                        ],
-                        "hallucinationRisk": 0.15,
-                        "summary": "Strong evidence-backed profile.",
-                    }
-                ),
+                content=json.dumps(payload),
             )
         if request.intent == "ALIGNMENT":
+            payload = {
+                "skillsMatch": ["Python", "SQL"],
+                "missingSkills": ["Kubernetes"],
+                "experienceMatch": "Strong backend alignment.",
+                "fitScore": 82,
+                "reasoning": "Most core skills are present.",
+                "sources": [],
+            }
             return AgentResponse(
                 agent_name="JobAlignmentAgent",
-                content=json.dumps(
-                    {
-                        "skillsMatch": ["Python", "FastAPI"],
-                        "missingSkills": ["Kubernetes"],
-                        "experienceMatch": "Strong backend alignment",
-                        "fitScore": 82,
-                        "reasoning": "Good core skill overlap with one cloud gap.",
-                    }
-                ),
+                content=json.dumps(payload),
             )
 
         return AgentResponse(
@@ -131,9 +125,12 @@ def test_agents_and_chat():
 
     assert resume_response.status_code == 200
     resume_payload = resume_response.json()["payload"]
-    assert {"score", "readability", "formattingRecommendations", "suggestions"} <= set(
-        resume_payload.keys()
-    )
+    assert {
+        "score",
+        "readability",
+        "formattingRecommendations",
+        "suggestions",
+    } <= set(resume_payload.keys())
 
     assert content_response.status_code == 200
     content_payload = content_response.json()["payload"]
@@ -157,3 +154,15 @@ def test_agents_and_chat():
 
     assert interview_response.status_code == 200
     assert isinstance(interview_response.json()["payload"], str)
+
+
+def test_chat_rejects_invalid_intent():
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/chat",
+        params={"sessionId": "s-invalid"},
+        json=_chat_request_payload("UNKNOWN_INTENT"),
+    )
+
+    assert response.status_code == 422

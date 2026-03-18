@@ -84,8 +84,8 @@ def test_governance_content_strength_audit_flags_unfaithful() -> None:
     assert audited.sharp_metadata["has_quantified_achievements"] is True
 
 
-def test_orchestration_chains_agents_for_first_resume_review() -> None:
-    """Test that first-time resume review chains ResumeCriticAgent -> ContentStrengthAgent."""
+def test_orchestration_routes_resume_critic_intent() -> None:
+    """Test that ResumeCritic intent routes to ResumeCriticAgent."""
     governance = SharpGovernanceService()
     resume_agent = StubAgent("ResumeCriticAgent")
     content_agent = StubAgent("ContentStrengthAgent")
@@ -94,28 +94,25 @@ def test_orchestration_chains_agents_for_first_resume_review() -> None:
     orchestrator = OrchestrationAgent(
         [resume_agent, content_agent, job_agent, interview_agent],
         governance=governance,
-        intent_gemini_service=None,
     )
 
     context = SessionContext(session_id="s1", user_id="u1")
     request = ChatRequest(
-        intent="Please analyze and review my resume",
+        intent="RESUME_CRITIC",
         resumeData={},
         jobDescription="",
         messageHistory=[]
     )
     result = orchestrator.orchestrate(request, context)
 
-    # Both ResumeCriticAgent and ContentStrengthAgent should be called for first resume review
-    assert result.agent_name == "ContentStrengthAgent"
-    assert len(context.history or []) == 2
+    assert result.agent_name == "ResumeCriticAgent"
+    assert len(context.history or []) == 1
     assert resume_agent.inputs
-    assert content_agent.inputs
-    assert "Original request:" in content_agent.inputs[0]
-    assert context.decision_trace[-1].startswith("Orchestrator: Routed to ContentStrengthAgent")
+    assert not content_agent.inputs
+    assert context.decision_trace[-1].startswith("Orchestrator: Routed to ResumeCriticAgent")
 
 
-def test_orchestration_routes_job_alignment_keyword() -> None:
+def test_orchestration_routes_alignment_intent() -> None:
     governance = SharpGovernanceService()
     resume_agent = StubAgent("ResumeCriticAgent")
     content_agent = StubAgent("ContentStrengthAgent")
@@ -128,7 +125,7 @@ def test_orchestration_routes_job_alignment_keyword() -> None:
 
     context = SessionContext(session_id="s2", user_id="u2")
     request = ChatRequest(
-        intent="How does my profile match this job?",
+        intent="ALIGNMENT",
         resumeData={},
         jobDescription="",
         messageHistory=[]
@@ -139,3 +136,6 @@ def test_orchestration_routes_job_alignment_keyword() -> None:
     assert len(context.history or []) == 1
     assert job_agent.inputs
     assert len(job_agent.inputs) == 1
+    artifacts = (context.shared_memory or {}).get("artifacts")
+    assert isinstance(artifacts, list)
+    assert artifacts and artifacts[0].get("agent") == "JobAlignmentAgent"

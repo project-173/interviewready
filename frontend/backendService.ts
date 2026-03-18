@@ -45,7 +45,12 @@ class BackendService {
 
   private hasResumeContent(resume?: Resume | null): boolean {
     if (!resume) return false;
-    return Object.keys(resume).length > 0;
+    return Object.values(resume).some((value) => {
+      if (Array.isArray(value)) {
+        return value.length > 0;
+      }
+      return Boolean(value);
+    });
   }
 
   getSessionId(): string {
@@ -175,27 +180,13 @@ class BackendService {
     alignment: AlignmentReport, 
     history: { role: 'user' | 'agent'; text: string }[]
   ): Promise<string> {
-    // Create a minimal resume object for the interview coach
     const resume: Resume = {
-      title: '',
-      summary: '',
-      isMaster: false,
-      contact: {
-        fullName: '',
-        email: '',
-        phone: '',
-        city: '',
-        country: '',
-        linkedin: '',
-        github: '',
-        portfolio: ''
-      },
+      work: [],
+      education: [],
+      awards: [],
+      certificates: [],
       skills: [],
-      experiences: [],
-      educations: [],
-      projects: [],
-      certifications: [],
-      awards: []
+      projects: []
     };
 
     const request: ChatRequest = {

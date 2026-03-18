@@ -105,8 +105,7 @@ class ContentStrengthAgent(BaseAgent):
         agent_name = self.get_name()
         processing_start_time = time.time()
         
-        # Log processing start
-        logger.debug(f"ContentStrengthAgent processing started", 
+        logger.debug("ContentStrengthAgent processing started", 
                     session_id=session_id, 
                     input_length=len(input_text),
                     input_preview=input_text[:100] + "..." if len(input_text) > 100 else input_text)
@@ -124,15 +123,24 @@ class ContentStrengthAgent(BaseAgent):
 
             if raw_result is None:
                 raw_result = self.call_gemini(input_text, context)
+            
+            # Validate that we got a meaningful response
+            if not raw_result or not raw_result.strip():
+                raise ValueError("Empty response received from Gemini API")
+            
             processing_time = time.time() - processing_start_time
             
-            # Log Gemini API call completion
-            logger.debug(f"ContentStrengthAgent Gemini call completed", 
+            logger.debug("ContentStrengthAgent processing completed", 
                         session_id=session_id, 
                         processing_time_ms=round(processing_time * 1000, 2),
-                        raw_result_length=len(raw_result))
+                        result_length=len(raw_result),
+                        result_preview=raw_result[:100] + "..." if len(raw_result) > 100 else raw_result)
             
             parsed = parse_json_object(raw_result)
+
+            # Validate that parsing succeeded
+            if not parsed:
+                raise ValueError(f"Failed to parse valid JSON from Gemini response: {raw_result[:200]}...")
 
             if parsed:
                 logger.debug("ContentStrengthAgent JSON parsing successful",

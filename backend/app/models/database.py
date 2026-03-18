@@ -16,9 +16,6 @@ class ResumeModel(Base):
     __tablename__ = "resumes"
     
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    title = Column(String)
-    summary = Column(Text)
-    is_master = Column(Boolean, default=False)
     skills = Column(JSON)  # List[str]
     
     # Relationships

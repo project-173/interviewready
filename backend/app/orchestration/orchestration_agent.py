@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import json
-import re
 import time
-from typing import Any
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
 
@@ -15,10 +13,17 @@ from app.agents.gemini_service import GeminiService
 from app.core.langfuse_client import langfuse
 from app.core.logging import logger
 from app.governance.sharp_governance_service import SharpGovernanceService
-from app.models.agent import AgentResponse, ChatRequest
+from app.models.agent import (
+    ActionPlan,
+    AnalysisArtifact,
+    AgentResponse,
+    ChatRequest,
+    NormalizationFailure,
+    ResumeDocument,
+)
 from app.models.resume import Resume
 from app.models.session import SessionContext
-from app.utils.json_parser import parse_json_object
+from app.utils.json_parser import parse_json_object, parse_json_payload
 
 class OrchestrationState(TypedDict):
     """Workflow state used by LangGraph orchestration."""
@@ -29,45 +34,18 @@ class OrchestrationState(TypedDict):
     agent_sequence: list[str]
     current_index: int
     current_response: AgentResponse | None
+    artifacts: list[AnalysisArtifact]
 
 class OrchestrationAgent:
     """Routes user input to one or more specialist agents."""
-
-    INTENT_ANALYSIS_PROMPT = """
-You are an intent classifier for a multi-agent resume analysis system. Analyze the user's input and determine which agent(s) should handle it.
-
-Available agents:
-- ResumeCriticAgent: General resume analysis, structure, ATS compatibility, overall feedback
-- JobAlignmentAgent: Matching resume to specific job descriptions, gap analysis
-- InterviewCoachAgent: Interview preparation, mock interviews, behavioral questions
-- ContentStrengthAgent: Skill extraction, evidence evaluation, phrasing improvements, strength analysis
-
-Respond with ONLY a JSON array of agent names in execution order, e.g.: ["ResumeCriticAgent", "ContentStrengthAgent"]
-
-Rules:
-- For general resume questions, use ResumeCriticAgent
-- For skill/strength/achievement analysis, use ContentStrengthAgent
-- For job matching questions, use JobAlignmentAgent
-- For interview preparation, use InterviewCoachAgent
-- Multiple agents can be chained: ResumeCriticAgent can be followed by ContentStrengthAgent for detailed analysis
-- Consider conversation context when determining intent
-
-User input: %s
-
-Previous context: %s
-
-Respond with ONLY the JSON array, no other text.
-"""
 
     def __init__(
         self,
         agent_list: list[BaseAgentProtocol],
         governance: SharpGovernanceService,
-        intent_gemini_service: GeminiService | None = None,
     ) -> None:
         self.agents = {agent.get_name(): agent for agent in agent_list}
         self.governance = governance
-        self.intent_gemini_service = intent_gemini_service
         self.workflow = self._build_workflow()
 
     def orchestrate(self, request: ChatRequest, context: SessionContext) -> AgentResponse:
@@ -86,7 +64,19 @@ Respond with ONLY the JSON array, no other text.
         ) as trace:
             # Extract intent from request and build input text for agents
             intent = request.intent
-            resume_model = self._resolve_resume_data(request, context)
+            if intent not in {"RESUME_CRITIC", "CONTENT_STRENGTH", "ALIGNMENT", "INTERVIEW_COACH"}:
+                raise ValueError(f"Unsupported intent: {intent}")
+            logger.log_state_transition("orchestration_start", "normalize_resume", session_id, intent=intent)
+            normalization_result = self._normalize_resume(request, context)
+            if isinstance(normalization_result, NormalizationFailure):
+                logger.log_state_transition(
+                    "normalize_resume",
+                    "normalize_failed",
+                    session_id,
+                    reason=normalization_result.reason,
+                )
+                return self._build_normalization_failure_response(normalization_result, context)
+            resume_model, _resume_document = normalization_result
             resume_data = (
                 resume_model.model_dump(exclude_none=True)
                 if resume_model is not None
@@ -101,7 +91,7 @@ Respond with ONLY the JSON array, no other text.
             )
 
                     # For intent analysis, use the original request text, not the processed intent
-        original_input = request.intent or ""
+            original_input = request.intent or ""
 
             # Log orchestration start
             logger.log_orchestration_start(input_text, session_id, user_id)
@@ -229,15 +219,11 @@ Respond with ONLY the JSON array, no other text.
         
         logger.debug("Governance audit completed", session_id=session_id, agent_name=agent_name, governance_passed=True)
 
-        next_input = current_input
-        if current_index < len(agent_sequence) - 1:
-            next_input = self._build_chained_input(
-                state["original_input"],
-                audited_response,
-                agent_name,
-            )
-            logger.debug("Built chained input for next agent", session_id=session_id, next_agent_index=current_index + 1, chained_input_length=len(next_input))
+        artifacts = list(state.get("artifacts", []))
+        artifacts.append(self._build_artifact(audited_response, agent_name))
+        self._store_artifacts_in_context(artifacts, context)
 
+        next_input = current_input
         return {
             "original_input": state["original_input"],
             "current_input": next_input,
@@ -245,6 +231,7 @@ Respond with ONLY the JSON array, no other text.
             "agent_sequence": agent_sequence,
             "current_index": current_index + 1,
             "current_response": audited_response,
+            "artifacts": artifacts,
         }
 
     @staticmethod
@@ -253,176 +240,31 @@ Respond with ONLY the JSON array, no other text.
             return "end"
         return "continue"
 
-    def _analyze_intent(self, input_text: str, context: SessionContext) -> list[str]:
-        session_id = getattr(context, 'session_id', 'unknown')
-        
-        if not input_text or not input_text.strip():
-            logger.debug("Empty input detected, defaulting to ResumeCriticAgent", session_id=session_id)
-            return ["ResumeCriticAgent"]
-
-        lower_input = input_text.lower()
-        
-        # Log keyword-based intent analysis
-        logger.debug("Starting keyword-based intent analysis", session_id=session_id, input_length=len(input_text), input_text=input_text, lower_input=lower_input)
-
-        if any(
-            keyword in lower_input
-            for keyword in (
-                "skill",
-                "strength",
-                "phrasing",
-                "achievement",
-                "evidence",
-                "improve my resume",
-            )
-        ):
-            logger.debug("Intent matched: ContentStrengthAgent (keywords)", session_id=session_id, keywords_matched=["skill", "strength", "phrasing", "achievement", "evidence", "improve my resume"])
-            return ["ContentStrengthAgent"]
-
-        if any(
-            keyword in lower_input
-            for keyword in ("interview", "mock", "behavioral", "practice")
-        ):
-            logger.debug("Intent matched: InterviewCoachAgent (keywords)", session_id=session_id, keywords_matched=["interview", "mock", "behavioral", "practice"])
-            return ["InterviewCoachAgent"]
-
-        if any(keyword in lower_input for keyword in ("job", "alignment", "match", "gap")):
-            logger.debug("Intent matched: JobAlignmentAgent (keywords)", session_id=session_id, keywords_matched=["job", "alignment", "match", "gap"])
-            return ["JobAlignmentAgent"]
-
-        if any(
-            keyword in lower_input
-            for keyword in ("analyze", "critique", "review", "feedback")
-        ):
-            if not context.history:
-                logger.debug("Intent matched: ResumeCriticAgent -> ContentStrengthAgent (keywords, no history)", session_id=session_id, keywords_matched=["analyze", "critique", "review", "feedback"], has_history=False)
-                return ["ResumeCriticAgent", "ContentStrengthAgent"]
-            logger.debug("Intent matched: ResumeCriticAgent (keywords, has history)", session_id=session_id, keywords_matched=["analyze", "critique", "review", "feedback"], has_history=True, history_length=len(context.history))
-            return ["ResumeCriticAgent"]
-
-        logger.debug("No keyword matches, falling back to LLM intent analysis", session_id=session_id)
-        return self._analyze_intent_with_llm(input_text, context)
-
-    def _analyze_intent_with_llm(
-        self,
-        input_text: str,
-        context: SessionContext,
-    ) -> list[str]:
-        session_id = getattr(context, 'session_id', 'unknown')
-        
-        if self.intent_gemini_service is None:
-            logger.warning("No intent Gemini service available, defaulting to ResumeCriticAgent", session_id=session_id)
-            return ["ResumeCriticAgent"]
-
-        try:
-            context_summary = (
-                "No previous interactions"
-                if not context.history
-                else f"{len(context.history)} previous agent interactions"
-            )
-
-            prompt_text = self.INTENT_ANALYSIS_PROMPT % (input_text, context_summary)
-            
-            logger.log_api_call("gemini", "intent_analysis", session_id, prompt_length=len(prompt_text))
-            
-            llm_start_time = time.time()
-            response = self.intent_gemini_service.generate_response(
-                system_prompt=(
-                    "You are an intent classifier. Respond with ONLY a JSON array "
-                    "of agent names."
-                ),
-                user_input=prompt_text,
-                context=None,
-            )
-            llm_execution_time = time.time() - llm_start_time
-            
-            logger.debug("LLM intent analysis completed", session_id=session_id, execution_time_ms=round(llm_execution_time * 1000, 2), response_length=len(response))
-            
-            result = self._parse_agent_sequence(response)
-            logger.log_intent_analysis(input_text, result, "llm_based", session_id)
-            
-            return result
-            
-        except Exception as e:
-            logger.log_agent_error("IntentAnalysisLLM", e, session_id)
-            logger.warning("LLM intent analysis failed, defaulting to ResumeCriticAgent", session_id=session_id)
-            return ["ResumeCriticAgent"]
-
-    def _parse_agent_sequence(self, response: str) -> list[str]:
-        session_id = "unknown"  # We don't have session context here
-        
-        logger.debug("Parsing agent sequence from LLM response", session_id=session_id, raw_response=response[:200])
-        
-        cleaned_response = response.strip()
-        json_array_match = re.search(r"\[[\s\S]*\]", cleaned_response)
-        if json_array_match:
-            cleaned_response = json_array_match.group()
-            logger.debug("Found JSON array in response", session_id=session_id, extracted_json=cleaned_response)
-
-        try:
-            parsed = json.loads(cleaned_response)
-            if isinstance(parsed, list):
-                candidates = [str(item) for item in parsed]
-                logger.debug("Successfully parsed JSON array", session_id=session_id, parsed_agents=candidates)
-            else:
-                candidates = []
-                logger.warning("Parsed JSON was not a list", session_id=session_id, parsed_type=type(parsed).__name__)
-        except json.JSONDecodeError as e:
-            logger.warning("JSON decode failed, falling back to string parsing", session_id=session_id, error=str(e))
-            cleaned_response = cleaned_response.strip("[]")
-            candidates = [item.strip().strip("\"'") for item in cleaned_response.split(",")]
-            logger.debug("Parsed using string split method", session_id=session_id, split_candidates=candidates)
-
-        valid_agents = [
-            candidate for candidate in candidates if self._is_valid_agent(candidate)
-        ]
-        
-        if not valid_agents:
-            logger.warning("No valid agents found in parsed response, defaulting to ResumeCriticAgent", session_id=session_id, invalid_candidates=candidates, available_agents=list(self.agents.keys()))
-            return ["ResumeCriticAgent"]
-        
-        logger.debug("Valid agents identified", session_id=session_id, valid_agents=valid_agents)
-        return valid_agents
-
-    def _is_valid_agent(self, agent_name: str) -> bool:
-        return agent_name in self.agents
-
-    @staticmethod
-    def _build_chained_input(
-        original_input: str,
-        previous_response: AgentResponse,
-        previous_agent: str,
-    ) -> str:
-        prior_content = previous_response.content or ""
-        return (
-            f"Original request: {original_input}\n\n"
-            f"Previous analysis from {previous_agent}:\n"
-            f"{prior_content}\n\n"
-            "Continue analysis based on the above context."
-        )
-
     def _build_agent_input(self, intent: str, resume_data: dict, job_description: str, message_history: list) -> str:
         """Build input text for agents based on intent and available data."""
         if intent == "RESUME_CRITIC":
-            return f"Analyze this resume: {json.dumps(resume_data, indent=2)}"
+            return f"Resume data: {json.dumps(resume_data, indent=2)}"
         
         elif intent == "CONTENT_STRENGTH":
-            return f"Analyze the content strength and skills of this resume using STAR/XYZ methodology: {json.dumps(resume_data, indent=2)}"
+            return f"Resume data: {json.dumps(resume_data, indent=2)}"
         
         elif intent == "ALIGNMENT":
-            return f"Analyze the fit between this resume and the Job Description. Use Google Search to research the company or specific technology trends if necessary.\nResume: {json.dumps(resume_data, indent=2)}\nJD: {job_description}"
+            return f"Resume data: {json.dumps(resume_data, indent=2)}\nJob Description: {job_description}"
         
         elif intent == "INTERVIEW_COACH":
             history_str = json.dumps([{"role": msg.role, "text": msg.text} for msg in message_history], indent=2)
-            return f"You are a high-stakes Interview Coach. Based on this alignment data: {job_description}, conduct a realistic mock interview. Ask one targeted question at a time. History: {history_str}"
+            return f"Alignment data: {job_description}\nConversation history: {history_str}"
         
         else:
             # Fallback
-            return f"Process this request: {json.dumps(resume_data, indent=2)}"
+            return f"Request data: {json.dumps(resume_data, indent=2)}"
 
-    def _resolve_resume_data(self, request: ChatRequest, context: SessionContext) -> Resume | None:
-        """Resolve resume input with strict precedence: resumeData first, then resumeFile."""
+    def _normalize_resume(
+        self, request: ChatRequest, context: SessionContext
+    ) -> tuple[Resume, ResumeDocument] | NormalizationFailure:
+        """Normalize resume inputs into a Resume + ResumeDocument pair."""
         session_id = getattr(context, "session_id", "unknown")
+
         if request.resumeData is not None:
             if self._has_resume_content(request.resumeData):
                 logger.debug(
@@ -431,7 +273,12 @@ Respond with ONLY the JSON array, no other text.
                     source="resumeData",
                 )
                 self._store_resume_in_context(request.resumeData, context)
-                return request.resumeData
+                resume_document = self._build_resume_document_from_resume(
+                    request.resumeData,
+                    source="resumeData",
+                )
+                self._store_resume_document_in_context(resume_document, context)
+                return request.resumeData, resume_document
             logger.debug(
                 "resumeData payload is empty, checking resumeFile fallback",
                 session_id=session_id,
@@ -444,9 +291,24 @@ Respond with ONLY the JSON array, no other text.
                 session_id=session_id,
                 source="resumeFile",
             )
-            resume = self._extract_resume_from_file(request.resumeFile.model_dump(), context)
+            try:
+                resume = self._extract_resume_from_file(
+                    request.resumeFile.model_dump(), context
+                )
+            except Exception as exc:
+                return NormalizationFailure(
+                    reason="Failed to normalize resume file.",
+                    recovery_steps="Upload a valid PDF resume and ensure it is not password protected.",
+                    details=str(exc),
+                )
             self._store_resume_in_context(resume, context)
-            return resume
+            resume_document = self._resume_document_from_context(context)
+            if resume_document is None:
+                resume_document = self._build_resume_document_from_resume(
+                    resume, source="resumeFile"
+                )
+                self._store_resume_document_in_context(resume_document, context)
+            return resume, resume_document
 
         memory_resume = self._resume_from_context(context)
         if memory_resume is not None:
@@ -455,10 +317,19 @@ Respond with ONLY the JSON array, no other text.
                 session_id=session_id,
                 source="shared_memory",
             )
-            return memory_resume
+            resume_document = self._resume_document_from_context(context)
+            if resume_document is None:
+                resume_document = self._build_resume_document_from_resume(
+                    memory_resume, source="shared_memory"
+                )
+                self._store_resume_document_in_context(resume_document, context)
+            return memory_resume, resume_document
 
         logger.debug("No resume input provided in request", session_id=session_id)
-        return None
+        return NormalizationFailure(
+            reason="No resume provided for normalization.",
+            recovery_steps="Upload a PDF resume or provide resumeData in the request payload.",
+        )
 
     def _extract_resume_from_file(
         self, resume_file_payload: dict[str, Any], context: SessionContext
@@ -468,6 +339,12 @@ Respond with ONLY the JSON array, no other text.
             raise RuntimeError("ExtractorAgent is required when resumeFile is provided.")
 
         response = extractor.process(json.dumps(resume_file_payload), context)
+        if response.sharp_metadata:
+            resume_document = response.sharp_metadata.get("resume_document")
+            if isinstance(resume_document, dict):
+                shared_memory = dict(context.shared_memory or {})
+                shared_memory["resume_document"] = resume_document
+                context.shared_memory = shared_memory
         parsed = parse_json_object(response.content or "")
         if not parsed:
             raise ValueError("ExtractorAgent returned invalid JSON for resumeFile payload.")
@@ -479,6 +356,102 @@ Respond with ONLY the JSON array, no other text.
         )
         context.decision_trace = trace
         return resume
+
+    def _build_normalization_failure_response(
+        self, failure: NormalizationFailure, context: SessionContext
+    ) -> AgentResponse:
+        actions = [failure.recovery_steps] if failure.recovery_steps else []
+        action_plan = ActionPlan(
+            summary="Resume normalization failed.",
+            actions=actions,
+            priority="HIGH",
+            no_change=False,
+            metadata={
+                "stage": "normalize_resume",
+                "failure_reason": failure.reason,
+                "details": failure.details,
+            },
+        )
+        trace = list(context.decision_trace or [])
+        trace.append("Orchestrator: Normalization failed, returning recovery ActionPlan.")
+        context.decision_trace = trace
+        return AgentResponse(
+            agent_name="NormalizeStage",
+            content=json.dumps(action_plan.model_dump(exclude_none=True), indent=2),
+            reasoning=failure.reason,
+            confidence_score=0.0,
+            decision_trace=trace,
+            sharp_metadata={"normalization_failed": True},
+        )
+
+    @staticmethod
+    def _build_artifact(
+        response: AgentResponse, agent_name: str
+    ) -> AnalysisArtifact:
+        parsed = parse_json_payload(response.content or "", allow_array=True)
+        payload: dict[str, Any] | list[Any] | str
+        if parsed is None:
+            payload = response.content or ""
+        else:
+            payload = parsed
+        metadata = {}
+        if response.sharp_metadata:
+            metadata["governance"] = response.sharp_metadata
+        return AnalysisArtifact(
+            agent=agent_name,
+            artifact_type=agent_name,
+            payload=payload,
+            confidence_score=response.confidence_score,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _store_artifacts_in_context(
+        artifacts: list[AnalysisArtifact], context: SessionContext
+    ) -> None:
+        shared_memory = dict(context.shared_memory or {})
+        shared_memory["artifacts"] = [
+            artifact.model_dump(exclude_none=True) for artifact in artifacts
+        ]
+        context.shared_memory = shared_memory
+
+    @staticmethod
+    def _build_resume_document_from_resume(resume: Resume, source: str) -> ResumeDocument:
+        data = resume.model_dump(exclude_none=True)
+        raw_text = (
+            json.dumps(data, indent=2)
+            if OrchestrationAgent._has_resume_content(resume)
+            else ""
+        )
+        warnings: list[str] = []
+        if not raw_text:
+            warnings.append("resume content is empty; raw_text unavailable")
+        return ResumeDocument(
+            source=source,
+            raw_text=raw_text or None,
+            warnings=warnings,
+        )
+
+    @staticmethod
+    def _store_resume_document_in_context(
+        resume_document: ResumeDocument, context: SessionContext
+    ) -> None:
+        shared_memory = dict(context.shared_memory or {})
+        shared_memory["resume_document"] = resume_document.model_dump(exclude_none=True)
+        context.shared_memory = shared_memory
+
+    @staticmethod
+    def _resume_document_from_context(
+        context: SessionContext,
+    ) -> ResumeDocument | None:
+        memory = context.shared_memory or {}
+        raw_document = memory.get("resume_document")
+        if not isinstance(raw_document, dict) or not raw_document:
+            return None
+        try:
+            return ResumeDocument.model_validate(raw_document)
+        except Exception:
+            return None
 
     @staticmethod
     def _has_resume_content(resume: Resume) -> bool:
@@ -519,9 +492,11 @@ Respond with ONLY the JSON array, no other text.
         """Map intent directly to agent sequence."""
         intent_mapping = {
             "RESUME_CRITIC": ["ResumeCriticAgent"],
-            "CONTENT_STRENGTH": ["ContentStrengthAgent"], 
+            "CONTENT_STRENGTH": ["ContentStrengthAgent"],
             "ALIGNMENT": ["JobAlignmentAgent"],
             "INTERVIEW_COACH": ["InterviewCoachAgent"]
         }
         
-        return intent_mapping.get(intent, ["ResumeCriticAgent"])
+        if intent not in intent_mapping:
+            raise ValueError(f"Unsupported intent: {intent}")
+        return intent_mapping[intent]

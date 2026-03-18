@@ -10,10 +10,9 @@ from ..models.agent import AgentResponse, StructuralAssessment
 from ..models.session import SessionContext
 from ..utils.json_parser import parse_json_object
 
-
 class ResumeCriticAgent(BaseAgent):
     """Agent for analyzing resume structure, ATS compatibility, and impact."""
-    USE_MOCK_RESPONSE = True
+    USE_MOCK_RESPONSE = False
     MOCK_RESPONSE_KEY = "ResumeCriticAgent"
 
     SYSTEM_PROMPT = """
@@ -75,7 +74,6 @@ class ResumeCriticAgent(BaseAgent):
         agent_name = self.get_name()
         processing_start_time = time.time()
         
-        # Log processing start
         logger.debug("ResumeCriticAgent processing started", 
                     session_id=session_id, 
                     input_length=len(input_text),
@@ -94,24 +92,34 @@ class ResumeCriticAgent(BaseAgent):
 
             if raw_result is None:
                 raw_result = self.call_gemini(input_text, context)
+            
+            if not raw_result or not raw_result.strip():
+                raise ValueError("Empty response received from Gemini API")
+            
             parsed_result = parse_json_object(raw_result)
-            structured_result = self._normalize_structural_assessment(parsed_result)
+            
+            if not parsed_result:
+                raise ValueError(f"Failed to parse valid JSON from Gemini response: {raw_result[:200]}...")
+            
+            validated_result = StructuralAssessment.model_validate(parsed_result)
+            structured_result = validated_result.model_dump()
+            
+            if not structured_result.get("formattingRecommendations") and not structured_result.get("suggestions"):
+                raise ValueError("Gemini API returned empty recommendations and suggestions")
+            
             processing_time = time.time() - processing_start_time
             
-            # Log processing completion
             logger.debug("ResumeCriticAgent processing completed", 
                         session_id=session_id, 
                         processing_time_ms=round(processing_time * 1000, 2),
                         result_length=len(raw_result),
                         result_preview=raw_result[:100] + "..." if len(raw_result) > 100 else raw_result)
             
-            # Build decision trace for auditability
             decision_trace = [
                 "ResumeCriticAgent: Analyzed resume structure and content impact",
                 f"ResumeCriticAgent: Generated critique with confidence {self.CONFIDENCE_SCORE}"
             ]
             
-            # Create SHARP metadata
             sharp_metadata = {
                 "analysis_type": "resume_critique",
                 "confidence_score": self.CONFIDENCE_SCORE,
@@ -127,7 +135,6 @@ class ResumeCriticAgent(BaseAgent):
                 sharp_metadata=sharp_metadata
             )
             
-            # Log response creation
             logger.debug("ResumeCriticAgent response created", 
                         session_id=session_id, 
                         confidence_score=self.CONFIDENCE_SCORE,

@@ -281,13 +281,13 @@ const App: React.FC = () => {
               <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm w-64 max-h-[300px] overflow-y-auto">
                  <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-3">Recent Uploads</h4>
                  <div className="space-y-1.5">
-                   {state.history.map((h) => (
+                   {state.history.map((h, index) => (
                      <button 
-                       key={h.contact?.fullName ?? h.email}
+                       key={index}
                        onClick={() => setState(prev => ({ ...prev, currentResume: h, status: WorkflowStatus.CRITIQUING }))}
                        className="w-full p-2.5 rounded-lg text-left text-[11px] font-medium text-slate-600 hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-all truncate"
                      >
-                        {h.contact?.fullName || 'Untitled Resume'}
+                        Resume {index + 1}
                      </button>
                    ))}
                  </div>
