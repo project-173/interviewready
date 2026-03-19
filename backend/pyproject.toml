@@ -21,6 +21,8 @@ dependencies = [
     "pypdf>=6.9.1",
     "langfuse>=2.0.0",
     "llm-guard>=0.3.0",
+    "pip",
+    "en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
 ]
 requires-python = ">=3.11"
 readme = "README.md"
@@ -38,6 +40,9 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.black]
 line-length = 88
