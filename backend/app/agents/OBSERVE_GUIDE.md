@@ -11,7 +11,7 @@ The `@observe` decorator adds **semantic structure** to your Langfuse traces, ma
 
 ### 1. Import the decorator
 ```python
-from app.core.langfuse_client import observe
+from langfuse import observe
 ```
 
 ### 2. Decorate functions with observation types
@@ -49,7 +49,7 @@ def check_hallucinations(text):
 Before (using `@trace_agent_process`):
 ```python
 # app/agents/resume_critic.py
-from app.core.langfuse_client import trace_agent_process
+from langfuse import trace_agent_process
 
 class ResumeCriticAgent:
     @trace_agent_process
@@ -59,7 +59,7 @@ class ResumeCriticAgent:
 
 After (mixing both):
 ```python
-from app.core.langfuse_client import trace_agent_process, observe
+from langfuse import trace_agent_process, observe
 
 class ResumeCriticAgent:
     @trace_agent_process
@@ -87,7 +87,7 @@ trace: ResumeCriticAgent_process (session_id=abc)
 ### Example 2: Tools with @observe
 
 ```python
-from app.core.langfuse_client import observe
+from langfuse import observe
 from app.utils.pdf_parser import extract_text
 
 @observe(name="extract-resume-text", observation_type="tool")
@@ -131,7 +131,7 @@ trace: review_resume (session_id=abc)
 ### Example 3: Guardrails with @observe
 
 ```python
-from app.core.langfuse_client import observe
+from langfuse import observe
 
 @observe(name="validate-confidence", observation_type="guardrail")
 def check_confidence(decision: dict, threshold: float = 0.5) -> bool:
@@ -160,7 +160,7 @@ def validate_grounding(response: str, sources: list) -> bool:
 
 **Usage in API endpoint:**
 ```python
-from app.core.langfuse_client import observe
+from langfuse import observe
 
 @observe(name="chat-request", observation_type="agent")
 async def chat_endpoint(request, session_id):
@@ -189,7 +189,7 @@ trace: chat-request (session_id=abc, type=agent)
 ### Example 4: OpenAI Integration
 
 ```python
-from app.core.langfuse_client import observe
+from langfuse import observe
 from openai import OpenAI
 
 client = OpenAI()
@@ -240,7 +240,7 @@ Once observations are tagged with types, you can filter traces:
 
 ```python
 # app/api/v1/endpoints/chat.py
-from app.core.langfuse_client import observe, langfuse
+from langfuse import observe, langfuse
 
 @observe(name="chat-session", observation_type="agent")
 async def chat_endpoint(request, session_id):

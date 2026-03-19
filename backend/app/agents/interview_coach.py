@@ -4,7 +4,7 @@ import time
 from typing import Optional
 from .base import BaseAgent
 from .gemini_service import GeminiLiveService
-from ..core.langfuse_client import trace_agent_process, observe
+from langfuse import observe
 from ..core.logging import logger
 from ..core.config import settings
 from ..models.agent import AgentResponse
@@ -77,8 +77,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             else:
                 print("GEMINI_API_KEY not set; Gemini Live will not be used.")
     
-    @trace_agent_process
-    @observe(name="interview_coach_process", observation_type="agent")
+    @observe(name="interview_coach_process", as_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process interview coaching request.
 
@@ -279,7 +278,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             )
             raise
     
-    @observe(name="_call_gemini_live_audio", observation_type="tool") 
+    @observe(name="_call_gemini_live_audio", as_type="tool") 
     def _call_gemini_live_audio(
         self, audio_data: bytes, system_prompt: str
     ) -> Optional[str]:
