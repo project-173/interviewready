@@ -28,8 +28,8 @@ async def list_agents(
     with langfuse.trace(
         name="list_agents",
         session_id=session_id or user_id,
+        user_id=user_id,
         metadata={
-            "user_id": user_id,
             "endpoint": "/api/v1/agents",
             "method": "GET",
         },
@@ -37,7 +37,7 @@ async def list_agents(
         try:
             orchestrator = get_orchestration_agent()
         except Exception as exc:
-            trace.update(output={"error": "orchestrator_unavailable", "reason": str(exc)})
+            trace.update(session_id=session_id, output={"error": "orchestrator_unavailable", "reason": str(exc)})
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"Orchestration service unavailable: {exc}",
@@ -48,5 +48,5 @@ async def list_agents(
             for name, agent in orchestrator.get_agents().items()
         }
 
-        trace.update(output={"success": True, "agent_count": len(result)})
+        trace.update(session_id=session_id, output={"success": True, "agent_count": len(result)})
         return result

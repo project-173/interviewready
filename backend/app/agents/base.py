@@ -138,7 +138,9 @@ class BaseAgent(ABC, BaseAgentProtocol):
                     
                 except Exception as e:
                     api_execution_time = time.time() - api_start_time
-                    trace.update(output={"error": "exception", "message": str(e)})
+                    trace.update(
+                        session_id=session_id,
+                        output={"error": "exception", "message": str(e)})
                     logger.log_agent_error(agent_name, e, session_id)
                     logger.error("Gemini API call failed", 
                                 session_id=session_id, 

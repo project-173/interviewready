@@ -80,8 +80,8 @@ Respond with ONLY the JSON array, no other text.
         with langfuse.trace(
             name="orchestration_execution",
             session_id=session_id,
+            user_id=user_id,
             metadata={
-                "user_id": user_id,
                 "intent": request.intent,
             },
         ) as trace:
@@ -108,7 +108,7 @@ Respond with ONLY the JSON array, no other text.
                     # Map intent to agent sequence directly (legacy/explicit mode)
                     agent_sequence = self._map_intent_to_agents(intent)
 
-                trace.update(output={"agent_sequence": agent_sequence})
+                trace.update(session_id=session_id, output={"agent_sequence": agent_sequence})
                 logger.log_intent_analysis(input_text, agent_sequence, "hybrid_routing", session_id)
                 
                 state: OrchestrationState = {
@@ -130,11 +130,11 @@ Respond with ONLY the JSON array, no other text.
                 total_time = time.time() - start_time
                 logger.log_orchestration_complete(session_id, total_time, agent_sequence)
                 
-                trace.update(output={"success": True, "duration_s": total_time})
+                trace.update(session_id=session_id, output={"success": True, "duration_s": total_time})
                 return current_response
                 
             except Exception as e:
-                trace.update(output={"error": str(e)})
+                trace.update(session_id=session_id, output={"error": str(e)})
                 logger.log_agent_error("OrchestrationAgent", e, session_id)
                 raise
 

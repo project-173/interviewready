@@ -35,14 +35,14 @@ async def chat_endpoint(
     with langfuse.trace(
         name="chat_api_request",
         session_id=session_id,
+        user_id=user_id,
         metadata={
-            "user_id": user_id,
             "endpoint": "/api/v1/chat",
             "method": "POST",
         },
     ) as trace:
         if not user_id:
-            trace.update(output={"error": "missing_user_id"})
+            trace.update(session_id=session_id, output={"error": "missing_user_id"})
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Missing user identity in authentication token",
@@ -51,7 +51,7 @@ async def chat_endpoint(
     try:
         context = get_or_create_session_context(session_id=session_id, user_id=user_id)
     except PermissionError as exc:
-        trace.update(output={"error": "permission_denied", "reason": str(exc)})
+        trace.update(session_id=session_id, output={"error": "permission_denied", "reason": str(exc)})
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(exc),
@@ -60,7 +60,7 @@ async def chat_endpoint(
     try:
         orchestrator = get_orchestration_agent()
     except Exception as exc:
-        trace.update(output={"error": "orchestrator_unavailable", "reason": str(exc)})
+        trace.update(session_id=session_id, output={"error": "orchestrator_unavailable", "reason": str(exc)})
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Orchestration service unavailable: {exc}",
@@ -75,6 +75,7 @@ async def chat_endpoint(
             payload=_extract_api_payload(internal_response),
         )
         trace.update(
+            session_id=session_id, 
             output={
                 "success": True,
                 "agent": internal_response.agent_name,
@@ -83,7 +84,7 @@ async def chat_endpoint(
         )
         return result
     except Exception as exc:
-        trace.update(output={"error": "orchestration_failed", "reason": str(exc)})
+        trace.update(session_id=session_id, output={"error": "orchestration_failed", "reason": str(exc)})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process chat request: {exc}",

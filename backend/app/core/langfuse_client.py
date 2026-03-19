@@ -18,9 +18,16 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+from functools import wraps
 from typing import Any, Optional
 
 from app.core.config import settings
+
+# Import Langfuse early so it's available for the observe decorator
+try:
+    from langfuse import Langfuse  # type: ignore
+except ImportError:  # pragma: no cover
+    Langfuse = None  # type: ignore
 
 
 class _NoopSpan:
@@ -56,14 +63,14 @@ _default_metadata: ContextVar[dict] = ContextVar("_default_metadata", default={}
 
 
 class _SpanWrapper:
-    """Wrap a real Langfuse observation to provide a stable, minimal public API.
+    """Wrap a real LangfuseSpan to provide a stable, minimal public API.
 
-    The Langfuse Python client uses `start_as_current_observation()` which returns a
-    context manager yielding an observation object. That object exposes `update()` and
+    The Langfuse Python client uses `start_as_current_span()` which returns a
+    context manager yielding a `LangfuseSpan`. That span exposes `update()` and
     `score()`, but not the legacy `set_output()` helper used in our code.
 
     This wrapper provides `set_output()` and `update()` methods and delegates
-    all other attribute access to the underlying observation.
+    all other attribute access to the underlying span.
     """
 
     def __init__(self, span: Any):
@@ -83,11 +90,11 @@ class _SpanWrapper:
         return getattr(self._span, "end", lambda *a, **k: None)(*args, **kwargs)
 
     def span(self, *args: Any, **kwargs: Any) -> Any:
-        """Create a nested observation within the current trace."""
+        """Create a nested span within the current trace/span."""
 
         @contextmanager
         def _nested_span():
-            with self._span.start_as_current_observation(*args, **kwargs) as nested:
+            with self._span.start_as_current_span(*args, **kwargs) as nested:
                 yield _SpanWrapper(nested)
 
         return _nested_span()
@@ -147,9 +154,9 @@ class _LangfuseWrapper:
         end_on_exit: Optional[bool] = None,
         **extra_metadata: Any,
     ):
-        """Create a tracing observation that can be used as a context manager.
+        """Create a tracing span that can be used as a context manager.
 
-        This is a thin wrapper over langfuse.Langfuse.start_as_current_observation(),
+        This is a thin wrapper over langfuse.Langfuse.start_as_current_span(),
         providing a stable API that supports a `session_id` argument and
         automatically merges extra keyword args into the `metadata` map.
         """
@@ -172,17 +179,19 @@ class _LangfuseWrapper:
 
         if prompt is not None:
             # Langfuse's current Python SDK does not accept `prompt` as a
-            # native argument to start_as_current_observation(), so we store it in
+            # native argument to start_as_current_span(), so we store it in
             # metadata to keep it queryable.
             merged_metadata["prompt"] = prompt
 
-        with self._client.start_as_current_observation(
+        with self._client.start_as_current_span(
             name=name,
             metadata=merged_metadata,
             input=input,
             output=output,
             version=version,
             level=level,
+            status_message=status_message,
+            end_on_exit=end_on_exit,
         ) as span:
             yield _SpanWrapper(span)
 
@@ -217,57 +226,73 @@ def trace_agent_process(func):
     return wrapper
 
 
-def observe(name: str, observation_type: str = "agent"):
-    """Decorator to add semantic observation tracking (agent, tool, guardrail).
-    
-    Works with Langfuse's @observe decorator if available, otherwise uses traces.
-    Gracefully handles Langfuse versions that don't support observation_type parameter.
-    
+class _NoopLangfuse:
+    """No-op Langfuse wrapper used when SDK is unavailable or not configured."""
+
+    @staticmethod
+    def trace(*args: Any, **kwargs: Any) -> "_NoopContextManager":
+        return _NoopContextManager()
+
+    @staticmethod
+    def propagate_attributes(*args: Any, **kwargs: Any) -> "_NoopContextManager":
+        return _NoopContextManager()
+
+    @staticmethod
+    def create_prompt(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    @staticmethod
+    def get_prompt(*args: Any, **kwargs: Any) -> None:
+        return None
+
+
+class _NoopContextManager:
+    """Context manager that does nothing."""
+
+    def __enter__(self) -> "_NoopSpan":
+        return _NoopSpan()
+
+    def __exit__(self, *_: Any) -> None:
+        pass
+
+
+def observe(name: str, observation_type: str = "tool"):
+    """Decorator to track function execution in Langfuse.
+
+    Supports three fallback modes:
+    1. Try native Langfuse @observe decorator (if SDK supports observation_type param)
+    2. Fall back to wrapping with langfuse.trace()
+    3. No-op if Langfuse unavailable
+
     Args:
-        name: Name of the observation
-        observation_type: Type of observation ('agent', 'tool', 'guardrail', 'generation', etc.)
-    
-    Example:
-        @observe(name="medication-check", observation_type="tool")
-        def check_medication_interactions(medications: list):
-            return ...
+        name: Name of the observation (e.g., "parse-json")
+        observation_type: Type of observation ("agent", "tool", "guardrail", "generation")
     """
-    
+
     def decorator(func):
-        def wrapper(*args, **kwargs):
-            from app.core.langfuse_client import langfuse
-            
-            # Try to use Langfuse's native @observe if available
+        # Try native Langfuse decorator first (only if SDK is installed)
+        if Langfuse:
             try:
-                from langfuse import observe as langfuse_observe
-                
-                # Try with observation_type first (newer versions)
+                from langfuse.decorators import observe as langfuse_observe  # type: ignore
+                # Try with observation_type parameter (newer SDK versions)
                 try:
-                    observed_func = langfuse_observe(name=name, observation_type=observation_type)(func)
-                    return observed_func(*args, **kwargs)
+                    return langfuse_observe(name=name, observation_type=observation_type)(func)
                 except TypeError:
-                    # Fallback to older Langfuse version without observation_type
-                    observed_func = langfuse_observe(name=name)(func)
-                    return observed_func(*args, **kwargs)
-            except (ImportError, AttributeError, TypeError):
-                # Final fallback: use our trace wrapper with observation_type in metadata
-                with langfuse.trace(name=name, metadata={"observation_type": observation_type}) as trace:
-                    try:
-                        result = func(*args, **kwargs)
-                        trace.update(output={"status": "success"})
-                        return result
-                    except Exception as e:
-                        trace.update(output={"status": "error", "error": str(e)})
-                        raise
-        
+                    # Fall back to name-only (older SDK versions)
+                    return langfuse_observe(name=name)(func)
+            except (ImportError, AttributeError):
+                pass
+
+        # Fall back to trace wrapper
+        @wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            with langfuse.trace(name=name, metadata={"observation_type": observation_type}):
+                return func(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
-
-try:
-    from langfuse import Langfuse  # type: ignore
-except ImportError:  # pragma: no cover
-    Langfuse = None  # type: ignore
 
 
 if Langfuse and settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY:
