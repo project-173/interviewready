@@ -102,7 +102,7 @@ class Settings(BaseSettings):
 
     # Mock agent response
     MOCK_RESUME_CRITIC_AGENT: bool = True
-    MOCK_EXTRACTOR_AGENT: bool = False
+    MOCK_EXTRACTOR_AGENT: bool = True
     MOCK_CONTENT_STRENGTH_AGENT: bool = True
     MOCK_JOB_ALIGNMENT_AGENT: bool = True
     MOCK_INTERVIEW_COACH_AGENT: bool = True
