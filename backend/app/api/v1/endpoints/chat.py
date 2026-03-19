@@ -99,15 +99,27 @@ async def chat_endpoint(
 
 def _extract_api_payload(response: AgentResponse) -> dict[str, Any] | list[Any] | str:
     """Convert internal AgentResponse content into external API payload."""
-    content = (response.content or "").strip()
-    if not content:
+    content = response.content
+    
+    # Handle None content
+    if content is None:
+        return {}
+    
+    # If content is already a dict or list, return it directly
+    if isinstance(content, (dict, list)):
+        return content
+    
+    # Handle string content (legacy case or raw text from audio/live responses)
+    content_str = str(content).strip()
+    if not content_str:
         return {}
 
-    parsed = _parse_json_payload(content)
+    # Try to parse as JSON for string content
+    parsed = _parse_json_payload(content_str)
     if parsed is not None:
         return parsed
 
-    return content
+    return content_str
 
 
 def _parse_json_payload(content: str) -> dict[str, Any] | list[Any] | None:

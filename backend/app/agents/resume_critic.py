@@ -129,7 +129,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             
             response = AgentResponse(
                 agent_name=self.get_name(),
-                content=json.dumps(structured_result, indent=2),
+                content=structured_result,
                 reasoning="Analyzed resume structure and content impact.",
                 confidence_score=self.CONFIDENCE_SCORE,
                 decision_trace=decision_trace,

@@ -135,7 +135,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             
             response = AgentResponse(
                 agent_name=self.get_name(),
-                content=json.dumps(structured_result, indent=2),
+                content=structured_result,
                 reasoning=summary,
                 confidence_score=overall_confidence,
                 decision_trace=decision_trace,

@@ -6,8 +6,9 @@ from .base import BaseAgent
 from .gemini_service import GeminiLiveService
 from langfuse import observe
 from ..core.logging import logger
+from ..utils.json_parser import parse_json_object
 from ..core.config import settings
-from ..models.agent import AgentResponse
+from ..models.agent import AgentResponse, InterviewCoachingReport
 from ..models.session import SessionContext
 
 
@@ -199,6 +200,26 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 result_preview=result[:100] + "..." if len(result) > 100 else result,
             )
 
+            # Try to parse as JSON if it looks like structured data
+            structured_result = None
+            content_to_return = result
+            
+            # Only attempt JSON parsing for text-based methods that should return structured data
+            if method_used in ["standard_gemini", "standard_gemini_fallback", "mock_response_file"]:
+                try:
+                    structured_result = self.parse_and_validate(result, InterviewCoachingReport).model_dump()
+                    content_to_return = structured_result
+                except Exception as e:
+                    logger.debug(
+                        "InterviewCoachAgent JSON parsing failed, returning raw result",
+                        session_id=session_id,
+                        error_type=type(e).__name__,
+                        error_message=str(e),
+                        raw_preview=result[:200]
+                    )
+                    # Keep raw result if parsing fails
+                    content_to_return = result
+
             # Build decision trace for auditability
             input_type = "audio" if isinstance(input_text, bytes) else "text"
             decision_trace = [
@@ -229,6 +250,12 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                     "InterviewCoachAgent: Used standard Gemini API (fallback)"
                 )
 
+            # Add structured result info to trace if applicable
+            if structured_result:
+                decision_trace.append(
+                    f"InterviewCoachAgent: Parsed structured JSON with {len(structured_result.get('questions', []))} questions"
+                )
+
             # Create SHARP metadata
             analysis_type = (
                 "interview_coaching_audio"
@@ -243,11 +270,12 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 ),
                 "method_used": method_used,
                 "input_type": input_type,
+                "structured_result": structured_result is not None,
             }
 
             response = AgentResponse(
                 agent_name=self.get_name(),
-                content=result,
+                content=content_to_return,
                 reasoning="Generated interview coaching feedback.",
                 confidence_score=self.CONFIDENCE_SCORE,
                 decision_trace=decision_trace,

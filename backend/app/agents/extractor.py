@@ -199,7 +199,7 @@ Output format:
             )
             response = AgentResponse(
                 agent_name=self.get_name(),
-                content=json.dumps(resume.model_dump(), indent=2),
+                content=resume.model_dump(),
                 reasoning="Extracted and structured resume data using LLM.",
                 confidence_score=self.CONFIDENCE_SCORE,
                 decision_trace=decision_trace,

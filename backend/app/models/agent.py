@@ -9,7 +9,7 @@ class AgentResponse(BaseModel):
     """Agent response model with SHARP compliance data."""
     
     agent_name: Optional[str] = None
-    content: Optional[str] = None
+    content: Optional[Dict[str, Any] | List[Any] | str] = None
     reasoning: Optional[str] = None  # Explainability
     confidence_score: Optional[float] = None  # Confidence Indicator
     decision_trace: Optional[List[str]] = Field(default_factory=list)  # Auditability
@@ -158,6 +158,23 @@ class StructuralAssessment(BaseModel):
     readability: Optional[str] = None
     formattingRecommendations: Optional[List[str]] = Field(default_factory=list)
     suggestions: Optional[List[str]] = Field(default_factory=list)
+
+
+class InterviewQuestion(BaseModel):
+    """Interview question with tips."""
+    
+    question: str
+    keywords: List[str] = Field(default_factory=list)
+    tip: str
+
+
+class InterviewCoachingReport(BaseModel):
+    """Interview coaching analysis report."""
+    
+    interview_type: Optional[str] = None
+    questions: Optional[List[InterviewQuestion]] = Field(default_factory=list)
+    preparation_tips: Optional[List[str]] = Field(default_factory=list)
+    common_mistakes: Optional[List[str]] = Field(default_factory=list)
 
 
 class WorkflowStatus(BaseModel):

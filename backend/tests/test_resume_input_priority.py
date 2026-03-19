@@ -30,7 +30,7 @@ class StubAgent:
         self.inputs.append(input_text)
         return AgentResponse(
             agent_name=self._name,
-            content=json.dumps({"ok": True}),
+            content={"ok": True},
             reasoning="stub",
             confidence_score=0.9,
             decision_trace=[],
@@ -48,7 +48,7 @@ class StubExtractorAgent(StubAgent):
         self.inputs.append(input_text)
         return AgentResponse(
             agent_name=self._name,
-            content=json.dumps({"work": [{"name": "Extracted from PDF"}]}),
+            content={"work": [{"name": "Extracted from PDF"}]},
             reasoning="stub extract",
             confidence_score=1.0,
             decision_trace=[],

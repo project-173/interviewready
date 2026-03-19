@@ -8,11 +8,25 @@ from typing import Any
 
 
 def parse_json_payload(
-    text: str,
+    text: Any,
     *,
     allow_array: bool = False,
 ) -> dict[str, Any] | list[Any] | None:
     """Parse JSON from raw or fenced markdown text."""
+    if text is None:
+        return None
+
+    if isinstance(text, dict):
+        return text
+    if isinstance(text, list):
+        return text if allow_array else None
+    if isinstance(text, bytes):
+        try:
+            text = text.decode("utf-8")
+        except Exception:
+            return None
+    if not isinstance(text, str):
+        text = str(text)
     if not text or not text.strip():
         return None
 
@@ -47,7 +61,7 @@ def parse_json_payload(
     return None
 
 
-def parse_json_object(text: str) -> dict[str, Any]:
+def parse_json_object(text: Any) -> dict[str, Any]:
     """Parse a JSON object from text; return empty dict if unavailable."""
     parsed = parse_json_payload(text, allow_array=False)
     if isinstance(parsed, dict):

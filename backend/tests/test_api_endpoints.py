@@ -24,7 +24,7 @@ class StubOrchestrator:
             }
             return AgentResponse(
                 agent_name="ResumeCriticAgent",
-                content=json.dumps(payload),
+                content=payload,
             )
         if request.intent == "CONTENT_STRENGTH":
             payload = {
@@ -60,7 +60,7 @@ class StubOrchestrator:
             }
             return AgentResponse(
                 agent_name="ContentStrengthAgent",
-                content=json.dumps(payload),
+                content=payload,
             )
         if request.intent == "ALIGNMENT":
             payload = {
@@ -73,7 +73,7 @@ class StubOrchestrator:
             }
             return AgentResponse(
                 agent_name="JobAlignmentAgent",
-                content=json.dumps(payload),
+                content=payload,
             )
 
         return AgentResponse(
