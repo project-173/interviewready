@@ -76,17 +76,6 @@ Output format:
                 "highlights": ["achievement1", "achievement2"]
             }
         ],
-        "volunteer": [
-            {
-                "organization": "Organization",
-                "position": "Volunteer",
-                "url": "https://organization.com",
-                "startDate": "2019-01-01",
-                "endDate": "2020-01-01",
-                "summary": "Volunteer summary",
-                "highlights": ["impact1", "impact2"]
-            }
-        ],
         "education": [
             {
                 "institution": "University Name",
@@ -115,38 +104,11 @@ Output format:
                 "url": "https://certificate.com"
             }
         ],
-        "publications": [
-            {
-                "name": "Publication Title",
-                "publisher": "Publisher",
-                "releaseDate": "2021-01-01",
-                "url": "https://publication.com",
-                "summary": "Publication summary"
-            }
-        ],
         "skills": [
             {
                 "name": "Web Development",
                 "level": "Advanced",
                 "keywords": ["HTML", "CSS", "JavaScript"]
-            }
-        ],
-        "languages": [
-            {
-                "language": "English",
-                "fluency": "Native speaker"
-            }
-        ],
-        "interests": [
-            {
-                "name": "Wildlife",
-                "keywords": ["Ferrets", "Unicorns"]
-            }
-        ],
-        "references": [
-            {
-                "name": "Jane Doe",
-                "reference": "Reference text"
             }
         ],
         "projects": [
