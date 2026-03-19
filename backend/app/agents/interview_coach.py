@@ -81,7 +81,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                     print(f"Failed to connect to Gemini Live: {e}")
             else:
                 print("GEMINI_API_KEY not set; Gemini Live will not be used.")
-    
+
     @observe(name="interview_coach_process", as_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process interview coaching request.
@@ -262,7 +262,8 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             # Log response creation
             logger.debug(
                 f"InterviewCoachAgent response created",
-                session_id=session_id,input_type=input_type,
+                session_id=session_id,
+                input_type=input_type,
                 confidence_score=self.CONFIDENCE_SCORE,
                 analysis_type=analysis_type,
                 method_used=method_used,
@@ -280,7 +281,8 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 error_message=str(e),
             )
             raise
-@observe(name="_call_gemini_live_audio", as_type="tool")
+
+    @observe(name="_call_gemini_live_audio", as_type="tool")
     def _call_gemini_live_audio(
         self, audio_data: bytes, system_prompt: str
     ) -> Optional[str]:
@@ -342,3 +344,62 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 error_message=str(e),
             )
             return f"Error contacting Gemini Live for audio: {str(e)}"
+
+    @observe(name="_call_gemini_live", as_type="tool")
+    def _call_gemini_live(self, input_text: str) -> Optional[str]:
+        """Call Gemini Live service with timeout.
+
+        Args:
+            input_text: Input text for coaching
+
+        Returns:
+            Response from Gemini Live or None if error
+        """
+        session_id = "unknown"
+
+        if (
+            not hasattr(self.gemini_live_service, "connected")
+            or not self.gemini_live_service.connected
+        ):
+            logger.debug(
+                "InterviewCoachAgent Gemini Live not connected", session_id=session_id
+            )
+            return None
+
+        try:
+            logger.debug(
+                "InterviewCoachAgent calling Gemini Live",
+                session_id=session_id,
+                input_length=len(input_text),
+            )
+
+            live_start_time = time.time()
+            raw = self.gemini_live_service.send_textAndWaitResponse(input_text, 10000)
+            live_execution_time = time.time() - live_start_time
+
+            if not raw or raw.strip() == "":
+                logger.warning(
+                    "InterviewCoachAgent Gemini Live returned empty response",
+                    session_id=session_id,
+                    execution_time_ms=round(live_execution_time * 1000, 2),
+                )
+                return "(No response from Gemini Live)"
+
+            logger.debug(
+                "InterviewCoachAgent Gemini Live call successful",
+                session_id=session_id,
+                execution_time_ms=round(live_execution_time * 1000, 2),
+                response_length=len(raw),
+                response_preview=raw[:100] + "..." if len(raw) > 100 else raw,
+            )
+
+            return raw
+        except Exception as e:
+            logger.log_agent_error("InterviewCoachAgent-GeminiLive", e, session_id)
+            logger.error(
+                "InterviewCoachAgent Gemini Live call failed",
+                session_id=session_id,
+                error_type=type(e).__name__,
+                error_message=str(e),
+            )
+            return f"Error contacting Gemini Live: {str(e)}"

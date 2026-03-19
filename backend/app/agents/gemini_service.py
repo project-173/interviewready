@@ -39,18 +39,18 @@ class GeminiService:
         """
         self.api_key = api_key or settings.GEMINI_API_KEY
         self.model_name = model_name or settings.GEMINI_MODEL
-self.client = None
+        self.client = None
         self.mock_mode = False
 
         if self.api_key:
-
-        self.client = genai.Client(api_key=self.api_key)
-else:
+            self.client = genai.Client(api_key=self.api_key)
+        else:
             # Gracefully degrade to mock mode when API key is not available
             from ..core.logging import logger
+
             logger.warning("GEMINI_API_KEY not configured - using mock responses")
             self.mock_mode = True
-    
+
     def generate_response(
         self,
         system_prompt: str,
@@ -86,9 +86,11 @@ else:
             return response.text
         except Exception as e:
             from ..core.logging import logger
+
             logger.error(f"Gemini API call failed: {str(e)}")
             return f"Error calling Gemini API: {str(e)}"
-def _generate_mock_response(self, system_prompt: str, user_input: str) -> str:
+
+    def _generate_mock_response(self, system_prompt: str, user_input: str) -> str:
         """Generate a mock response based on the system prompt.
 
         Args:
@@ -108,7 +110,7 @@ def _generate_mock_response(self, system_prompt: str, user_input: str) -> str:
                     "contact": {
                         "fullName": "John Doe",
                         "email": "john@example.com",
-                        "phone": "555-0123"
+                        "phone": "555-0123",
                     },
                     "skills": ["Python", "JavaScript", "Project Management"],
                     "experiences": [
@@ -117,7 +119,7 @@ def _generate_mock_response(self, system_prompt: str, user_input: str) -> str:
                             "company": "Tech Corp",
                             "start_date": "2020-01",
                             "end_date": "present",
-                            "description": "Led development of core platform features"
+                            "description": "Led development of core platform features",
                         }
                     ],
                     "educations": [
@@ -125,22 +127,22 @@ def _generate_mock_response(self, system_prompt: str, user_input: str) -> str:
                             "school": "State University",
                             "degree": "BS Computer Science",
                             "start_date": "2015-09",
-                            "end_date": "2019-05"
+                            "end_date": "2019-05",
                         }
-                    ]
+                    ],
                 },
                 "critique": {
                     "score": 78,
                     "readability": "Good structure with clear sections",
                     "formattingRecommendations": [
                         "Use bullet points for better readability",
-                        "Ensure consistent date formatting"
+                        "Ensure consistent date formatting",
                     ],
                     "suggestions": [
                         "Add quantifiable metrics to achievements",
-                        "Highlight technical skills more prominently"
-                    ]
-                }
+                        "Highlight technical skills more prominently",
+                    ],
+                },
             }
         elif "alignment" in system_prompt.lower():
             # Job Alignment mock response
@@ -150,16 +152,13 @@ def _generate_mock_response(self, system_prompt: str, user_input: str) -> str:
                 "missing_skills": ["Kubernetes", "Docker"],
                 "strengths": [
                     "Strong technical foundation",
-                    "Proven leadership experience"
+                    "Proven leadership experience",
                 ],
-                "gaps": [
-                    "Limited DevOps experience",
-                    "No containerization background"
-                ],
+                "gaps": ["Limited DevOps experience", "No containerization background"],
                 "recommendations": [
                     "Learn containerization technologies",
-                    "Pursue Docker and Kubernetes certifications"
-                ]
+                    "Pursue Docker and Kubernetes certifications",
+                ],
             }
         elif "strength" in system_prompt.lower():
             # Content Strength mock response
@@ -169,20 +168,17 @@ def _generate_mock_response(self, system_prompt: str, user_input: str) -> str:
                     "clarity": 8,
                     "relevance": 7,
                     "completeness": 6,
-                    "impact": 7
+                    "impact": 7,
                 },
-                "strengths": [
-                    "Clear communication",
-                    "Well-organized content"
-                ],
+                "strengths": ["Clear communication", "Well-organized content"],
                 "weaknesses": [
                     "Lacks specific metrics",
-                    "Could benefit from more examples"
+                    "Could benefit from more examples",
                 ],
                 "suggestions": [
                     "Add quantifiable results",
-                    "Include more specific achievements"
-                ]
+                    "Include more specific achievements",
+                ],
             }
         else:
             # Generic response
@@ -191,8 +187,8 @@ def _generate_mock_response(self, system_prompt: str, user_input: str) -> str:
                 "analysis": "Mock response generated",
                 "recommendations": [
                     "Continue professional development",
-                    "Expand skill set"
-                ]
+                    "Expand skill set",
+                ],
             }
 
         return json.dumps(mock_data)
@@ -255,7 +251,12 @@ class GeminiLiveService:
             raise Exception(f"Failed to connect to Gemini Live: {str(e)}")
 
     def send_audio_and_wait_response(
-        self, audio_data: bytes, system_prompt: str, mime_type: str = "audio/wav", text_prompt: str = "", timeout_ms: int = 10000
+        self,
+        audio_data: bytes,
+        system_prompt: str,
+        mime_type: str = "audio/wav",
+        text_prompt: str = "",
+        timeout_ms: int = 10000,
     ) -> Optional[str]:
         """Send audio data and wait for response.
         Args:
@@ -273,6 +274,7 @@ class GeminiLiveService:
 
         try:
             from google.genai import types
+
             audio_part = types.Part.from_bytes(data=audio_data, mime_type=mime_type)
             contents = [audio_part]
             if text_prompt:
@@ -283,8 +285,32 @@ class GeminiLiveService:
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
-                )
+                ),
             )
             return response.text
         except Exception as e:
             return f"Error in Gemini Live Audio: {str(e)}"
+
+    def send_textAndWaitResponse(
+        self, text: str, timeout_ms: int = 10000
+    ) -> Optional[str]:
+        """Send text and wait for response.
+
+        Args:
+            text: Text to send
+            timeout_ms: Timeout in milliseconds
+
+        Returns:
+            Response text or None if timeout/error
+        """
+        if not self.connected or not self.client:
+            return None
+
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=text,
+            )
+            return response.text
+        except Exception as e:
+            return f"Error in Gemini Live: {str(e)}"

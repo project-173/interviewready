@@ -39,7 +39,7 @@ export const CriticStep: React.FC<{ report: StructuralAssessment; onApprove: () 
     <div className="space-y-3">
       <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Formatting Recommendations</h4>
       <div className="space-y-2">
-        {report.formattingRecommendations.map((rec, i) => (
+        {(report.formattingRecommendations || []).map((rec, i) => (
           <div key={i} className="flex items-start gap-3 p-3 bg-white border border-slate-200 rounded-lg text-xs text-slate-600 transition-colors hover:border-slate-300">
             <div className="mt-0.5 w-1.5 h-1.5 rounded-full bg-slate-400 flex-none"></div>
             {rec}
@@ -52,7 +52,7 @@ export const CriticStep: React.FC<{ report: StructuralAssessment; onApprove: () 
       <div className="space-y-3">
         <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Content Suggestions</h4>
         <div className="space-y-2">
-          {report.suggestions.map((suggestion, i) => (
+          {(report.suggestions || []).map((suggestion, i) => (
             <div key={i} className="flex items-start gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-slate-600 transition-colors hover:border-blue-300">
               <div className="mt-0.5 w-1.5 h-1.5 rounded-full bg-blue-400 flex-none"></div>
               {suggestion}
@@ -92,13 +92,13 @@ export const ContentStep: React.FC<{ report: ContentAnalysisReport; onApprove: (
 
       <div className="p-6 bg-white border border-slate-200 rounded-2xl">
         <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Key Achievements</h4>
-        <div className="space-y-3">
+         <div className="space-y-3">
           {(report.achievements || []).slice(0, 3).map((ach, i) => (
             <div key={i} className="text-[11px] text-slate-600 border-l-2 border-slate-200 pl-3">
-              <p className="font-medium text-slate-900">{ach.description}</p>
+              <p className="font-medium text-slate-900">{ach?.description}</p>
               <div className="flex gap-2 mt-1">
-                <span className={`text-[9px] uppercase font-bold ${ach.impact === 'HIGH' ? 'text-emerald-600' : 'text-amber-600'}`}>{ach.impact} Impact</span>
-                {ach.quantifiable && <span className="text-[9px] uppercase font-bold text-blue-600">Quantified</span>}
+                <span className={`text-[9px] uppercase font-bold ${ach?.impact === 'HIGH' ? 'text-emerald-600' : 'text-amber-600'}`}>{ach?.impact} Impact</span>
+                {ach?.quantifiable && <span className="text-[9px] uppercase font-bold text-blue-600">Quantified</span>}
               </div>
             </div>
           ))}
@@ -112,10 +112,10 @@ export const ContentStep: React.FC<{ report: ContentAnalysisReport; onApprove: (
          {(report.skills || []).slice(0, 6).map((skill, i) => (
            <div key={i} className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
              <div className="flex justify-between items-start mb-1">
-               <span className="text-[11px] font-bold text-slate-900">{skill.name}</span>
-               <span className="text-[9px] px-1.5 py-0.5 bg-white border border-slate-200 rounded text-slate-500">{skill.category}</span>
+               <span className="text-[11px] font-bold text-slate-900">{skill?.name}</span>
+               <span className="text-[9px] px-1.5 py-0.5 bg-white border border-slate-200 rounded text-slate-500">{skill?.category}</span>
              </div>
-             <p className="text-[10px] text-slate-500 line-clamp-2 italic">"{skill.evidence}"</p>
+             <p className="text-[10px] text-slate-500 line-clamp-2 italic">"{skill?.evidence}"</p>
            </div>
          ))}
        </div>
@@ -129,14 +129,14 @@ export const ContentStep: React.FC<{ report: ContentAnalysisReport; onApprove: (
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                <div>
                  <p className="text-[9px] font-bold text-amber-600 uppercase mb-1">Original</p>
-                 <p className="text-[11px] text-slate-500 line-through">{sug.original}</p>
+                 <p className="text-[11px] text-slate-500 line-through">{sug?.original}</p>
                </div>
                <div>
                  <p className="text-[9px] font-bold text-emerald-600 uppercase mb-1">Suggested</p>
-                 <p className="text-[11px] text-slate-900 font-medium">{sug.suggested}</p>
+                 <p className="text-[11px] text-slate-900 font-medium">{sug?.suggested}</p>
                </div>
              </div>
-             <p className="mt-3 text-[10px] text-slate-600 bg-white/50 p-2 rounded border border-amber-100/50">{sug.rationale}</p>
+             <p className="mt-3 text-[10px] text-slate-600 bg-white/50 p-2 rounded border border-amber-100/50">{sug?.rationale}</p>
            </div>
          ))}
        </div>

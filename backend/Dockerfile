@@ -15,9 +15,8 @@ COPY pyproject.toml uv.lock ./
 # if the lock file is out of sync.
 RUN uv sync --no-install-project --no-dev
 
-# Install spaCy language models for LLM Guard scanners
-RUN /app/.venv/bin/python -m spacy download en_core_web_sm && \
-    /app/.venv/bin/python -m spacy download zh_core_web_sm
+# Install spaCy language models for LLM Guard scanners (English only)
+RUN /app/.venv/bin/python -m spacy download en_core_web_sm
 
 # Final stage
 FROM python:3.11-slim-bookworm

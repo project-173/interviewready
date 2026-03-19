@@ -68,7 +68,7 @@ class BackendService {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.getAuthToken()}`,
       },
-      body: JSON.stringify(request),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {

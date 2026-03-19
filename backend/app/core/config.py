@@ -46,7 +46,7 @@ class Settings(BaseSettings):
 
     # Security
     SECURITY_FILTER_ORDER: int = 5
-    AUTH_ENABLED: bool = True
+    AUTH_ENABLED: bool = False
     AUTH_DISABLED_USER_ID: str = "dev-user"
     LLM_GUARD_ENABLED: bool = True
 

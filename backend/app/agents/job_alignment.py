@@ -24,7 +24,7 @@ class JobAlignmentAgent(BaseAgent):
     MOCK_RESPONSE_KEY = "JobAlignmentAgent"
 
     SYSTEM_PROMPT = (
-"""
+        """
         You are a Job Description Alignment Agentthat compares candidate resumes against job descriptions.
 
 CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
@@ -113,12 +113,14 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         agent_name = self.get_name()
         processing_start_time = time.time()
 
-        logger.debug("JobAlignmentAgent processing started",
-                    session_id=session_id,
-                    input_length=len(input_text),
-                    input_preview=input_text[:100] + "..."
+        logger.debug(
+            "JobAlignmentAgent processing started",
+            session_id=session_id,
+            input_length=len(input_text),
+            input_preview=input_text[:100] + "..."
             if len(input_text) > 100
-            else input_text)
+            else input_text,
+        )
 
         try:
             raw_result = (
@@ -136,10 +138,11 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 
             raw_result = raw_result or self.call_gemini(input_text, context)
 
-            structured_result = self.parse_and_validate(raw_result, AlignmentReport).model_dump()
+            structured_result = self.parse_and_validate(
+                raw_result, AlignmentReport
+            ).model_dump()
 
-            # Validate that we got a meaningful response
-            if not raw_output or not raw_output.strip():
+            if not raw_result or not raw_result.strip():
                 raise ValueError("Empty response received from Gemini API")
 
             processing_time = time.time() - processing_start_time
@@ -147,12 +150,15 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             logger.debug(
                 "JobAlignmentAgent JSON parsing completed",
                 session_id=session_id,
-                processing_time_ms=round(processing_time * 1000, 2))
+                processing_time_ms=round(processing_time * 1000, 2),
+            )
 
             skills_match: List[str] = structured_result.get("skillsMatch", [])
             missing_skills: List[str] = structured_result.get("missingSkills", [])
             fit_score: int = int(structured_result.get("fitScore", 50))
-            reasoning: str = structured_result.get("reasoning", "No reasoning provided.")
+            reasoning: str = structured_result.get(
+                "reasoning", "No reasoning provided."
+            )
 
             confidence = self._compute_confidence(fit_score, missing_skills)
             decision_trace = [

@@ -25,7 +25,8 @@ class ExtractorAgent(BaseAgent):
     MOCK_RESPONSE_KEY = "ExtractorAgent"
     CONFIDENCE_SCORE = 0.95
 
-    SYSTEM_PROMPT = ("""You are an expert resume parser. Extract structured information from resume text and return it as JSON.
+    SYSTEM_PROMPT = (
+        """You are an expert resume parser. Extract structured information from resume text and return it as JSON.
 
 CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
 
@@ -243,7 +244,7 @@ Output format:
         return payload
 
     def _extract_resume_with_llm(
-        self, text: str, source_text: str, source_text: str, context: SessionContext
+        self, text: str, source_text: str, context: SessionContext
     ) -> Resume:
         """Use LLM to extract structured resume data from text."""
 

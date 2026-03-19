@@ -2,7 +2,7 @@
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.concurrency import run_in_threadpool
 from langfuse import get_client, observe, propagate_attributes
 
@@ -21,6 +21,7 @@ router = APIRouter()
 
 langfuse = get_client()
 
+
 @router.post("")
 @observe(name="chat_endpoint")
 async def chat_endpoint(
@@ -37,7 +38,7 @@ async def chat_endpoint(
         metadata={
             "endpoint": "/api/v1/chat",
             "method": "POST",
-        }
+        },
     ):
         with propagate_attributes(user_id=user_id, session_id=session_id):
             try:
@@ -46,23 +47,23 @@ async def chat_endpoint(
                 )
             except PermissionError as exc:
                 langfuse.update_current_span(
-                output={"error": "permission_denied", "reason": str(exc)}
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=str(exc),
-            ) from exc
+                    output={"error": "permission_denied", "reason": str(exc)}
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=str(exc),
+                ) from exc
 
             try:
                 orchestrator = get_orchestration_agent()
             except Exception as exc:
                 langfuse.update_current_span(
-                output={"error": "orchestrator_unavailable", "reason": str(exc)}
-            )
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Orchestration service unavailable: {exc}",
-            ) from exc
+                    output={"error": "orchestrator_unavailable", "reason": str(exc)}
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Orchestration service unavailable: {exc}",
+                ) from exc
 
             try:
                 internal_response = await run_in_threadpool(
@@ -82,12 +83,12 @@ async def chat_endpoint(
                 return result
             except Exception as exc:
                 langfuse.update_current_span(
-                output={"error": "orchestration_failed", "reason": str(exc)}
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to process chat request: {exc}",
-            ) from exc
+                    output={"error": "orchestration_failed", "reason": str(exc)}
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to process chat request: {exc}",
+                ) from exc
 
 
 def _extract_api_payload(response: AgentResponse) -> dict[str, Any] | list[Any] | str:

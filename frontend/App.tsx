@@ -225,6 +225,7 @@ const App: React.FC = () => {
           }
 
           const resumeData = responseData.resume_data || {};
+          const critiqueData = responseData.critique_data || {};
           
           const resume: Resume = {
             title: resumeData.title || 'Untitled Resume',
@@ -255,7 +256,7 @@ const App: React.FC = () => {
             currentResume: resume, 
             history: [...prev.history, resume],
             criticReport: {
-              score: critiqueData.score || 85,
+              score: Number(critiqueData.score) || 85,
               readability: critiqueData.readability || 'Resume processed successfully',
               formattingRecommendations: critiqueData.formattingRecommendations || [],
               suggestions: critiqueData.suggestions || []

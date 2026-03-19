@@ -13,7 +13,7 @@ _vault = None
 
 def _ensure_spacy_models() -> bool:
     """Try to install missing spaCy models. Returns True if successful."""
-    models = ["en_core_web_sm", "zh_core_web_sm"]
+    models = ["en_core_web_sm"]  # Only English model needed for resume/interview app
 
     for model in models:
         try:
@@ -63,18 +63,17 @@ try:
 
         try:
             spacy.load("en_core_web_sm")
-            spacy.load("zh_core_web_sm")
             HAS_SPACY = True
-            logger.info("SpaCy models loaded successfully.")
+            logger.info("SpaCy en_core_web_sm model loaded successfully.")
         except Exception:
-            logger.info("SpaCy models not found, attempting to install...")
+            logger.info("SpaCy model not found, attempting to install...")
             if _ensure_spacy_models():
                 HAS_SPACY = True
-                logger.info("SpaCy models installed and loaded.")
+                logger.info("SpaCy model installed and loaded.")
             else:
                 HAS_SPACY = False
                 logger.warning(
-                    "Could not install spaCy models. Anonymize and Sensitive scanners disabled."
+                    "Could not install spaCy model. Anonymize and Sensitive scanners disabled."
                 )
 
     except ImportError:
