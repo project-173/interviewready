@@ -2,11 +2,8 @@
 
 import time
 from typing import Optional
-from langfuse import observe
 from .base import BaseAgent
 from .gemini_service import GeminiLiveService
-from .mock_config import MockConfig
-from .mock_gemini_service import MockGeminiLiveService
 from ..core.langfuse_client import trace_agent_process, observe
 from ..core.logging import logger
 from ..core.config import settings

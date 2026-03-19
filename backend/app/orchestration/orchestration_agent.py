@@ -7,11 +7,10 @@ import time
 from typing import Any, TypedDict, Union
 
 from langgraph.graph import END, StateGraph
-from langfuse import get_client, observe, propagate_attributes
 
 from app.agents.base import BaseAgentProtocol
 from app.agents.gemini_service import GeminiService
-from app.core.langfuse_client import langfuse
+from app.core.langfuse_client import langfuse, observe
 from app.core.logging import logger
 from app.governance.sharp_governance_service import SharpGovernanceService
 from app.models.agent import (
@@ -25,8 +24,6 @@ from app.models.agent import (
 from app.models.resume import Resume
 from app.models.session import SessionContext
 from app.utils.json_parser import parse_json_object, parse_json_payload
-
-langfuse = get_client()
 
 
 class OrchestrationState(TypedDict):

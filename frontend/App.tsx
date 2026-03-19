@@ -136,7 +136,6 @@ const App: React.FC = () => {
         }
         
         const resumeData = responseData.resume_data || {};
-        const critiqueData = responseData.critique || {};
         
         const resume: Resume = {
           title: resumeData.title || 'Untitled Resume',
@@ -220,7 +219,6 @@ const App: React.FC = () => {
           }
           
           const resumeData = responseData.resume_data || {};
-          const critiqueData = responseData.critique || {};
           
           const resume: Resume = {
             title: resumeData.title || 'Untitled Resume',

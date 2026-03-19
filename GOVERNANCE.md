@@ -146,7 +146,7 @@ Each layer adds governance metadata to traces:
 # API Layer - establishes session context
 with langfuse.propagate_attributes(session_id="user-abc"):
     with langfuse.trace(name="chat_api_request", metadata={
-        "user_id": current_user,
+        "user_id": get_current_user,
         "endpoint": "/api/v1/chat",
     }) as trace:
         

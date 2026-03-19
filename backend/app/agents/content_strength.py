@@ -9,7 +9,6 @@ from ..core.logging import logger
 from ..models.agent import AgentResponse, ContentAnalysisReport
 from ..models.session import SessionContext
 from ..utils.json_parser import parse_json_object
-from langfuse import observe
 
 class ContentStrengthAgent(BaseAgent):
     """Agent for analyzing content strength, skills reasoning, and evidence evaluation."""

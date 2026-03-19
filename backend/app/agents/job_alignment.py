@@ -3,10 +3,9 @@
 import json
 import time
 from typing import List, Dict, Any
-from langfuse import observe
 
 from .base import BaseAgent
-from ..core.langfuse_client import trace_agent_process, observe
+from ..core.langfuse_client import trace_agent_process, observe, observe
 from ..core.logging import logger
 from ..models.agent import AgentResponse, AlignmentReport
 from ..models.session import SessionContext

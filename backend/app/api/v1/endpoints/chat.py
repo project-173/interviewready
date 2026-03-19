@@ -2,28 +2,26 @@
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.concurrency import run_in_threadpool
-from langfuse import get_client, observe, propagate_attributes
 
 from app.api.v1.services import (
     get_or_create_session_context,
     get_orchestration_agent,
 )
 from app.core.auth import get_current_user
-from app.core.langfuse_client import langfuse
+from app.core.langfuse_client import langfuse, observe
 from app.models import AgentResponse, ChatApiResponse, ChatRequest
 from app.utils.json_parser import parse_json_payload
 
 router = APIRouter()
-
-langfuse = get_client()
 
 @router.post("")
 @observe(name="chat_endpoint")
 async def chat_endpoint(
     request: ChatRequest,
     session_id: Annotated[str, Query(alias="sessionId")],
+    current_user: dict[str, Any] = Depends(get_current_user),
 ) -> ChatApiResponse:
     """Run orchestration for the chat message within a user-owned session."""
     user_id = str(

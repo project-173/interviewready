@@ -37,7 +37,7 @@ class _NoopSpan:
     def __exit__(self, *_) -> None:
         return False
 
-    def start_as_current_span(self, *args: Any, **kwargs: Any) -> "_NoopSpan":
+    def start_as_current_observation(self, *args: Any, **kwargs: Any) -> "_NoopSpan":
         return self
 
     def update(self, *args: Any, **kwargs: Any) -> None:
@@ -65,8 +65,8 @@ _default_metadata: ContextVar[dict] = ContextVar("_default_metadata", default={}
 class _SpanWrapper:
     """Wrap a real LangfuseSpan to provide a stable, minimal public API.
 
-    The Langfuse Python client uses `start_as_current_span()` which returns a
-    context manager yielding a `LangfuseSpan`. That span exposes `update()` and
+    The Langfuse Python client uses `start_as_current_observation()` which returns a
+    context manager yielding a `LangfuseObservation`. That observation exposes `update()` and
     `score()`, but not the legacy `set_output()` helper used in our code.
 
     This wrapper provides `set_output()` and `update()` methods and delegates
@@ -94,7 +94,7 @@ class _SpanWrapper:
 
         @contextmanager
         def _nested_span():
-            with self._span.start_as_current_span(*args, **kwargs) as nested:
+            with self._span.start_as_current_observation(*args, **kwargs) as nested:
                 yield _SpanWrapper(nested)
 
         return _nested_span()
@@ -156,7 +156,7 @@ class _LangfuseWrapper:
     ):
         """Create a tracing span that can be used as a context manager.
 
-        This is a thin wrapper over langfuse.Langfuse.start_as_current_span(),
+        This is a thin wrapper over langfuse.Langfuse.start_as_current_observation(),
         providing a stable API that supports a `session_id` argument and
         automatically merges extra keyword args into the `metadata` map.
         """
@@ -179,11 +179,11 @@ class _LangfuseWrapper:
 
         if prompt is not None:
             # Langfuse's current Python SDK does not accept `prompt` as a
-            # native argument to start_as_current_span(), so we store it in
+            # native argument to start_as_current_observation(), so we store it in
             # metadata to keep it queryable.
             merged_metadata["prompt"] = prompt
 
-        with self._client.start_as_current_span(
+        with self._client.start_as_current_observation(
             name=name,
             metadata=merged_metadata,
             input=input,
@@ -192,8 +192,8 @@ class _LangfuseWrapper:
             level=level,
             status_message=status_message,
             end_on_exit=end_on_exit,
-        ) as span:
-            yield _SpanWrapper(span)
+        ) as observation:
+            yield _SpanWrapper(observation)
 
 
 def trace_agent_process(func):

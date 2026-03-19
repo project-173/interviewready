@@ -3,7 +3,6 @@
 import json
 import time
 from typing import Dict, Any
-from langfuse import observe
 from .base import BaseAgent
 from ..core.langfuse_client import trace_agent_process, observe
 from ..core.logging import logger
