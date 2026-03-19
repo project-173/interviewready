@@ -8,6 +8,8 @@ from typing import Any
 
 from app.agents.base import BaseAgent
 from app.core.logging import logger
+from ..core.langfuse_client import trace_agent_process, observe
+from ..core.config import settings
 from app.models import AgentResponse, Resume, ResumeDocument
 from app.models.session import SessionContext
 from app.utils.pdf_parser import parse_pdf_base64
@@ -17,6 +19,10 @@ from app.utils.validators import is_valid_url, is_full_url, is_valid_date
 
 class ExtractorAgent(BaseAgent):
     """LLM-powered resume extraction agent with structured output."""
+
+    USE_MOCK_RESPONSE = settings.MOCK_EXTRACTOR_AGENT
+    MOCK_RESPONSE_KEY = "ExtractorAgent"
+    CONFIDENCE_SCORE = 0.95
 
     SYSTEM_PROMPT = """You are an expert resume parser. Extract structured information from resume text and return it as JSON.
 
@@ -155,60 +161,110 @@ Output format:
         ]
     }"""
 
-    def __init__(self, gemini_service: object):
+    def __init__(self, gemini_service):
         super().__init__(
             gemini_service=gemini_service,
             system_prompt=self.SYSTEM_PROMPT,
             name="ExtractorAgent",
         )
 
+    @trace_agent_process
+    @observe(name="extractor_process", observation_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         session_id = getattr(context, "session_id", "unknown")
+        agent_name = self.get_name()
         start_time = time.time()
 
-        payload = self._parse_payload(input_text)
-        file_type = str(payload.get("fileType", "")).lower()
-        if file_type != "pdf":
-            raise ValueError(f"Unsupported resume file type: {file_type or 'missing'}")
-
-        base64_data = payload.get("data")
-        if not isinstance(base64_data, str) or not base64_data.strip():
-            raise ValueError("resumeFile.data must be a non-empty base64 string")
-
-        extracted_text = parse_pdf_base64(base64_data.strip())
-        if not extracted_text:
-            raise ValueError("Failed to extract text from resume PDF payload")
-
-        resume = self._extract_resume_with_llm(extracted_text, extracted_text)
-        resume_document = ResumeDocument(
-            source="resumeFile",
-            raw_text=extracted_text,
-            parse_confidence=0.95,
-        )
-        metadata = {
-            "source": "resumeFile",
-            "fileType": "pdf",
-            "extractedTextLength": len(extracted_text),
-            "resume_document": resume_document.model_dump(exclude_none=True),
-        }
-        trace = [
-            "ExtractorAgent: Used LLM to parse resume PDF and extract structured data"
-        ]
-        elapsed_ms = round((time.time() - start_time) * 1000, 2)
         logger.debug(
-            "ExtractorAgent completed LLM-based extraction",
+            "ExtractorAgent processing started",
             session_id=session_id,
-            extracted_text_length=len(extracted_text),
-            processing_time_ms=elapsed_ms,
+            input_length=len(input_text),
         )
-        return AgentResponse(
-            agent_name=self.get_name(),
-            content=json.dumps(resume.model_dump(), indent=2),
-            reasoning="Extracted and structured resume data using LLM.",
-            confidence_score=0.95,
-            decision_trace=trace,
-            sharp_metadata=metadata,
-        )
+
+        try:
+            raw_result = (
+                self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
+                if self.USE_MOCK_RESPONSE
+                else None
+            )
+
+            if self.USE_MOCK_RESPONSE and raw_result is None:
+                logger.warning(
+                    "Mock enabled but response key not found",
+                    session_id=session_id,
+                    mock_response_key=self.MOCK_RESPONSE_KEY,
+                )
+
+            payload = self._parse_payload(input_text)
+            file_type = str(payload.get("fileType", "")).lower()
+            if file_type != "pdf":
+                raise ValueError(
+                    f"Unsupported resume file type: {file_type or 'missing'}"
+                )
+
+            base64_data = payload.get("data")
+            if not isinstance(base64_data, str) or not base64_data.strip():
+                raise ValueError("resumeFile.data must be a non-empty base64 string")
+
+            extracted_text = parse_pdf_base64(base64_data.strip())
+            if not extracted_text:
+                raise ValueError("Failed to extract text from resume PDF payload")
+
+            resume = self._extract_resume_with_llm(
+                extracted_text, extracted_text, context
+            )
+            resume_document = ResumeDocument(
+                source="resumeFile",
+                raw_text=extracted_text,
+                parse_confidence=self.CONFIDENCE_SCORE,
+            )
+            metadata = {
+                "source": "resumeFile",
+                "fileType": "pdf",
+                "extractedTextLength": len(extracted_text),
+                "resume_document": resume_document.model_dump(exclude_none=True),
+                "analysis_type": "resume_extraction",
+                "confidence_score": self.CONFIDENCE_SCORE,
+            }
+            decision_trace = [
+                "ExtractorAgent: Used LLM to parse resume PDF and extract structured data"
+            ]
+            elapsed_ms = round((time.time() - start_time) * 1000, 2)
+            logger.debug(
+                "ExtractorAgent completed LLM-based extraction",
+                session_id=session_id,
+                extracted_text_length=len(extracted_text),
+                processing_time_ms=elapsed_ms,
+            )
+            response = AgentResponse(
+                agent_name=self.get_name(),
+                content=json.dumps(resume.model_dump(), indent=2),
+                reasoning="Extracted and structured resume data using LLM.",
+                confidence_score=self.CONFIDENCE_SCORE,
+                decision_trace=decision_trace,
+                sharp_metadata=metadata,
+            )
+
+            logger.debug(
+                "ExtractorAgent response created",
+                session_id=session_id,
+                confidence_score=self.CONFIDENCE_SCORE,
+                analysis_type="resume_extraction",
+            )
+
+            return response
+
+        except Exception as e:
+            elapsed_ms = round((time.time() - start_time) * 1000, 2)
+            logger.log_agent_error(agent_name, e, session_id)
+            logger.error(
+                "ExtractorAgent processing failed",
+                session_id=session_id,
+                processing_time_ms=elapsed_ms,
+                error_type=type(e).__name__,
+                error_message=str(e),
+            )
+            raise
 
     @staticmethod
     def _parse_payload(input_text: str) -> dict[str, Any]:
@@ -222,13 +278,15 @@ Output format:
             raise ValueError("ExtractorAgent payload must be a JSON object")
         return payload
 
-    def _extract_resume_with_llm(self, text: str, source_text: str) -> Resume:
+    def _extract_resume_with_llm(
+        self, text: str, source_text: str, context: SessionContext
+    ) -> Resume:
         """Use LLM to extract structured resume data from text."""
 
         user_input = f"Extract structured information from the following resume text:\n\n{text}\n\nReturn the result as valid JSON following the specified format."
 
         try:
-            raw_result = self.call_gemini(user_input, None)
+            raw_result = self.call_gemini(user_input, context)
 
             if not raw_result or not raw_result.strip():
                 raise ValueError("Empty response received from Gemini API")

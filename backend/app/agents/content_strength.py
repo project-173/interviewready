@@ -6,13 +6,14 @@ from typing import Dict, Any
 from .base import BaseAgent
 from ..core.langfuse_client import trace_agent_process, observe
 from ..core.logging import logger
+from ..core.config import settings
 from ..models.agent import AgentResponse, ContentAnalysisReport
 from ..models.session import SessionContext
 from ..utils.json_parser import parse_json_object
 
 class ContentStrengthAgent(BaseAgent):
     """Agent for analyzing content strength, skills reasoning, and evidence evaluation."""
-    USE_MOCK_RESPONSE = False
+    USE_MOCK_RESPONSE = settings.MOCK_CONTENT_STRENGTH_AGENT
     MOCK_RESPONSE_KEY = "ContentStrengthAgent"
     
     SYSTEM_PROMPT = """
@@ -93,70 +94,38 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                     input_preview=input_text[:100] + "..." if len(input_text) > 100 else input_text)
         
         try:
-            raw_result = None
-            if self.USE_MOCK_RESPONSE:
-                raw_result = self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
-                if raw_result is None:
-                    logger.warning(
-                        "ContentStrengthAgent mock enabled but response key not found",
-                        session_id=session_id,
-                        mock_response_key=self.MOCK_RESPONSE_KEY,
-                    )
+            raw_result = (
+                self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
+                if self.USE_MOCK_RESPONSE
+                else None
+            )
 
-            if raw_result is None:
-                raw_result = self.call_gemini(input_text, context)
-            
-            # Validate that we got a meaningful response
-            if not raw_result or not raw_result.strip():
-                raise ValueError("Empty response received from Gemini API")
+            if self.USE_MOCK_RESPONSE and raw_result is None:
+                logger.warning(
+                    "Mock enabled but response key not found",
+                    session_id=session_id,
+                    mock_response_key=self.MOCK_RESPONSE_KEY,
+                )
+
+            raw_result = raw_result or self.call_gemini(input_text, context)
+
+            structured_result = self.parse_and_validate(raw_result, ContentAnalysisReport).model_dump()
             
             processing_time = time.time() - processing_start_time
             
             logger.debug("ContentStrengthAgent processing completed", 
                         session_id=session_id, 
-                        processing_time_ms=round(processing_time * 1000, 2),
-                        result_length=len(raw_result),
-                        result_preview=raw_result[:100] + "..." if len(raw_result) > 100 else raw_result)
+                        processing_time_ms=round(processing_time * 1000, 2))
             
-            parsed = parse_json_object(raw_result)
-
-            # Validate that parsing succeeded
-            if not parsed:
-                raise ValueError(f"Failed to parse valid JSON from Gemini response: {raw_result[:200]}...")
-
-            if parsed:
-                logger.debug("ContentStrengthAgent JSON parsing successful",
-                            session_id=session_id, keys_found=list(parsed.keys()))
-            else:
-                logger.warning("ContentStrengthAgent JSON parsing failed",
-                            session_id=session_id, text_preview=raw_result[:200])
-                
-            normalized = self._normalize_content_analysis(parsed)
-            
-            # Log parsing results
-            logger.debug(f"ContentStrengthAgent JSON parsing completed", 
-                        session_id=session_id, 
-                        parsing_successful=bool(parsed),
-                        parsed_keys=list(parsed.keys()) if parsed else [])
-            
-            overall_confidence = self._calculate_overall_confidence(normalized)
-            hallucination_risk = self._get_double_or_zero(normalized, "hallucinationRisk")
-            summary = self._get_text_or_empty(normalized, "summary")
-            
-            # Log analysis metrics
-            logger.debug(f"ContentStrengthAgent analysis metrics calculated", 
-                        session_id=session_id, 
-                        overall_confidence=overall_confidence,
-                        hallucination_risk=hallucination_risk,
-                        skills_count=self._count_array(normalized, 'skills'),
-                        achievements_count=self._count_array(normalized, 'achievements'),
-                        suggestions_count=self._count_array(normalized, 'suggestions'))
+            overall_confidence = self._calculate_overall_confidence(structured_result)
+            hallucination_risk = self._get_double_or_zero(structured_result, "hallucinationRisk")
+            summary = self._get_text_or_empty(structured_result, "summary")
             
             decision_trace = [
                 "ContentStrengthAgent: Analyzed resume for skills and achievements",
-                f"ContentStrengthAgent: Identified {self._count_array(normalized, 'skills')} skills",
-                f"ContentStrengthAgent: Identified {self._count_array(normalized, 'achievements')} achievements",
-                f"ContentStrengthAgent: Generated {self._count_array(normalized, 'suggestions')} suggestions",
+                f"ContentStrengthAgent: Identified {self._count_array(structured_result, 'skills')} skills",
+                f"ContentStrengthAgent: Identified {self._count_array(structured_result, 'achievements')} achievements",
+                f"ContentStrengthAgent: Generated {self._count_array(structured_result, 'suggestions')} suggestions",
                 f"ContentStrengthAgent: Hallucination risk: {hallucination_risk}"
             ]
             
@@ -167,7 +136,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             
             response = AgentResponse(
                 agent_name=self.get_name(),
-                content=json.dumps(normalized, indent=2),
+                content=json.dumps(structured_result, indent=2),
                 reasoning=summary,
                 confidence_score=overall_confidence,
                 decision_trace=decision_trace,
@@ -192,33 +161,6 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                         error_type=type(e).__name__,
                         error_message=str(e))
             raise
-    
-    @observe(name="parse-json", observation_type="tool")
-    def _parse_json(self, text: str) -> Dict[str, Any]:
-        """Parse JSON from text with regex fallback.
-        
-        Args:
-            text: Text containing JSON
-            
-        Returns:
-            Parsed JSON dictionary
-        """
-        session_id = "unknown"  # We don't have session context here
-        
-        try:
-            json_pattern = re.compile(r'\{[\s\S]*\}', re.MULTILINE)
-            matcher = json_pattern.search(text)
-            if matcher:
-                result = json.loads(matcher.group())
-                logger.debug("JSON parsing successful with regex", session_id=session_id, keys_found=list(result.keys()))
-                return result
-            
-            result = json.loads(text)
-            logger.debug("JSON parsing successful without regex", session_id=session_id, keys_found=list(result.keys()))
-            return result
-        except Exception as e:
-            logger.warning("JSON parsing failed, returning empty dict", session_id=session_id, error=str(e), text_preview=text[:200])
-            return {}
     
     def _calculate_overall_confidence(self, node: Dict[str, Any]) -> float:
         """Calculate overall confidence from parsed data.
@@ -312,26 +254,3 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             return float(node.get(field, 0.0))
         except (ValueError, TypeError):
             return 0.0
-
-    @observe(name="normalize-content-analysis", observation_type="tool")
-    def _normalize_content_analysis(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalize parsed JSON to match ContentAnalysisReport model."""
-        data: Dict[str, Any] = {
-            "skills": parsed.get("skills", []),
-            "achievements": parsed.get("achievements", []),
-            "suggestions": parsed.get("suggestions", []),
-            "hallucinationRisk": self._get_double_or_zero(parsed, "hallucinationRisk"),
-            "summary": self._get_text_or_empty(parsed, "summary"),
-        }
-        try:
-            validated = ContentAnalysisReport.model_validate(data)
-            return validated.model_dump()
-        except Exception:
-            fallback = ContentAnalysisReport(
-                skills=[],
-                achievements=[],
-                suggestions=[],
-                hallucinationRisk=self._get_double_or_zero(parsed, "hallucinationRisk"),
-                summary=self._get_text_or_empty(parsed, "summary"),
-            )
-            return fallback.model_dump()

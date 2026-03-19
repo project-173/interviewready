@@ -5,8 +5,11 @@ import time
 from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Protocol, Optional, Dict, Any, List
+
+from app.utils.json_parser import parse_json_object
 from ..core.langfuse_client import langfuse
-from typing import Protocol, Optional, Dict, Any, Union
+from typing import Protocol, Optional, Dict, Any, Union, TypeVar, Type
+from pydantic import BaseModel, ValidationError
 from ..core.logging import logger
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
@@ -173,3 +176,21 @@ class BaseAgent(ABC, BaseAgentProtocol):
                                 error_type=type(e).__name__,
                                 error_message=str(e))
                     raise
+
+    T = TypeVar("T", bound=BaseModel)
+
+    def parse_and_validate(self, raw_result: str | None, model: Type[T]) -> T:
+        """Parse raw Gemini output and validate it against a Pydantic model.
+        
+        Raises ValueError on empty/unparseable output, ValidationError on schema mismatch.
+        """
+        if not raw_result or not raw_result.strip():
+            raise ValueError("Empty response received from Gemini API")
+
+        parsed = parse_json_object(raw_result)
+        if not parsed:
+            raise ValueError(
+                f"Failed to parse JSON from Gemini response: {raw_result[:200]}"
+            )
+
+        return model.model_validate(parsed)
