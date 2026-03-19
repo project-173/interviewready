@@ -82,6 +82,30 @@ class GeminiService:
         if context and context.job_description:
             parts.append(f"Job Description: {context.job_description}")
 
+        # Include analysis from prior agents (if present) so downstream agents can build on it
+        if context and getattr(context, "shared_memory", None):
+            analysis_results = context.shared_memory.get("analysis_results")
+            if isinstance(analysis_results, dict) and analysis_results:
+                try:
+                    parts.append(
+                        f"Previous analysis results:\n{json.dumps(analysis_results, indent=2)}"
+                    )
+                except Exception:
+                    # Fall back to stringified form if JSON serialization fails
+                    parts.append(f"Previous analysis results: {analysis_results}")
+
+            # Include any conversational history (e.g., interview chat) to keep continuity
+            message_history = context.shared_memory.get("message_history")
+            if isinstance(message_history, list) and message_history:
+                try:
+                    parts.append("Conversation history:")
+                    for m in message_history:
+                        role = m.get("role", "user")
+                        text = m.get("text", "")
+                        parts.append(f"[{role}] {text}")
+                except Exception:
+                    parts.append(f"Conversation history: {message_history}")
+
         parts.append(user_input)
 
         return "\n\n".join(parts)

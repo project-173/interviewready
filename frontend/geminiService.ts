@@ -119,7 +119,7 @@ export const interviewCoachAgent = async (
   history: { role: 'user' | 'agent'; text: string }[]
 ): Promise<string> => {
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
+    model: 'gemini-3-flash-preview',
     contents: `You are a high-stakes Interview Coach. Based on this alignment report: ${JSON.stringify(alignment)}, conduct a realistic mock interview. Ask one targeted question at a time. History: ${JSON.stringify(history)}`,
   });
   return response.text || "I'm sorry, I couldn't generate a response.";

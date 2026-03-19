@@ -29,7 +29,9 @@ class InterviewCoachAgent(BaseAgent):
 
         Always provide actionable, encouraging feedback that helps the candidate succeed in their job interview."""
     CONFIDENCE_SCORE = 0.85
-    DEFAULT_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
+    # Use the global Gemini model configured in settings (GEMINI_MODEL) for both standard and live calls.
+    # This ensures interview coaching uses the same model as other agents unless overridden via env vars.
+    DEFAULT_MODEL = settings.GEMINI_MODEL
 
     def __init__(self, gemini_service):
         """Initialize Interview Coach Agent.
@@ -111,7 +113,7 @@ class InterviewCoachAgent(BaseAgent):
 
                 if gemini_live_available:
                     result = self._call_gemini_live_audio(
-                        input_text, self.system_prompt
+                        input_text, self.system_prompt, context
                     )
                     method_used = "gemini_live_audio"
                 else:
@@ -148,7 +150,7 @@ class InterviewCoachAgent(BaseAgent):
                             f"InterviewCoachAgent using Gemini Live",
                             session_id=session_id,
                         )
-                        result = self._call_gemini_live(input_text)
+                        result = self._call_gemini_live(input_text, context)
                         if not result or result.startswith("Error"):
                             logger.warning(
                                 f"InterviewCoachAgent Gemini Live failed, falling back to standard Gemini",
@@ -260,18 +262,19 @@ class InterviewCoachAgent(BaseAgent):
             raise
 
     def _call_gemini_live_audio(
-        self, audio_data: bytes, system_prompt: str
+        self, audio_data: bytes, system_prompt: str, context: Optional[SessionContext] = None
     ) -> Optional[str]:
         """Call Gemini Live service with audio data.
 
         Args:
             audio_data: Audio data as bytes
             system_prompt: System prompt
+            context: Session context (used to add analysis history and resume/job info)
 
         Returns:
             Response from Gemini Live or None if error
         """
-        session_id = "unknown"  # We don't have session context here
+        session_id = getattr(context, "session_id", "unknown")
 
         if (
             not hasattr(self.gemini_live_service, "connected")
@@ -289,10 +292,23 @@ class InterviewCoachAgent(BaseAgent):
                 audio_length=len(audio_data),
             )
 
+            # Build a small text prompt that includes prior analysis/context so the audio response is grounded.
+            text_prompt = """
+This is a follow-up audio response from the user. Use the resume, job description, and previous analysis results to provide coaching feedback.
+"""
+            if context:
+                # Reuse the same prompt construction logic used for standard Gemini calls
+                try:
+                    text_prompt = self.gemini_service._construct_user_message(
+                        text_prompt, context
+                    )
+                except Exception:
+                    pass
+
             # Send audio and wait for response (10s timeout)
             live_start_time = time.time()
             raw = self.gemini_live_service.send_audio_and_wait_response(
-                audio_data, system_prompt, timeout_ms=10000
+                audio_data, system_prompt, text_prompt=text_prompt, timeout_ms=10000
             )
             live_execution_time = time.time() - live_start_time
 
@@ -322,3 +338,86 @@ class InterviewCoachAgent(BaseAgent):
                 error_message=str(e),
             )
             return f"Error contacting Gemini Live for audio: {str(e)}"
+
+    def _call_gemini_live(
+        self, input_text: str, context: Optional[SessionContext] = None
+    ) -> Optional[str]:
+        """Call Gemini Live service with text input.
+
+        Args:
+            input_text: User input text
+            context: Session context (used to include prior analysis + history)
+
+        Returns:
+            Response from Gemini Live or None if error
+        """
+        session_id = getattr(context, "session_id", "unknown")
+
+        if (
+            not hasattr(self.gemini_live_service, "connected")
+            or not self.gemini_live_service.connected
+            or not getattr(self.gemini_live_service, "client", None)
+        ):
+            logger.debug(
+                "InterviewCoachAgent Gemini Live not connected",
+                session_id=session_id,
+            )
+            return None
+
+        try:
+            logger.debug(
+                "InterviewCoachAgent calling Gemini Live with text",
+                session_id=session_id,
+                input_length=len(input_text),
+            )
+
+            from google.genai import types
+
+            live_start_time = time.time()
+            # Build a prompt that includes context (resume, job, analysis results) when available.
+            user_prompt = input_text
+            if context:
+                try:
+                    user_prompt = self.gemini_service._construct_user_message(
+                        input_text, context
+                    )
+                except Exception:
+                    # Fallback to raw input_text if prompt construction fails.
+                    user_prompt = input_text
+
+            response = self.gemini_live_service.client.models.generate_content(
+                model=self.gemini_live_service.model_name,
+                contents=[user_prompt],
+                config=types.GenerateContentConfig(
+                    system_instruction=self.system_prompt,
+                ),
+            )
+            live_execution_time = time.time() - live_start_time
+
+            raw = getattr(response, "text", None) or ""
+            if not raw or raw.strip() == "":
+                logger.warning(
+                    "InterviewCoachAgent Gemini Live returned empty response",
+                    session_id=session_id,
+                    execution_time_ms=round(live_execution_time * 1000, 2),
+                )
+                return "(No response from Gemini Live)"
+
+            logger.debug(
+                "InterviewCoachAgent Gemini Live text call successful",
+                session_id=session_id,
+                execution_time_ms=round(live_execution_time * 1000, 2),
+                response_length=len(raw),
+                response_preview=raw[:100] + "..." if len(raw) > 100 else raw,
+            )
+
+            return raw
+        except Exception as e:
+            logger.log_agent_error("InterviewCoachAgent-GeminiLive", e, session_id)
+            logger.error(
+                "InterviewCoachAgent Gemini Live text call failed",
+                session_id=session_id,
+                error_type=type(e).__name__,
+                error_message=str(e),
+            )
+            return f"Error contacting Gemini Live: {str(e)}"

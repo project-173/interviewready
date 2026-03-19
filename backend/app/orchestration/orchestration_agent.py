@@ -91,12 +91,17 @@ class OrchestrationAgent:
             job_description = request.jobDescription or ""
             message_history = request.messageHistory or []
 
+            # Persist message history into shared memory so downstream agents can reference it
+            shared_memory = dict(context.shared_memory or {})
+            shared_memory["message_history"] = message_history
+            context.shared_memory = shared_memory
+
             # Extract audio data if present — routed only to INTERVIEW_COACH
             audio_data: bytes | None = getattr(request, "audioData", None)
 
-            # Build input text based on intent and available data
+            # Build input text based on intent, available data, and conversation history
             input_text = self._build_agent_input(
-                intent, resume_data, job_description, audio_data
+                intent, resume_data, job_description, message_history, audio_data
             )
 
             # Log orchestration start
@@ -228,6 +233,19 @@ class OrchestrationAgent:
         response.decision_trace = trace
 
         audited_response = self.governance.audit(response, current_input)
+
+        # Persist agent output into shared memory so downstream agents can reuse analysis.
+        # This allows, for example, InterviewCoachAgent to access prior ResumeCritic/Alignment results.
+        shared_memory = dict(context.shared_memory or {})
+        analysis_results = dict(shared_memory.get("analysis_results") or {})
+        analysis_results[agent_name] = {
+            "content": audited_response.content,
+            "confidence_score": audited_response.confidence_score,
+            "sharp_metadata": audited_response.sharp_metadata,
+        }
+        shared_memory["analysis_results"] = analysis_results
+        context.shared_memory = shared_memory
+
         context.add_to_history(audited_response)
         context.decision_trace = trace
 
@@ -263,23 +281,44 @@ class OrchestrationAgent:
         intent: str,
         resume_data: dict,
         job_description: str,
+        message_history: list[dict[str, str]],
         audio_data: bytes | None = None,
     ) -> str | bytes:
-        """Build input for agents: audio bytes for INTERVIEW_COACH, text for all others."""
+        """Build input for agents.
+
+        - For INTERVIEW_COACH with audio, return raw audio bytes (the agent will handle text context separately).
+        - For all other cases, return a structured text prompt.
+        """
         if audio_data is not None and intent == "INTERVIEW_COACH":
             # For interview coaching with audio, return the audio data directly
             return audio_data
 
+        # Build a basic context block for text-based agents
+        resume_block = f"Resume data:\n{json.dumps(resume_data, indent=2)}"
+        jd_block = f"Job Description:\n{job_description}" if job_description else ""
+
+        history_block = ""
+        if message_history:
+            history_lines = []
+            for msg in message_history:
+                role = msg.get("role", "user")
+                text = msg.get("text", "")
+                history_lines.append(f"[{role}] {text}")
+            history_block = "\nConversation history:\n" + "\n".join(history_lines)
+
         if intent == "RESUME_CRITIC":
-            return f"Resume data: {json.dumps(resume_data, indent=2)}"
+            return f"{resume_block}{history_block}"
 
         if intent == "CONTENT_STRENGTH":
-            return f"Resume data: {json.dumps(resume_data, indent=2)}"
+            return f"{resume_block}{history_block}"
 
         if intent == "ALIGNMENT":
-            return f"Resume data: {json.dumps(resume_data, indent=2)}\nJob Description: {job_description}"
+            return f"{resume_block}\n{jd_block}{history_block}"
 
-        return f"Request data: {json.dumps(resume_data, indent=2)}"
+        if intent == "INTERVIEW_COACH":
+            return f"{resume_block}\n{jd_block}{history_block}"
+
+        return f"Request data: {json.dumps(resume_data, indent=2)}{history_block}"
 
     def _normalize_resume(
         self, request: ChatRequest, context: SessionContext

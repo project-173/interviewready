@@ -188,7 +188,12 @@ const App: React.FC = () => {
     setState(prev => ({ ...prev, interviewHistory: updatedHistory }));
     setIsLoading(true);
     try {
-      const responseText = await interviewCoachAgent(state.alignmentReport, updatedHistory);
+      const responseText = await interviewCoachAgent(
+        state.alignmentReport,
+        updatedHistory,
+        state.currentResume,
+        state.jobDescription
+      );
       setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
     } catch (err: any) {
       setError(err.message);
@@ -210,7 +215,7 @@ const App: React.FC = () => {
         audioData: audio,
       };
       const response = await backendService.callChatEndpoint(request);
-      const responseText = typeof response.payload === 'string' ? response.payload : JSON.stringify(response.payload);
+      const responseText = typeof response.payload === 'string' ? response.payload : JSON.stringify(response.payload, null, 2);
       setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
     } catch (err: any) {
       setError(err.message);

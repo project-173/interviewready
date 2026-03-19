@@ -36,7 +36,14 @@ class BackendService {
   private sessionId: string;
 
   constructor() {
-    this.sessionId = this.generateSessionId();
+    // Persist session ID across page reloads so the backend can retain session-scoped state
+    const storedSessionId = localStorage.getItem('interviewready_session_id');
+    if (storedSessionId) {
+      this.sessionId = storedSessionId;
+    } else {
+      this.sessionId = this.generateSessionId();
+      localStorage.setItem('interviewready_session_id', this.sessionId);
+    }
   }
 
   private generateSessionId(): string {
@@ -68,7 +75,7 @@ class BackendService {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.getAuthToken()}`,
       },
-      body: JSON.stringify(request),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
@@ -176,27 +183,28 @@ class BackendService {
   }
 
   async interviewCoachAgent(
-    alignment: AlignmentReport, 
-    history: { role: 'user' | 'agent'; text: string }[]
+    alignment: AlignmentReport,
+    history: { role: 'user' | 'agent'; text: string }[],
+    resume?: Resume | null,
+    jobDescription?: string
   ): Promise<string> {
-    const resume: Resume = {
-      work: [],
-      education: [],
-      awards: [],
-      certificates: [],
-      skills: [],
-      projects: []
-    };
-
     const request: ChatRequest = {
       intent: 'INTERVIEW_COACH',
-      resumeData: resume,
-      jobDescription: JSON.stringify(alignment),
-      messageHistory: history
+      resumeData: resume ?? null,
+      jobDescription: jobDescription || JSON.stringify(alignment),
+      messageHistory: history,
     };
-    
+
     const response = await this.callChatEndpoint(request);
-    return (response.payload && typeof response.payload === 'string' ? response.payload : response.content) || "I'm sorry, I couldn't generate a response.";
+    // The backend returns `payload` (not `content`) for chat responses.
+    // Use it directly if it's a string; otherwise serialize objects to show something meaningful.
+    if (typeof response.payload === 'string') {
+      return response.payload;
+    }
+    if (response.payload && typeof response.payload === 'object') {
+      return JSON.stringify(response.payload, null, 2);
+    }
+    return "I'm sorry, I couldn't generate a response.";
   }
 }
 
@@ -206,4 +214,9 @@ export const backendService = new BackendService();
 export const resumeCriticAgent = (resume: Resume) => backendService.resumeCriticAgent(resume);
 export const contentStrengthAgent = (resume?: Resume | null) => backendService.contentStrengthAgent(resume);
 export const alignmentAgent = (resume: Resume | null | undefined, jd: string) => backendService.alignmentAgent(resume, jd);
-export const interviewCoachAgent = (alignment: AlignmentReport, history: { role: 'user' | 'agent'; text: string }[]) => backendService.interviewCoachAgent(alignment, history);
+export const interviewCoachAgent = (
+  alignment: AlignmentReport,
+  history: { role: 'user' | 'agent'; text: string }[],
+  resume?: Resume | null,
+  jobDescription?: string
+) => backendService.interviewCoachAgent(alignment, history, resume, jobDescription);
