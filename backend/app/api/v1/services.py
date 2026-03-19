@@ -26,7 +26,6 @@ def get_orchestration_agent() -> OrchestrationAgent:
     return OrchestrationAgent(
         agent_list=agents,
         governance=governance,
-        intent_gemini_service=gemini_service,
     )
 
 

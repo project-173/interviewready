@@ -105,3 +105,6 @@ __pycache__
 
 # Roam code
 .roam/
+
+# Aider
+.aider*

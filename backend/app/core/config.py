@@ -1,9 +1,9 @@
 """Application configuration settings."""
 
-from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 from typing import List, Optional, Union
 import os
+import json
 import json
 
 
@@ -21,11 +21,11 @@ class Settings(BaseSettings):
     APP_ENV: str = "local"
     
     # Database
-    DATABASE_URL: str = "sqlite:///./test.db"  # Use SQLite by default to ensure startup without Postgres
+    DATABASE_URL: str = "postgresql://user:password@localhost/interviewready"
     
     # Google Cloud / Vertex AI Configuration
-    GOOGLE_PROJECT_ID: str = "your-project-id"
-    GOOGLE_LOCATION: str = "asia-southeast1"
+    GOOGLE_PROJECT_ID: str = "architecting-ai-systems-e71af"
+    GOOGLE_LOCATION: str = "us-central1"
     GOOGLE_CREDENTIALS_URI: Optional[str] = None
     
     # Gemini Model Configuration
@@ -81,10 +81,20 @@ class Settings(BaseSettings):
     ENABLE_INFO_ENDPOINT: bool = True
     ENABLE_METRICS_ENDPOINT: bool = True
     
-    model_config = ConfigDict(
-        env_file=".env",
-        case_sensitive=True
-    )
+    # LangGraph
+    LANGGRAPH_API_KEY: Optional[str] = None
+    
+    # Langfuse
+    LANGFUSE_PUBLIC_KEY: Optional[str] = None
+    LANGFUSE_SECRET_KEY: Optional[str] = None
+    LANGFUSE_HOST: Optional[str] = None
+    
+    # Environment
+    APP_ENV: str = "development"
+    
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
 
 
 # Create settings instance

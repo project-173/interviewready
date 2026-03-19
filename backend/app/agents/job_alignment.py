@@ -3,6 +3,7 @@
 import json
 import time
 from typing import List, Dict, Any
+from langfuse import observe
 
 from .base import BaseAgent
 from ..core.langfuse_client import trace_agent_process, observe
@@ -112,12 +113,10 @@ class JobAlignmentAgent(BaseAgent):
         agent_name = self.get_name()
         processing_start_time = time.time()
 
-        logger.debug(
-            "JobAlignmentAgent processing started",
-            session_id=session_id,
-            input_length=len(input_text),
-            input_preview=input_text[:100] + "..." if len(input_text) > 100 else input_text,
-        )
+        logger.debug("JobAlignmentAgent processing started", 
+                    session_id=session_id, 
+                    input_length=len(input_text),
+                    input_preview=input_text[:100] + "..." if len(input_text) > 100 else input_text)
 
         try:
             raw_output = None
@@ -132,6 +131,10 @@ class JobAlignmentAgent(BaseAgent):
 
             if raw_output is None:
                 raw_output = self.call_gemini(input_text, context)
+            
+            # Validate that we got a meaningful response
+            if not raw_output or not raw_output.strip():
+                raise ValueError("Empty response received from Gemini API")
 
             processing_time = time.time() - processing_start_time
             logger.debug(
@@ -142,6 +145,11 @@ class JobAlignmentAgent(BaseAgent):
             )
 
             parsed = self._parse_json(raw_output)
+            
+            # Validate that parsing succeeded
+            if not parsed:
+                raise ValueError(f"Failed to parse valid JSON from Gemini response: {raw_output[:200]}...")
+            
             normalized = self._normalize_alignment_output(parsed)
 
             logger.debug(
@@ -199,13 +207,11 @@ class JobAlignmentAgent(BaseAgent):
                 sharp_metadata=metadata,
             )
 
-            logger.debug(
-                "JobAlignmentAgent response created",
-                session_id=session_id,
-                confidence_score=confidence,
-                fit_score=fit_score,
-                analysis_type="job_alignment",
-            )
+            logger.debug("JobAlignmentAgent processing completed", 
+                        session_id=session_id, 
+                        processing_time_ms=round(processing_time * 1000, 2),
+                        result_length=len(raw_output),
+                        result_preview=raw_output[:100] + "..." if len(raw_output) > 100 else raw_output)
 
             return response
 

@@ -1,17 +1,20 @@
 """Agents endpoint for listing available agent prompts."""
 
-from typing import Any
-
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Query, status
+from langfuse import get_client, observe, propagate_attributes
 
 from app.api.v1.services import get_orchestration_agent
 from app.core.langfuse_client import langfuse
 
 router = APIRouter()
 
+langfuse = get_client()
 
 @router.get("", response_model=dict[str, str])
-async def list_agents() -> dict[str, str]:
+@observe(name="list_agents")
+async def list_agents(
+    session_id: str | None = Query(None, alias="sessionId"),
+) -> dict[str, str]:
     """Return available agents mapped to their current system prompts."""
 
 
@@ -37,4 +40,9 @@ async def list_agents() -> dict[str, str]:
         }
 
         trace.update(output={"success": True, "agent_count": len(result)})
+        return result
+
+        langfuse.update_current_span(
+            output={"success": True, "agent_count": len(result)}
+        )
         return result

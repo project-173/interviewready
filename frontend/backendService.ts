@@ -23,7 +23,13 @@ export interface ExtractorFileData {
 
 interface ChatResponse {
   agent?: string;
-  payload?: Record<string, any> | any[] | string;
+  payload?: any;
+  agent_name?: string;
+  content?: string;
+  reasoning?: string;
+  confidence_score?: number;
+  decision_trace?: string[];
+  sharp_metadata?: Record<string, any>;
 }
 
 class BackendService {
@@ -39,7 +45,12 @@ class BackendService {
 
   private hasResumeContent(resume?: Resume | null): boolean {
     if (!resume) return false;
-    return Object.keys(resume).length > 0;
+    return Object.values(resume).some((value) => {
+      if (Array.isArray(value)) {
+        return value.length > 0;
+      }
+      return Boolean(value);
+    });
   }
 
   getSessionId(): string {
@@ -47,6 +58,10 @@ class BackendService {
   }
 
   async callChatEndpoint(request: ChatRequest): Promise<ChatResponse> {
+    const requestBody = {
+      ...request,
+      audioData: request.audioData ? btoa(String.fromCharCode(...request.audioData)) : null,
+    };
     const response = await fetch(`${API_BASE_URL}/api/v1/chat?sessionId=${this.sessionId}`, {
       method: 'POST',
       headers: {
@@ -100,9 +115,15 @@ class BackendService {
     };
     
     const response = await this.callChatEndpoint(request);
-    const payload = response.payload;
-    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-      return payload as StructuralAssessment;
+    
+    try {
+      if (response.payload && typeof response.payload === 'object') {
+        return response.payload;
+      }
+      return JSON.parse(response.content || '{}');
+    } catch (error) {
+      console.error('Failed to parse resume critic response:', error);
+      throw new Error('Invalid response from resume critic agent');
     }
     throw new Error('Invalid response from resume critic agent');
   }
@@ -116,9 +137,15 @@ class BackendService {
     if (this.hasResumeContent(resume)) request.resumeData = resume;
     
     const response = await this.callChatEndpoint(request);
-    const payload = response.payload;
-    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-      return payload as ContentAnalysisReport;
+    
+    try {
+      if (response.payload && typeof response.payload === 'object') {
+        return response.payload;
+      }
+      return JSON.parse(response.content || '{}');
+    } catch (error) {
+      console.error('Failed to parse content strength response:', error);
+      throw new Error('Invalid response from content strength agent');
     }
     throw new Error('Invalid response from content strength agent');
   }
@@ -132,42 +159,33 @@ class BackendService {
     if (this.hasResumeContent(resume)) request.resumeData = resume;
     
     const response = await this.callChatEndpoint(request);
-    const payload = response.payload;
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    
+    try {
+      let data = response.payload;
+      if (!data || typeof data !== 'object') {
+        data = JSON.parse(response.content || '{}');
+      }
+      return {
+        ...data,
+        sources: data.sources || []
+      };
+    } catch (error) {
+      console.error('Failed to parse alignment response:', error);
       throw new Error('Invalid response from alignment agent');
     }
-    const data = payload as Record<string, any>;
-    return {
-      ...data,
-      sources: data.sources || []
-    } as AlignmentReport;
   }
 
   async interviewCoachAgent(
     alignment: AlignmentReport, 
     history: { role: 'user' | 'agent'; text: string }[]
   ): Promise<string> {
-    // Create a minimal resume object for the interview coach
     const resume: Resume = {
-      title: '',
-      summary: '',
-      isMaster: false,
-      contact: {
-        fullName: '',
-        email: '',
-        phone: '',
-        city: '',
-        country: '',
-        linkedin: '',
-        github: '',
-        portfolio: ''
-      },
+      work: [],
+      education: [],
+      awards: [],
+      certificates: [],
       skills: [],
-      experiences: [],
-      educations: [],
-      projects: [],
-      certifications: [],
-      awards: []
+      projects: []
     };
 
     const request: ChatRequest = {
@@ -178,9 +196,7 @@ class BackendService {
     };
     
     const response = await this.callChatEndpoint(request);
-    return typeof response.payload === 'string'
-      ? response.payload
-      : "I'm sorry, I couldn't generate a response.";
+    return (response.payload && typeof response.payload === 'string' ? response.payload : response.content) || "I'm sorry, I couldn't generate a response.";
   }
 }
 

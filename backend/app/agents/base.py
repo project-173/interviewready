@@ -2,9 +2,9 @@
 
 import json
 import time
-from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Protocol, Optional, Dict, Any
+from abc import ABC, abstractmethod
+from typing import Protocol, Optional, Dict, Any, Union
 from ..core.langfuse_client import langfuse
 from ..core.logging import logger
 from ..models.agent import AgentResponse
@@ -18,7 +18,7 @@ class BaseAgentProtocol(Protocol):
         """Get the agent name."""
         ...
     
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
+    def process(self, input_data: Union[str, bytes], context: SessionContext) -> AgentResponse:
         """Process input and return agent response."""
         ...
     
@@ -47,6 +47,7 @@ class BaseAgent(ABC, BaseAgentProtocol):
         self.gemini_service = gemini_service
         self.system_prompt = system_prompt
         self.name = name
+        self.mock_service = None  # Initialize mock_service attribute
     
     def get_name(self) -> str:
         """Get the agent name."""

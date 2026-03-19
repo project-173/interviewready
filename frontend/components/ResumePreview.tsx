@@ -1,12 +1,31 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Resume } from "../types";
 
 interface ResumePreviewProps {
   resume: Resume | null;
 }
 
+const formatRange = (start?: string, end?: string): string => {
+  if (start && end) return `${start} - ${end}`;
+  if (start) return start;
+  if (end) return end;
+  return "";
+};
+
 export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
-  const [activeTab, setActiveTab] = useState("basics");
+  const [activeTab, setActiveTab] = useState("work");
+
+  const tabs = useMemo(
+    () => [
+      { id: "work", label: "Work" },
+      { id: "education", label: "Education" },
+      { id: "skills", label: "Skills" },
+      { id: "projects", label: "Projects" },
+      { id: "certificates", label: "Certificates" },
+      { id: "awards", label: "Awards" },
+    ],
+    []
+  );
 
   if (!resume) {
     return (
@@ -36,15 +55,12 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
     );
   }
 
-  const tabs = [
-    { id: "basics", label: "Summary" },
-    { id: "experience", label: "Experience" },
-    { id: "education", label: "Education" },
-    { id: "skills", label: "Skills" },
-    { id: "projects", label: "Projects" },
-    { id: "certifications", label: "Certifications" },
-    { id: "awards", label: "Awards" },
-  ];
+  const workItems = resume.work ?? [];
+  const educationItems = resume.education ?? [];
+  const skillItems = resume.skills ?? [];
+  const projectItems = resume.projects ?? [];
+  const certificateItems = resume.certificates ?? [];
+  const awardItems = resume.awards ?? [];
 
   return (
     <div className="bg-white h-full flex flex-col animate-in fade-in duration-500">
@@ -52,33 +68,10 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
         <div className="flex justify-between items-start mb-8">
           <div>
             <h2 className="text-2xl font-bold tracking-tight text-slate-900">
-              {resume.name}
+              Resume Preview
             </h2>
             <div className="flex gap-4 mt-2 text-xs font-medium text-slate-400">
-              <span className="flex items-center gap-1.5">
-                <svg
-                  className="w-3 h-3"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                </svg>
-                {resume.email}
-              </span>
-              {resume.phone && (
-                <span className="flex items-center gap-1.5">
-                  <svg
-                    className="w-3 h-3"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path>
-                  </svg>
-                  {resume.phone}
-                </span>
-              )}
+              <span>JSON Resume (basics excluded)</span>
             </div>
           </div>
           <button className="text-[11px] font-bold text-slate-500 border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all flex items-center gap-2 shadow-sm">
@@ -94,7 +87,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
           </button>
         </div>
 
-        <div className="inline-flex h-9 items-center justify-center rounded-lg bg-slate-100 p-1 text-slate-500">
+        <div className="inline-flex h-9 items-center justify-center rounded-lg bg-slate-100 p-1 text-slate-500 flex-wrap">
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -112,116 +105,163 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
       </div>
 
       <div className="flex-1 overflow-y-auto p-10 max-w-4xl mx-auto w-full">
-        {activeTab === "basics" && (
-          <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em] mb-6">
-              Profile Narrative
-            </h3>
-            <div className="p-8 bg-slate-50 border border-slate-200 rounded-2xl relative">
-              <div className="absolute top-4 left-4 text-slate-200">
-                <svg
-                  className="w-8 h-8"
-                  fill="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.154c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z" />
-                </svg>
-              </div>
-              <p className="text-slate-700 leading-relaxed text-sm relative z-10 font-medium">
-                {resume.summary || "No professional summary provided."}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {activeTab === "experience" && (
+        {activeTab === "work" && (
           <div className="space-y-10 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {resume.experiences.map((exp) => (
-              <div key={`${exp.company}-${exp.role}`} className="group">
-                <div className="flex justify-between items-baseline mb-3">
-                  <h4 className="text-base font-bold text-slate-900">
-                    {exp.role}
-                  </h4>
-                  <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-1 rounded border border-slate-200">
-                    {exp.duration}
-                  </span>
+            {workItems.length > 0 ? (
+              workItems.map((item, index) => (
+                <div key={`${item.name}-${item.position}-${index}`} className="group">
+                  <div className="flex justify-between items-baseline mb-3">
+                    <h4 className="text-base font-bold text-slate-900">
+                      {item.position || "Role"}
+                    </h4>
+                    <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-1 rounded border border-slate-200">
+                      {formatRange(item.startDate, item.endDate) || "Dates"}
+                    </span>
+                  </div>
+                  <p className="text-xs font-semibold text-slate-500 mb-4">
+                    {item.name || "Company"}
+                  </p>
+                  {item.summary && (
+                    <p className="text-[13px] text-slate-600 leading-relaxed mb-4">
+                      {item.summary}
+                    </p>
+                  )}
+                  {item.highlights && item.highlights.length > 0 && (
+                    <ul className="space-y-2.5">
+                      {item.highlights.map((highlight, idx) => (
+                        <li
+                          key={`${highlight}-${idx}`}
+                          className="text-[13px] text-slate-600 flex gap-3 leading-relaxed"
+                        >
+                          <span className="text-slate-300 font-bold shrink-0">-</span>
+                          {highlight}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
-                <p className="text-xs font-semibold text-slate-500 mb-4">
-                  {exp.company}
-                </p>
-                <ul className="space-y-2.5">
-                  {exp.achievements.map((ach) => (
-                    <li
-                      key={ach}
-                      className="text-[13px] text-slate-600 flex gap-3 leading-relaxed"
-                    >
-                      <span className="text-slate-300 font-bold shrink-0">
-                        •
-                      </span>
-                      {ach}
-                    </li>
-                  ))}
-                </ul>
+              ))
+            ) : (
+              <div className="text-center py-12 text-slate-300 italic text-xs border-2 border-dashed border-slate-100 rounded-xl">
+                No work history found.
               </div>
-            ))}
+            )}
           </div>
         )}
 
         {activeTab === "education" && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {resume.educations.map((edu) => (
-              <div
-                key={`${edu.institution}-${edu.degree}`}
-                className="p-6 bg-white border border-slate-200 rounded-xl hover:shadow-md transition-shadow"
-              >
-                <h4 className="font-bold text-slate-900 mb-1.5 text-sm">
-                  {edu.degree}
-                </h4>
-                <p className="text-xs font-semibold text-slate-500 mb-4">
-                  {edu.institution}
-                </p>
-                <div className="flex items-center gap-2">
-                  <div className="px-2 py-0.5 bg-slate-50 text-[10px] text-slate-400 border border-slate-100 rounded font-bold uppercase">
-                    {edu.year}
+            {educationItems.length > 0 ? (
+              educationItems.map((edu, index) => (
+                <div
+                  key={`${edu.institution}-${edu.area}-${index}`}
+                  className="p-6 bg-white border border-slate-200 rounded-xl hover:shadow-md transition-shadow"
+                >
+                  <h4 className="font-bold text-slate-900 mb-1.5 text-sm">
+                    {[edu.studyType, edu.area].filter(Boolean).join(" ") || "Education"}
+                  </h4>
+                  <p className="text-xs font-semibold text-slate-500 mb-3">
+                    {edu.institution || "Institution"}
+                  </p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {formatRange(edu.startDate, edu.endDate) && (
+                      <div className="px-2 py-0.5 bg-slate-50 text-[10px] text-slate-400 border border-slate-100 rounded font-bold uppercase">
+                        {formatRange(edu.startDate, edu.endDate)}
+                      </div>
+                    )}
+                    {edu.score && (
+                      <div className="px-2 py-0.5 bg-slate-50 text-[10px] text-slate-400 border border-slate-100 rounded font-bold uppercase">
+                        Score {edu.score}
+                      </div>
+                    )}
                   </div>
+                  {edu.courses && edu.courses.length > 0 && (
+                    <div className="mt-4 text-[11px] text-slate-500">
+                      Courses: {edu.courses.join(", ")}
+                    </div>
+                  )}
                 </div>
+              ))
+            ) : (
+              <div className="col-span-2 text-center py-12 text-slate-300 italic text-xs border-2 border-dashed border-slate-100 rounded-xl">
+                No education entries found.
               </div>
-            ))}
+            )}
           </div>
         )}
 
         {activeTab === "skills" && (
-          <div className="flex flex-wrap gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {resume.skills.map((skill) => (
-              <span
-                key={skill}
-                className="bg-white border border-slate-200 text-slate-700 px-3.5 py-1.5 rounded-lg text-[11px] font-semibold hover:border-slate-400 transition-colors shadow-sm"
-              >
-                {skill}
-              </span>
-            ))}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            {skillItems.length > 0 ? (
+              skillItems.map((skill, index) => (
+                <div
+                  key={`${skill.name}-${index}`}
+                  className="p-4 bg-white border border-slate-200 rounded-xl"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-bold text-slate-900">
+                      {skill.name || "Skill"}
+                    </h4>
+                    {skill.level && (
+                      <span className="text-[10px] font-bold text-slate-400 uppercase">
+                        {skill.level}
+                      </span>
+                    )}
+                  </div>
+                  {skill.keywords && skill.keywords.length > 0 && (
+                    <div className="text-[11px] text-slate-500">
+                      {skill.keywords.join(", ")}
+                    </div>
+                  )}
+                </div>
+              ))
+            ) : (
+              <div className="text-center py-12 text-slate-300 italic text-xs border-2 border-dashed border-slate-100 rounded-xl col-span-2">
+                No skills found.
+              </div>
+            )}
           </div>
         )}
 
         {activeTab === "projects" && (
           <div className="grid grid-cols-1 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {resume.projects && resume.projects.length > 0 ? (
-              resume.projects.map((proj) => (
+            {projectItems.length > 0 ? (
+              projectItems.map((proj, index) => (
                 <div
-                  key={`${proj.title}-${proj.date}`}
+                  key={`${proj.name}-${index}`}
                   className="p-6 bg-slate-50/50 border border-slate-200 rounded-xl"
                 >
                   <div className="flex justify-between items-center mb-4">
                     <h4 className="font-bold text-sm text-slate-900">
-                      {proj.title}
+                      {proj.name || "Project"}
                     </h4>
                     <span className="text-[10px] font-bold text-slate-400">
-                      {proj.date}
+                      {formatRange(proj.startDate, proj.endDate)}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    {proj.description}
-                  </p>
+                  {proj.description && (
+                    <p className="text-xs text-slate-600 leading-relaxed mb-3">
+                      {proj.description}
+                    </p>
+                  )}
+                  {proj.highlights && proj.highlights.length > 0 && (
+                    <ul className="space-y-2">
+                      {proj.highlights.map((highlight, idx) => (
+                        <li
+                          key={`${highlight}-${idx}`}
+                          className="text-[12px] text-slate-600 flex gap-3 leading-relaxed"
+                        >
+                          <span className="text-slate-300 font-bold shrink-0">-</span>
+                          {highlight}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {proj.url && (
+                    <div className="mt-3 text-[11px] text-slate-400 break-all">
+                      {proj.url}
+                    </div>
+                  )}
                 </div>
               ))
             ) : (
@@ -232,33 +272,40 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
           </div>
         )}
 
-        {activeTab === "certifications" && (
+        {activeTab === "certificates" && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {resume.certifications && resume.certifications.length > 0 ? (
-              resume.certifications.map((cert) => (
+            {certificateItems.length > 0 ? (
+              certificateItems.map((cert, index) => (
                 <div
-                  key={`${cert.issuer}-${cert.name}`}
+                  key={`${cert.issuer}-${cert.name}-${index}`}
                   className="flex items-start gap-4 p-5 bg-white border border-slate-200 rounded-xl"
                 >
-                  <div className="p-2.5 bg-slate-50 border border-slate-100 rounded-lg text-lg">
-                    📜
+                  <div className="p-2.5 bg-slate-50 border border-slate-100 rounded-lg text-[11px] font-bold text-slate-500">
+                    CERT
                   </div>
                   <div>
                     <h4 className="text-[13px] font-bold text-slate-900 mb-0.5">
-                      {cert.name}
+                      {cert.name || "Certificate"}
                     </h4>
                     <p className="text-[10px] text-slate-400 font-bold uppercase">
-                      {cert.issuer}
+                      {cert.issuer || "Issuer"}
                     </p>
-                    <p className="text-[10px] text-slate-300 font-medium mt-1">
-                      {cert.date}
-                    </p>
+                    {cert.date && (
+                      <p className="text-[10px] text-slate-300 font-medium mt-1">
+                        {cert.date}
+                      </p>
+                    )}
+                    {cert.url && (
+                      <p className="text-[10px] text-slate-300 font-medium mt-1 break-all">
+                        {cert.url}
+                      </p>
+                    )}
                   </div>
                 </div>
               ))
             ) : (
               <div className="col-span-2 text-center py-12 text-slate-300 italic text-xs border-2 border-dashed border-slate-100 rounded-xl">
-                No certifications found.
+                No certificates found.
               </div>
             )}
           </div>
@@ -266,25 +313,32 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
 
         {activeTab === "awards" && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {resume.awards && resume.awards.length > 0 ? (
-              resume.awards.map((award) => (
+            {awardItems.length > 0 ? (
+              awardItems.map((award, index) => (
                 <div
-                  key={`${award.issuer}-${award.title}`}
+                  key={`${award.awarder}-${award.title}-${index}`}
                   className="flex gap-4 p-6 bg-white border border-slate-200 rounded-xl"
                 >
-                  <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg text-xl">
-                    🏆
+                  <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg text-[11px] font-bold text-slate-500">
+                    AWARD
                   </div>
                   <div>
                     <h4 className="text-[13px] font-bold text-slate-900 mb-0.5">
-                      {award.title}
+                      {award.title || "Award"}
                     </h4>
                     <p className="text-[10px] text-slate-400 font-bold uppercase">
-                      {award.issuer}
+                      {award.awarder || "Issuer"}
                     </p>
-                    <div className="inline-block mt-3 px-2 py-0.5 bg-slate-100 text-[9px] font-black text-slate-500 rounded uppercase tracking-tighter">
-                      {award.date}
-                    </div>
+                    {award.date && (
+                      <div className="inline-block mt-3 px-2 py-0.5 bg-slate-100 text-[9px] font-black text-slate-500 rounded uppercase tracking-tighter">
+                        {award.date}
+                      </div>
+                    )}
+                    {award.summary && (
+                      <p className="text-[11px] text-slate-500 mt-3">
+                        {award.summary}
+                      </p>
+                    )}
                   </div>
                 </div>
               ))

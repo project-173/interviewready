@@ -8,12 +8,17 @@ from .database import *
 
 __all__ = [
     # Base models
-    "Contact",
-    "Experience", 
+    "Work",
+    "Volunteer",
     "Education",
-    "Project",
-    "Certification",
     "Award",
+    "Certificate",
+    "Publication",
+    "Skill",
+    "Language",
+    "Interest",
+    "Reference",
+    "Project",
     "Source",
     
     # Resume models
@@ -24,6 +29,10 @@ __all__ = [
     "ChatApiResponse",
     "ChatRequest",
     "ResumeFile",
+    "ResumeDocument",
+    "AnalysisArtifact",
+    "ActionPlan",
+    "NormalizationFailure",
     "AlignmentReport",
     "ContentAnalysisReport",
     "InterviewMessage",
