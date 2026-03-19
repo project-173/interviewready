@@ -63,7 +63,7 @@ class BaseAgent(ABC, BaseAgentProtocol):
         return self.system_prompt
     
     @abstractmethod
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
+    def process(self, input_data: dict, context: SessionContext) -> AgentResponse:
         """Process input and return agent response. Must be implemented by subclasses."""
         pass
 
@@ -163,7 +163,7 @@ class BaseAgent(ABC, BaseAgentProtocol):
         
         Raises ValueError on empty/unparseable output, ValidationError on schema mismatch.
         """
-        if not raw_result or not raw_result.strip():
+        if not raw_result:
             raise ValueError("Empty response received from Gemini API")
 
         parsed = parse_json_object(raw_result)

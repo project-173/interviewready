@@ -1,0 +1,148 @@
+{
+    "ResumeCriticAgent": {
+        "score": 75,
+        "readability": "good",
+        "formattingRecommendations": [
+            "Use consistent bullet point formatting",
+            "Add clear section headers"
+        ],
+        "suggestions": [
+            "Quantify achievements with specific metrics",
+            "Remove redundant information"
+        ]
+    },
+    "ContentStrengthAgent": {
+        "skills": [
+            {
+                "name": "Python",
+                "category": "Technical",
+                "confidenceScore": 0.9,
+                "evidenceStrength": "HIGH",
+                "evidence": "Extensive experience with Python development"
+            },
+            {
+                "name": "Machine Learning",
+                "category": "Technical",
+                "confidenceScore": 0.85,
+                "evidenceStrength": "HIGH",
+                "evidence": "Built ML models for production systems"
+            },
+            {
+                "name": "Data Analysis",
+                "category": "Technical",
+                "confidenceScore": 0.8,
+                "evidenceStrength": "MEDIUM",
+                "evidence": "Performed data analysis for business insights"
+            }
+        ],
+        "achievements": [
+            {
+                "description": "Led team of 5 engineers",
+                "impact": "HIGH",
+                "quantifiable": true,
+                "confidenceScore": 0.95,
+                "originalText": "Led team of 5 engineers"
+            },
+            {
+                "description": "Improved system performance by 40%",
+                "impact": "HIGH",
+                "quantifiable": true,
+                "confidenceScore": 0.9,
+                "originalText": "Improved system performance by 40%"
+            }
+        ],
+        "suggestions": [
+            {
+                "original": "experienced developer",
+                "suggested": "5+ years of professional software development experience",
+                "rationale": "Quantify experience with specific timeframe",
+                "faithful": true,
+                "confidenceScore": 0.85
+            },
+            {
+                "original": "good communication",
+                "suggested": "Collaborated with cross-functional teams of 10+ members",
+                "rationale": "Provide specific evidence of communication skills",
+                "faithful": true,
+                "confidenceScore": 0.8
+            }
+        ],
+        "hallucinationRisk": 0.1,
+        "summary": "Strong technical background with measurable accomplishments"
+    },
+    "JobAlignmentAgent": {
+        "skillsMatch": [
+            "Python",
+            "SQL",
+            "Machine Learning"
+        ],
+        "missingSkills": [
+            "Kubernetes",
+            "AWS"
+        ],
+        "experienceMatch": "good",
+        "fitScore": 75,
+        "reasoning": "Candidate has strong technical foundation matching core requirements"
+    },
+    "InterviewCoachAgent": {
+        "questions": [
+            {
+                "question": "Describe a challenging technical problem you solved recently.",
+                "type": "behavioral",
+                "focus": "Problem Solving"
+            },
+            {
+                "question": "How would you design a scalable system for X?",
+                "type": "technical",
+                "focus": "System Design"
+            }
+        ],
+        "tips": [
+            "Use the STAR method for behavioral questions",
+            "Be specific about your contributions"
+        ]
+    },
+    "ExtractorAgent": {
+        "work": [
+            {
+                "name": "Tech Corp",
+                "position": "Software Engineer",
+                "startDate": "2020-01",
+                "endDate": "",
+                "summary": "Developed scalable backend services",
+                "highlights": [
+                    "Led team of 5 engineers",
+                    "Improved system performance by 40%"
+                ]
+            }
+        ],
+        "education": [
+            {
+                "institution": "State University",
+                "area": "Computer Science",
+                "studyType": "Bachelor of Science",
+                "endDate": "2020-01"
+            }
+        ],
+        "awards": [],
+        "certificates": [],
+        "skills": [
+            {
+                "name": "Python",
+                "level": "Advanced",
+                "keywords": ["Django", "FastAPI", "Data Analysis"]
+            },
+            {
+                "name": "JavaScript",
+                "level": "Intermediate",
+                "keywords": ["React", "Node.js"]
+            },
+            {
+                "name": "SQL",
+                "level": "Advanced",
+                "keywords": ["PostgreSQL", "MySQL"]
+            }
+        ],
+        "projects": []
+    }
+}

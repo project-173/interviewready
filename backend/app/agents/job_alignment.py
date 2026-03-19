@@ -6,6 +6,7 @@ from typing import List
 from langfuse import observe
 
 from .base import BaseAgent
+from ..core.config import settings
 from ..core.logging import logger
 from ..models.agent import AgentResponse, AlignmentReport
 from ..models.session import SessionContext
@@ -15,7 +16,7 @@ from ..utils.json_parser import parse_json_object
 class JobAlignmentAgent(BaseAgent):
     """Agent for evaluating how well a resume matches a specific job description."""
 
-    USE_MOCK_RESPONSE = False
+    USE_MOCK_RESPONSE = settings.MOCK_JOB_ALIGNMENT_AGENT
     MOCK_RESPONSE_KEY = "JobAlignmentAgent"
 
     SYSTEM_PROMPT = """
@@ -67,7 +68,9 @@ class JobAlignmentAgent(BaseAgent):
 
             raw_result = raw_result or self.call_gemini(input_text, context)
 
-            structured_result = self.parse_and_validate(raw_result, AlignmentReport).model_dump()
+            structured_result = self.parse_and_validate(
+                raw_result, AlignmentReport
+            ).model_dump()
 
             skills_match: List[str] = structured_result["skillsMatch"]
             missing_skills: List[str] = structured_result["missingSkills"]
@@ -109,7 +112,7 @@ class JobAlignmentAgent(BaseAgent):
                 error_message=str(e),
             )
             raise
-        
+
     def _compute_confidence(self, fit_score: int, missing_skills: List[str]) -> float:
         """Compute confidence score from fit score and missing skills count."""
         base = fit_score / 100.0

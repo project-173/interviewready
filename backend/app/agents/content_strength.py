@@ -4,6 +4,7 @@ import json
 import time
 from typing import Any
 from .base import BaseAgent
+from ..core.config import settings
 from ..core.logging import logger
 from ..models.agent import AgentResponse, ContentAnalysisReport
 from ..models.session import SessionContext
@@ -14,7 +15,7 @@ from langfuse import observe
 class ContentStrengthAgent(BaseAgent):
     """Analyzes resume content strength, skills reasoning, and evidence quality."""
 
-    USE_MOCK_RESPONSE = False
+    USE_MOCK_RESPONSE = settings.MOCK_CONTENT_STRENGTH_AGENT
     MOCK_RESPONSE_KEY = "ContentStrengthAgent"
 
     SYSTEM_PROMPT = """
@@ -115,7 +116,9 @@ class ContentStrengthAgent(BaseAgent):
 
             raw_result = raw_result or self.call_gemini(input_text, context)
 
-            structured_result = self.parse_and_validate(raw_result, ContentAnalysisReport).model_dump()
+            structured_result = self.parse_and_validate(
+                raw_result, ContentAnalysisReport
+            ).model_dump()
 
             overall_confidence = self._calculate_overall_confidence(structured_result)
             hallucination_risk = structured_result["hallucinationRisk"]
@@ -133,9 +136,9 @@ class ContentStrengthAgent(BaseAgent):
                 confidence_score=overall_confidence,
                 decision_trace=[
                     "ContentStrengthAgent: Analyzed resume for skills and achievements",
-                    f"ContentStrengthAgent: Identified {len(structured_result["skills"])} skills",
-                    f"ContentStrengthAgent: Identified {len(structured_result["achievements"])} achievements",
-                    f"ContentStrengthAgent: Generated {len(structured_result["suggestions"])} suggestions",
+                    f"ContentStrengthAgent: Identified {len(structured_result['skills'])} skills",
+                    f"ContentStrengthAgent: Identified {len(structured_result['achievements'])} achievements",
+                    f"ContentStrengthAgent: Generated {len(structured_result['suggestions'])} suggestions",
                     f"ContentStrengthAgent: Hallucination risk: {hallucination_risk}",
                 ],
                 sharp_metadata={

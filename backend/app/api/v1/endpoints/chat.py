@@ -31,10 +31,12 @@ async def chat_endpoint(
         metadata={
             "endpoint": "/api/v1/chat",
             "method": "POST",
-        }
+        },
     ):
         try:
-            context = get_or_create_session_context(session_id=session_id, user_id=user_id)
+            context = get_or_create_session_context(
+                session_id=session_id, user_id=user_id
+            )
         except PermissionError as exc:
             langfuse.update_current_span(
                 output={"error": "permission_denied", "reason": str(exc)}
@@ -83,15 +85,22 @@ async def chat_endpoint(
 
 def _extract_api_payload(response: AgentResponse) -> dict[str, Any] | list[Any] | str:
     """Convert internal AgentResponse content into external API payload."""
-    content = (response.content or "").strip()
+    content = response.content
+    if isinstance(content, dict):
+        return content
+    if isinstance(content, list):
+        return content
     if not content:
         return {}
+    content_str = str(content).strip()
+    if not content_str:
+        return {}
 
-    parsed = _parse_json_payload(content)
+    parsed = _parse_json_payload(content_str)
     if parsed is not None:
         return parsed
 
-    return content
+    return content_str
 
 
 def _parse_json_payload(content: str) -> dict[str, Any] | list[Any] | None:

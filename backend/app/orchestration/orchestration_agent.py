@@ -30,8 +30,8 @@ langfuse = get_client()
 class OrchestrationState(TypedDict):
     """Workflow state used by LangGraph orchestration."""
 
-    original_input: Union[str, bytes]
-    current_input: Union[str, bytes]
+    original_input: Union[dict, bytes]
+    current_input: Union[dict, bytes]
     context: SessionContext
     agent_sequence: list[str]
     current_index: int
@@ -52,11 +52,13 @@ class OrchestrationAgent:
         self.workflow = self._build_workflow()
 
     @observe(name="orchestration_execution")
-    def orchestrate(self, request: ChatRequest, context: SessionContext) -> AgentResponse:
+    def orchestrate(
+        self, request: ChatRequest, context: SessionContext
+    ) -> AgentResponse:
         """Run intent analysis and execute selected agent sequence."""
         start_time = time.time()
-        session_id = getattr(context, 'session_id', 'unknown')
-        user_id = getattr(context, 'user_id', None)
+        session_id = getattr(context, "session_id", "unknown")
+        user_id = getattr(context, "user_id", None)
 
         with propagate_attributes(session_id=session_id):
             langfuse.update_current_span(
@@ -68,10 +70,17 @@ class OrchestrationAgent:
 
             # Extract intent from request and build input text for agents
             intent = request.intent
-            if intent not in {"RESUME_CRITIC", "CONTENT_STRENGTH", "ALIGNMENT", "INTERVIEW_COACH"}:
+            if intent not in {
+                "RESUME_CRITIC",
+                "CONTENT_STRENGTH",
+                "ALIGNMENT",
+                "INTERVIEW_COACH",
+            }:
                 raise ValueError(f"Unsupported intent: {intent}")
 
-            logger.log_state_transition("orchestration_start", "normalize_resume", session_id, intent=intent)
+            logger.log_state_transition(
+                "orchestration_start", "normalize_resume", session_id, intent=intent
+            )
             normalization_result = self._normalize_resume(request, context)
             if isinstance(normalization_result, NormalizationFailure):
                 logger.log_state_transition(
@@ -80,7 +89,9 @@ class OrchestrationAgent:
                     session_id,
                     reason=normalization_result.reason,
                 )
-                return self._build_normalization_failure_response(normalization_result, context)
+                return self._build_normalization_failure_response(
+                    normalization_result, context
+                )
 
             resume_model, _resume_document = normalization_result
             resume_data = (
@@ -95,27 +106,29 @@ class OrchestrationAgent:
             audio_data: bytes | None = getattr(request, "audioData", None)
 
             # Build input text based on intent and available data
-            input_text = self._build_agent_input(
+            input_data = self._build_agent_input(
                 intent, resume_data, job_description, audio_data
             )
 
             # Log orchestration start
-            logger.log_orchestration_start(input_text, session_id, user_id)
+            logger.log_orchestration_start(input_data, session_id, user_id)
 
             try:
                 # Map intent to agent sequence directly
                 agent_sequence = self._map_intent_to_agents(intent)
 
-                langfuse.update_current_span(
-                    output={"agent_sequence": agent_sequence}
+                langfuse.update_current_span(output={"agent_sequence": agent_sequence})
+
+                logger.log_state_transition(
+                    "normalize_resume", "route_agents", session_id
+                )
+                logger.log_intent_analysis(
+                    input_data, agent_sequence, "intent_direct", session_id
                 )
 
-                logger.log_state_transition("normalize_resume", "route_agents", session_id)
-                logger.log_intent_analysis(input_text, agent_sequence, "intent_direct", session_id)
-
                 state: OrchestrationState = {
-                    "original_input": input_text,
-                    "current_input": input_text,
+                    "original_input": input_data,
+                    "current_input": input_data,
                     "context": context,
                     "agent_sequence": agent_sequence,
                     "current_index": 0,
@@ -124,16 +137,23 @@ class OrchestrationAgent:
                 }
 
                 logger.log_state_transition(
-                    "orchestration_start", "workflow_execution", session_id, agent_sequence=agent_sequence
+                    "orchestration_start",
+                    "workflow_execution",
+                    session_id,
+                    agent_sequence=agent_sequence,
                 )
                 result = self.workflow.invoke(state)
                 current_response = result.get("current_response")
 
                 if current_response is None:
-                    raise RuntimeError("Orchestration completed without an agent response.")
+                    raise RuntimeError(
+                        "Orchestration completed without an agent response."
+                    )
 
                 total_time = time.time() - start_time
-                logger.log_orchestration_complete(session_id, total_time, agent_sequence)
+                logger.log_orchestration_complete(
+                    session_id, total_time, agent_sequence
+                )
 
                 langfuse.update_current_span(
                     output={"success": True, "duration_s": total_time}
@@ -164,7 +184,7 @@ class OrchestrationAgent:
         agent_sequence = state["agent_sequence"]
         current_index = state["current_index"]
         context = state["context"]
-        session_id = getattr(context, 'session_id', 'unknown')
+        session_id = getattr(context, "session_id", "unknown")
 
         if current_index >= len(agent_sequence):
             logger.debug(
@@ -186,7 +206,9 @@ class OrchestrationAgent:
             raise error
 
         current_input = state["current_input"]
-        logger.log_agent_execution_start(agent_name, current_input, session_id, current_index)
+        logger.log_agent_execution_start(
+            agent_name, current_input, session_id, current_index
+        )
 
         agent_start_time = time.time()
 
@@ -213,12 +235,17 @@ class OrchestrationAgent:
                             "duration_ms": round(agent_execution_time * 1000, 2),
                         }
                     )
-                    logger.log_agent_execution_complete(agent_name, response, session_id, agent_execution_time)
+                    logger.log_agent_execution_complete(
+                        agent_name, response, session_id, agent_execution_time
+                    )
 
                 except Exception as e:
                     agent_execution_time = time.time() - agent_start_time
                     langfuse.update_current_span(
-                        output={"error": str(e), "duration_ms": round(agent_execution_time * 1000, 2)}
+                        output={
+                            "error": str(e),
+                            "duration_ms": round(agent_execution_time * 1000, 2),
+                        }
                     )
                     logger.log_agent_error(agent_name, e, session_id)
                     raise
@@ -266,20 +293,24 @@ class OrchestrationAgent:
         audio_data: bytes | None = None,
     ) -> str | bytes:
         """Build input for agents: audio bytes for INTERVIEW_COACH, text for all others."""
-        if audio_data is not None and intent == "INTERVIEW_COACH":
-            # For interview coaching with audio, return the audio data directly
-            return audio_data
 
-        if intent == "RESUME_CRITIC":
-            return f"Resume data: {json.dumps(resume_data, indent=2)}"
+        match intent:
+            case "RESUME_CRITIC" | "CONTENT_STRENGTH":
+                return json.dumps({"resume": resume_data})
 
-        if intent == "CONTENT_STRENGTH":
-            return f"Resume data: {json.dumps(resume_data, indent=2)}"
+            case "ALIGNMENT":
+                return json.dumps(
+                    {
+                        "resume": resume_data,
+                        "job_description": job_description,
+                    }
+                )
 
-        if intent == "ALIGNMENT":
-            return f"Resume data: {json.dumps(resume_data, indent=2)}\nJob Description: {job_description}"
+            case "INTERVIEW_COACH":
+                return audio_data
 
-        return f"Request data: {json.dumps(resume_data, indent=2)}"
+            case _:
+                raise ValueError(f"Unknown intent: {intent!r}")
 
     def _normalize_resume(
         self, request: ChatRequest, context: SessionContext
@@ -358,7 +389,9 @@ class OrchestrationAgent:
     ) -> Resume:
         extractor = self.agents.get("ExtractorAgent")
         if extractor is None:
-            raise RuntimeError("ExtractorAgent is required when resumeFile is provided.")
+            raise RuntimeError(
+                "ExtractorAgent is required when resumeFile is provided."
+            )
 
         response = extractor.process(json.dumps(resume_file_payload), context)
         if response.sharp_metadata:
@@ -369,7 +402,9 @@ class OrchestrationAgent:
                 context.shared_memory = shared_memory
         parsed = parse_json_object(response.content or "")
         if not parsed:
-            raise ValueError("ExtractorAgent returned invalid JSON for resumeFile payload.")
+            raise ValueError(
+                "ExtractorAgent returned invalid JSON for resumeFile payload."
+            )
 
         resume = Resume.model_validate(parsed)
         trace = list(context.decision_trace or [])
@@ -395,7 +430,9 @@ class OrchestrationAgent:
             },
         )
         trace = list(context.decision_trace or [])
-        trace.append("Orchestrator: Normalization failed, returning recovery ActionPlan.")
+        trace.append(
+            "Orchestrator: Normalization failed, returning recovery ActionPlan."
+        )
         context.decision_trace = trace
         return AgentResponse(
             agent_name="NormalizeStage",
@@ -407,9 +444,7 @@ class OrchestrationAgent:
         )
 
     @staticmethod
-    def _build_artifact(
-        response: AgentResponse, agent_name: str
-    ) -> AnalysisArtifact:
+    def _build_artifact(response: AgentResponse, agent_name: str) -> AnalysisArtifact:
         parsed = parse_json_payload(response.content or "", allow_array=True)
         payload: dict[str, Any] | list[Any] | str
         if parsed is None:
@@ -438,7 +473,9 @@ class OrchestrationAgent:
         context.shared_memory = shared_memory
 
     @staticmethod
-    def _build_resume_document_from_resume(resume: Resume, source: str) -> ResumeDocument:
+    def _build_resume_document_from_resume(
+        resume: Resume, source: str
+    ) -> ResumeDocument:
         data = resume.model_dump(exclude_none=True)
         raw_text = (
             json.dumps(data, indent=2)

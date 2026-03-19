@@ -8,52 +8,64 @@ import json
 
 class Settings(BaseSettings):
     """Application settings."""
-    
+
     # Application
     APP_NAME: str = "agent-backend"
     DEBUG: bool = False
     VERSION: str = "1.0.0"
     SERVER_PORT: int = 8080
-    
+
     # Database
     DATABASE_URL: str = "postgresql://user:password@localhost/interviewready"
-    
+
     # Google Cloud / Vertex AI Configuration
     GOOGLE_PROJECT_ID: str = "architecting-ai-systems-e71af"
     GOOGLE_LOCATION: str = "us-central1"
     GOOGLE_CREDENTIALS_URI: Optional[str] = None
-    
+
     # Gemini Model Configuration
     GEMINI_MODEL: str = "gemini-2.5-flash"
-    GEMINI_API_KEY: str
+    GEMINI_API_KEY: Optional[str] = None
     GOOGLE_AI_API_KEY: Optional[str] = None
-    
+
     # Security
     SECURITY_FILTER_ORDER: int = 5
     AUTH_ENABLED: bool = True
     AUTH_DISABLED_USER_ID: str = "dev-user"
-    
+
     # CORS
-    ALLOWED_HOSTS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173"]
-    
+    ALLOWED_HOSTS: List[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+
     # Logging & Monitoring
     LOG_LEVEL: str = "DEBUG"
     LOGGERS: List[str] = ["app"]  # Equivalent to com.agent.backend
     ENABLE_HEALTH_ENDPOINT: bool = True
     ENABLE_INFO_ENDPOINT: bool = True
     ENABLE_METRICS_ENDPOINT: bool = True
-    
+
     # LangGraph
     LANGGRAPH_API_KEY: Optional[str] = None
-    
+
     # Langfuse
     LANGFUSE_PUBLIC_KEY: Optional[str] = None
     LANGFUSE_SECRET_KEY: Optional[str] = None
     LANGFUSE_HOST: Optional[str] = None
-    
+
     # Environment
     APP_ENV: str = "development"
-    
+
+    # Agent Mock Settings
+    MOCK_CONTENT_STRENGTH_AGENT: bool = True
+    MOCK_RESUME_CRITIC_AGENT: bool = True
+    MOCK_JOB_ALIGNMENT_AGENT: bool = True
+    MOCK_EXTRACTOR_AGENT: bool = True
+    MOCK_INTERVIEW_COACH_AGENT: bool = True
+
     class Config:
         env_file = ".env"
         case_sensitive = True

@@ -14,7 +14,7 @@ from ..models.session import SessionContext
 class InterviewCoachAgent(BaseAgent):
     """Agent for providing interview coaching and simulation."""
 
-    USE_MOCK_RESPONSE = False
+    USE_MOCK_RESPONSE = settings.MOCK_INTERVIEW_COACH_AGENT
     MOCK_RESPONSE_KEY = "InterviewCoachAgent"
 
     SYSTEM_PROMPT = """You are an expert Interview Coach specializing in personalized interview preparation. You have access to the candidate's resume and the target job description. Your role is to:

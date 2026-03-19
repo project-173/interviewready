@@ -9,6 +9,7 @@ from typing import Any
 from langfuse import observe
 
 from app.agents.base import BaseAgent
+from app.core.config import settings
 from app.core.logging import logger
 from app.models import AgentResponse, Resume, ResumeDocument
 from app.models.session import SessionContext
@@ -19,7 +20,7 @@ from app.utils.validators import is_valid_url, is_full_url, is_valid_date
 class ExtractorAgent(BaseAgent):
     """LLM-powered resume extraction agent with structured output."""
 
-    USE_MOCK_RESPONSE = False
+    USE_MOCK_RESPONSE = settings.MOCK_EXTRACTOR_AGENT
     MOCK_RESPONSE_KEY = "ExtractorAgent"
     CONFIDENCE_SCORE = 0.95
 
@@ -75,8 +76,6 @@ class ExtractorAgent(BaseAgent):
         )
 
         try:
-            extracted_text = self._extract_text_from_payload(input_text)
-
             raw_result = (
                 self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
                 if self.USE_MOCK_RESPONSE
@@ -89,6 +88,8 @@ class ExtractorAgent(BaseAgent):
                     session_id=session_id,
                     mock_response_key=self.MOCK_RESPONSE_KEY,
                 )
+
+            extracted_text = self._extract_text_from_payload(input_text)
 
             user_prompt = (
                 f"Extract structured information from the following resume text:\n\n"
@@ -182,7 +183,9 @@ class ExtractorAgent(BaseAgent):
         for field, name_key in field_name_keys.items():
             for item in getattr(resume, field, []):
                 item_name = getattr(item, name_key, None) or "unknown"
-                self._validate_urls_for_item(item, field, item_name, source_lower, invalid_urls)
+                self._validate_urls_for_item(
+                    item, field, item_name, source_lower, invalid_urls
+                )
                 self._validate_dates_for_item(item, field, item_name, invalid_dates)
 
         errors = []
@@ -197,7 +200,12 @@ class ExtractorAgent(BaseAgent):
             raise ValueError(" ".join(errors))
 
     def _validate_urls_for_item(
-        self, item: Any, field: str, item_name: str, source_lower: str, invalid_urls: list[str]
+        self,
+        item: Any,
+        field: str,
+        item_name: str,
+        source_lower: str,
+        invalid_urls: list[str],
     ) -> None:
         url_value = getattr(item, "url", None)
         if url_value is None:
@@ -205,7 +213,9 @@ class ExtractorAgent(BaseAgent):
         if not is_valid_url(url_value):
             invalid_urls.append(f"{field}.{item_name}: url='{url_value}' (invalid)")
         elif is_full_url(url_value) and url_value.lower() not in source_lower:
-            invalid_urls.append(f"{field}.{item_name}: url='{url_value}' (not in source)")
+            invalid_urls.append(
+                f"{field}.{item_name}: url='{url_value}' (not in source)"
+            )
 
     def _validate_dates_for_item(
         self, item: Any, field: str, item_name: str, invalid_dates: list[str]

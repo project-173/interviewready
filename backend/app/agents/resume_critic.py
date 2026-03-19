@@ -4,6 +4,7 @@ import json
 import time
 from langfuse import observe
 from .base import BaseAgent
+from ..core.config import settings
 from ..core.logging import logger
 from ..models.agent import AgentResponse, StructuralAssessment
 from ..models.session import SessionContext
@@ -13,7 +14,7 @@ from ..utils.json_parser import parse_json_object
 class ResumeCriticAgent(BaseAgent):
     """Analyzes resume structure, ATS compatibility, and impact."""
 
-    USE_MOCK_RESPONSE = False
+    USE_MOCK_RESPONSE = settings.MOCK_RESUME_CRITIC_AGENT
     MOCK_RESPONSE_KEY = "ResumeCriticAgent"
     CONFIDENCE_SCORE = 0.9
 
@@ -65,7 +66,9 @@ class ResumeCriticAgent(BaseAgent):
 
             raw_result = raw_result or self.call_gemini(input_text, context)
 
-            structured_result = self.parse_and_validate(raw_result, StructuralAssessment).model_dump()
+            structured_result = self.parse_and_validate(
+                raw_result, StructuralAssessment
+            ).model_dump()
 
             logger.debug(
                 "ResumeCriticAgent processing completed",
