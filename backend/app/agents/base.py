@@ -2,9 +2,9 @@
 
 import json
 import time
-from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Protocol, Optional, Dict, Any
+from abc import ABC, abstractmethod
+from typing import Protocol, Optional, Dict, Any, Union
 from ..core.logging import logger
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
@@ -17,7 +17,7 @@ class BaseAgentProtocol(Protocol):
         """Get the agent name."""
         ...
     
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
+    def process(self, input_data: Union[str, bytes], context: SessionContext) -> AgentResponse:
         """Process input and return agent response."""
         ...
     
@@ -46,6 +46,7 @@ class BaseAgent(ABC, BaseAgentProtocol):
         self.gemini_service = gemini_service
         self.system_prompt = system_prompt
         self.name = name
+        self.mock_service = None  # Initialize mock_service attribute
     
     def get_name(self) -> str:
         """Get the agent name."""
@@ -100,7 +101,8 @@ class BaseAgent(ABC, BaseAgentProtocol):
         Returns:
             Gemini response text
         """
-        session_id = getattr(context, 'session_id', 'unknown')
+
+        session_id = getattr(context, "session_id", "unknown")
         agent_name = self.get_name()
         
         # Log API call start
@@ -112,11 +114,22 @@ class BaseAgent(ABC, BaseAgentProtocol):
         api_start_time = time.time()
         
         try:
-            response = self.gemini_service.generate_response(
-                system_prompt=self.system_prompt,
-                user_input=input_text,
-                context=context
-            )
+            # Use mock service if enabled
+            if self.mock_service:
+                logger.debug("Using mock Gemini service", session_id=session_id, agent_name=agent_name)
+                response = self.mock_service.generate_response(
+                    system_prompt=self.system_prompt,
+                    user_input=input_text,
+                    context=context
+                )
+            else:
+                # Use real Gemini service
+                logger.debug("Using real Gemini service", session_id=session_id, agent_name=agent_name)
+                response = self.gemini_service.generate_response(
+                    system_prompt=self.system_prompt,
+                    user_input=input_text,
+                    context=context
+                )
             
             api_execution_time = time.time() - api_start_time
             

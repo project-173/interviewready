@@ -12,9 +12,6 @@ class ResumeModel(Base):
     __tablename__ = "resumes"
 
     id = Column(String, primary_key=True)
-    title = Column(String, nullable=True)
-    summary = Column(Text, nullable=True)
-    is_master = Column(Boolean, default=False)
     skills = Column(ARRAY(String), nullable=True)
 
     experiences = relationship("ExperienceModel", back_populates="resume", cascade="all, delete-orphan")

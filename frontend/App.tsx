@@ -197,6 +197,28 @@ const App: React.FC = () => {
     }
   };
 
+  const handleInterviewAudioMessage = async (audio: Uint8Array) => {
+    const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: '[Audio response]' }];
+    setState(prev => ({ ...prev, interviewHistory: updatedHistory }));
+    setIsLoading(true);
+    try {
+      const request: ChatRequest = {
+        intent: 'INTERVIEW_COACH',
+        resumeData: state.currentResume,
+        jobDescription: state.jobDescription,
+        messageHistory: updatedHistory,
+        audioData: audio,
+      };
+      const response = await backendService.callChatEndpoint(request);
+      const responseText = typeof response.payload === 'string' ? response.payload : JSON.stringify(response.payload);
+      setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-white text-slate-950">
       {/* 1. Primary SaaS Navbar */}
@@ -257,7 +279,7 @@ const App: React.FC = () => {
               {(state.status === WorkflowStatus.ANALYZING_CONTENT || state.status === WorkflowStatus.AWAITING_CONTENT_APPROVAL) && state.contentReport && <ContentStep report={state.contentReport} onApprove={approveContent} />}
               {(state.status === WorkflowStatus.ALIGNING_JD) && <AlignmentStep jd={state.jobDescription} onChangeJD={(val) => setState(prev => ({ ...prev, jobDescription: val }))} onAnalyze={runAlignment} isLoading={isLoading} />}
               {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterview} />}
-              {state.status === WorkflowStatus.INTERVIEWING && <InterviewStep history={state.interviewHistory} onSend={handleInterviewMessage} isLoading={isLoading} chatEndRef={chatEndRef} />}
+              {state.status === WorkflowStatus.INTERVIEWING && <InterviewStep history={state.interviewHistory} onSend={handleInterviewMessage} onSendAudio={handleInterviewAudioMessage} isLoading={isLoading} chatEndRef={chatEndRef} />}
             </div>
           </div>
 
@@ -281,13 +303,13 @@ const App: React.FC = () => {
               <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm w-64 max-h-[300px] overflow-y-auto">
                  <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-3">Recent Uploads</h4>
                  <div className="space-y-1.5">
-                   {state.history.map((h) => (
+                   {state.history.map((h, index) => (
                      <button 
-                       key={h.contact?.fullName ?? h.email}
+                       key={index}
                        onClick={() => setState(prev => ({ ...prev, currentResume: h, status: WorkflowStatus.CRITIQUING }))}
                        className="w-full p-2.5 rounded-lg text-left text-[11px] font-medium text-slate-600 hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-all truncate"
                      >
-                        {h.contact?.fullName || 'Untitled Resume'}
+                        Resume {index + 1}
                      </button>
                    ))}
                  </div>

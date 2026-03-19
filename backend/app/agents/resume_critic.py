@@ -3,16 +3,16 @@
 import json
 import time
 from typing import Dict, Any
+from langfuse import observe
 from .base import BaseAgent
 from ..core.logging import logger
 from ..models.agent import AgentResponse, StructuralAssessment
 from ..models.session import SessionContext
 from ..utils.json_parser import parse_json_object
 
-
 class ResumeCriticAgent(BaseAgent):
     """Agent for analyzing resume structure, ATS compatibility, and impact."""
-    USE_MOCK_RESPONSE = True
+    USE_MOCK_RESPONSE = False
     MOCK_RESPONSE_KEY = "ResumeCriticAgent"
 
     SYSTEM_PROMPT = """
@@ -40,6 +40,7 @@ class ResumeCriticAgent(BaseAgent):
             name="ResumeCriticAgent"
         )
     
+    @observe
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process resume text and provide critique.
         
@@ -54,7 +55,6 @@ class ResumeCriticAgent(BaseAgent):
         agent_name = self.get_name()
         processing_start_time = time.time()
         
-        # Log processing start
         logger.debug("ResumeCriticAgent processing started", 
                     session_id=session_id, 
                     input_length=len(input_text),
@@ -73,24 +73,34 @@ class ResumeCriticAgent(BaseAgent):
 
             if raw_result is None:
                 raw_result = self.call_gemini(input_text, context)
+            
+            if not raw_result or not raw_result.strip():
+                raise ValueError("Empty response received from Gemini API")
+            
             parsed_result = parse_json_object(raw_result)
-            structured_result = self._normalize_structural_assessment(parsed_result)
+            
+            if not parsed_result:
+                raise ValueError(f"Failed to parse valid JSON from Gemini response: {raw_result[:200]}...")
+            
+            validated_result = StructuralAssessment.model_validate(parsed_result)
+            structured_result = validated_result.model_dump()
+            
+            if not structured_result.get("formattingRecommendations") and not structured_result.get("suggestions"):
+                raise ValueError("Gemini API returned empty recommendations and suggestions")
+            
             processing_time = time.time() - processing_start_time
             
-            # Log processing completion
             logger.debug("ResumeCriticAgent processing completed", 
                         session_id=session_id, 
                         processing_time_ms=round(processing_time * 1000, 2),
                         result_length=len(raw_result),
                         result_preview=raw_result[:100] + "..." if len(raw_result) > 100 else raw_result)
             
-            # Build decision trace for auditability
             decision_trace = [
                 "ResumeCriticAgent: Analyzed resume structure and content impact",
                 f"ResumeCriticAgent: Generated critique with confidence {self.CONFIDENCE_SCORE}"
             ]
             
-            # Create SHARP metadata
             sharp_metadata = {
                 "analysis_type": "resume_critique",
                 "confidence_score": self.CONFIDENCE_SCORE,
@@ -106,7 +116,6 @@ class ResumeCriticAgent(BaseAgent):
                 sharp_metadata=sharp_metadata
             )
             
-            # Log response creation
             logger.debug("ResumeCriticAgent response created", 
                         session_id=session_id, 
                         confidence_score=self.CONFIDENCE_SCORE,
@@ -125,6 +134,38 @@ class ResumeCriticAgent(BaseAgent):
                         error_message=str(e))
             raise
 
+    def _parse_json(self, text: str) -> Dict[str, Any]:
+        """Parse JSON from raw or fenced markdown text."""
+        if not text:
+            return {}
+
+        # Remove markdown code blocks if the AI ignored instructions
+        text = text.strip()
+        if text.startswith("```json"):
+            text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+        try:
+            return json.loads(text)
+        except Exception as e:
+            logger.warning(f"Direct JSON parse failed, trying regex: {e}")
+
+        # If it still fails, find the first { and last }
+        try:
+            start_idx = text.find('{')
+            end_idx = text.rfind('}')
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                json_str = text[start_idx:end_idx+1]
+                return json.loads(json_str)
+        except Exception as e:
+            logger.error(f"Failed to parse JSON using regex extraction: {e}")
+
+        return {}
+
     def _normalize_structural_assessment(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize parsed content into StructuralAssessment schema."""
         fallback_suggestions = [
@@ -132,25 +173,33 @@ class ResumeCriticAgent(BaseAgent):
             "Add measurable impact statements for key achievements.",
         ]
 
-        result = {
-            "score": self._as_float(parsed.get("score"), 70.0),
+        # Handle the case where the AI returns the flat critique vs nested critique
+        critique_data = parsed.get("critique", parsed)
+
+        critique = {
+            "score": self._as_float(critique_data.get("score"), 70.0),
             "readability": self._as_str(
-                parsed.get("readability"),
+                critique_data.get("readability"),
                 "Resume analyzed. Improve clarity and consistency for stronger ATS performance.",
             ),
             "formattingRecommendations": self._as_str_list(
-                parsed.get("formattingRecommendations")
+                critique_data.get("formattingRecommendations")
             ),
-            "suggestions": self._as_str_list(parsed.get("suggestions")),
+            "suggestions": self._as_str_list(critique_data.get("suggestions")),
         }
 
-        if not result["formattingRecommendations"]:
-            result["formattingRecommendations"] = fallback_suggestions
-        if not result["suggestions"]:
-            result["suggestions"] = fallback_suggestions
+        if not critique["formattingRecommendations"]:
+            critique["formattingRecommendations"] = fallback_suggestions
+        if not critique["suggestions"]:
+            critique["suggestions"] = fallback_suggestions
 
-        validated = StructuralAssessment.model_validate(result)
-        return validated.model_dump()
+        validated_critique = StructuralAssessment.model_validate(critique)
+        
+        # We need to return the combined structure expected by the frontend
+        return {
+            "resume_data": parsed.get("resume_data", {}),
+            "critique": validated_critique.model_dump()
+        }
 
     @staticmethod
     def _as_float(value: Any, fallback: float) -> float:

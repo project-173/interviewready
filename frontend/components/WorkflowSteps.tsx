@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { StructuralAssessment, ContentAnalysisReport, AlignmentReport } from '../types';
 
@@ -37,9 +37,9 @@ export const CriticStep: React.FC<{ report: StructuralAssessment; onApprove: () 
     </div>
 
     <div className="space-y-3">
-      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Actionable Insights</h4>
+      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Formatting Recommendations</h4>
       <div className="space-y-2">
-        {report.formattingRecommendations.slice(0, 3).map((rec, i) => (
+        {report.formattingRecommendations.map((rec, i) => (
           <div key={i} className="flex items-start gap-3 p-3 bg-white border border-slate-200 rounded-lg text-xs text-slate-600 transition-colors hover:border-slate-300">
             <div className="mt-0.5 w-1.5 h-1.5 rounded-full bg-slate-400 flex-none"></div>
             {rec}
@@ -47,9 +47,23 @@ export const CriticStep: React.FC<{ report: StructuralAssessment; onApprove: () 
         ))}
       </div>
     </div>
+
+    {report.suggestions && report.suggestions.length > 0 && (
+      <div className="space-y-3">
+        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Content Suggestions</h4>
+        <div className="space-y-2">
+          {report.suggestions.map((suggestion, i) => (
+            <div key={i} className="flex items-start gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-slate-600 transition-colors hover:border-blue-300">
+              <div className="mt-0.5 w-1.5 h-1.5 rounded-full bg-blue-400 flex-none"></div>
+              {suggestion}
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
     
     <button onClick={onApprove} className="w-full bg-slate-900 text-white text-[13px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 active:scale-[0.98] transition-all">
-      Apply & Run Deep Analysis
+      Run Content Strength Analysis
     </button>
   </div>
 );
@@ -79,7 +93,7 @@ export const ContentStep: React.FC<{ report: ContentAnalysisReport; onApprove: (
       <div className="p-6 bg-white border border-slate-200 rounded-2xl">
         <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Key Achievements</h4>
         <div className="space-y-3">
-          {report.achievements.slice(0, 3).map((ach, i) => (
+          {(report.achievements || []).slice(0, 3).map((ach, i) => (
             <div key={i} className="text-[11px] text-slate-600 border-l-2 border-slate-200 pl-3">
               <p className="font-medium text-slate-900">{ach.description}</p>
               <div className="flex gap-2 mt-1">
@@ -95,7 +109,7 @@ export const ContentStep: React.FC<{ report: ContentAnalysisReport; onApprove: (
     <div className="space-y-3">
        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Extracted Skills & Evidence</h4>
        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-         {report.skills.slice(0, 6).map((skill, i) => (
+         {(report.skills || []).slice(0, 6).map((skill, i) => (
            <div key={i} className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
              <div className="flex justify-between items-start mb-1">
                <span className="text-[11px] font-bold text-slate-900">{skill.name}</span>
@@ -110,7 +124,7 @@ export const ContentStep: React.FC<{ report: ContentAnalysisReport; onApprove: (
     <div className="space-y-3">
        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Phrasing Suggestions</h4>
        <div className="space-y-2">
-         {report.suggestions.slice(0, 2).map((sug, i) => (
+         {(report.suggestions || []).slice(0, 2).map((sug, i) => (
            <div key={i} className="p-4 bg-amber-50/30 border border-amber-100 rounded-xl">
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                <div>
@@ -179,7 +193,7 @@ export const AlignmentReportStep: React.FC<{ report: AlignmentReport; onStartInt
        <div className="p-3.5 bg-white border border-slate-200 rounded-xl">
           <p className="text-[9px] font-bold text-slate-400 uppercase mb-2 tracking-widest">Matched Skills</p>
           <div className="flex flex-wrap gap-1">
-            {report.skillsMatch.slice(0, 8).map((k, i) => (
+            {(report.skillsMatch || []).slice(0, 8).map((k, i) => (
               <span key={i} className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200 font-medium">{k}</span>
             ))}
           </div>
@@ -187,7 +201,7 @@ export const AlignmentReportStep: React.FC<{ report: AlignmentReport; onStartInt
        <div className="p-3.5 bg-white border border-slate-200 rounded-xl">
           <p className="text-[9px] font-bold text-slate-400 uppercase mb-2 tracking-widest">Missing Skills</p>
           <div className="flex flex-wrap gap-1">
-            {report.missingSkills.slice(0, 8).map((k, i) => (
+            {(report.missingSkills || []).slice(0, 8).map((k, i) => (
               <span key={i} className="text-[10px] bg-red-50 text-red-600 px-2 py-0.5 rounded border border-red-100 font-medium">{k}</span>
             ))}
           </div>
@@ -218,59 +232,123 @@ export const AlignmentReportStep: React.FC<{ report: AlignmentReport; onStartInt
 export const InterviewStep: React.FC<{ 
   history: { role: 'user' | 'agent'; text: string }[]; 
   onSend: (msg: string) => void;
+  onSendAudio: (audio: Uint8Array) => void;
   isLoading: boolean;
   chatEndRef: React.RefObject<HTMLDivElement>;
-}> = ({ history, onSend, isLoading, chatEndRef }) => (
-  <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-[calc(100vh-340px)] flex flex-col">
-    <div className="flex-1 overflow-y-auto space-y-4 pr-3 mb-4 scrollbar-thin scrollbar-thumb-slate-200">
-      {history.map((msg, i) => (
-        <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-          <div className={`max-w-[88%] p-3.5 rounded-xl text-[13px] leading-relaxed shadow-sm transition-all ${
-            msg.role === 'user' ? 'bg-slate-900 text-white rounded-tr-none' : 'bg-white text-slate-800 rounded-tl-none border border-slate-200'
-          }`}>
-            {/* Wrap ReactMarkdown in a div to handle styling as className is restricted on the component itself in this context */}
-            <div className="prose prose-sm max-w-none prose-slate">
-              <ReactMarkdown 
-                components={{
-                  p: ({children}) => <p className="mb-2 last:mb-0">{children}</p>,
-                  ul: ({children}) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
-                  li: ({children}) => <li className="mb-0.5">{children}</li>,
-                  strong: ({children}) => <span className="font-bold">{children}</span>,
-                }}
-              >
-                {msg.text}
-              </ReactMarkdown>
+}> = ({ history, onSend, onSendAudio, isLoading, chatEndRef }) => {
+  const [isRecording, setIsRecording] = React.useState(false);
+  const [mediaRecorder, setMediaRecorder] = React.useState<MediaRecorder | null>(null);
+  const [audioChunks, setAudioChunks] = React.useState<Blob[]>([]);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const audioBlob = new Blob(chunks, { type: 'audio/wav' });
+        audioBlob.arrayBuffer().then(buffer => {
+          onSendAudio(new Uint8Array(buffer));
+        });
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      setMediaRecorder(recorder);
+      setAudioChunks(chunks);
+      recorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error('Error starting recording:', error);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder && isRecording) {
+      mediaRecorder.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const handleMicClick = () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  };
+
+  return (
+    <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-[calc(100vh-340px)] flex flex-col">
+      <div className="flex-1 overflow-y-auto space-y-4 pr-3 mb-4 scrollbar-thin scrollbar-thumb-slate-200">
+        {history.map((msg, i) => (
+          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[88%] p-3.5 rounded-xl text-[13px] leading-relaxed shadow-sm transition-all ${
+              msg.role === 'user' ? 'bg-slate-900 text-white rounded-tr-none' : 'bg-white text-slate-800 rounded-tl-none border border-slate-200'
+            }`}>
+              <div className="prose prose-sm max-w-none prose-slate">
+                <ReactMarkdown 
+                  components={{
+                    p: ({children}) => <p className="mb-2 last:mb-0">{children}</p>,
+                    ul: ({children}) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
+                    li: ({children}) => <li className="mb-0.5">{children}</li>,
+                    strong: ({children}) => <span className="font-bold">{children}</span>,
+                  }}
+                >
+                  {msg.text}
+                </ReactMarkdown>
+              </div>
             </div>
           </div>
-        </div>
-      ))}
-      <div ref={chatEndRef} />
-    </div>
-    
-    <form 
-      className="flex gap-2 pt-4 border-t border-slate-100"
-      onSubmit={(e) => {
-        e.preventDefault();
-        const input = (e.target as any).message;
-        if (!input.value.trim() || isLoading) return;
-        onSend(input.value);
-        input.value = '';
-      }}
-    >
-      <input 
-        name="message" 
-        autoFocus
-        autoComplete="off" 
-        placeholder="Draft your response..." 
-        className="flex-1 px-4 py-2.5 rounded-lg bg-white border border-slate-200 text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none transition-all placeholder:text-slate-400" 
-      />
-      <button 
-        type="submit" 
-        disabled={isLoading} 
-        className="bg-slate-900 text-white px-4 rounded-lg hover:bg-slate-800 disabled:opacity-50 flex items-center justify-center transition-all"
+        ))}
+        <div ref={chatEndRef} />
+      </div>
+      
+      <form 
+        className="flex gap-2 pt-4 border-t border-slate-100"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const input = (e.target as any).message;
+          if (!input.value.trim() || isLoading) return;
+          onSend(input.value);
+          input.value = '';
+        }}
       >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-      </button>
-    </form>
-  </div>
-);
+        <input 
+          name="message" 
+          autoFocus
+          autoComplete="off" 
+          placeholder="Draft your response..." 
+          className="flex-1 px-4 py-2.5 rounded-lg bg-white border border-slate-200 text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none transition-all placeholder:text-slate-400" 
+        />
+        <button 
+          type="button"
+          onClick={handleMicClick}
+          disabled={isLoading}
+          className={`px-4 py-2.5 rounded-lg border transition-all flex items-center justify-center ${
+            isRecording 
+              ? 'bg-red-500 border-red-500 text-white animate-pulse' 
+              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+          } disabled:opacity-50`}
+        >
+          <svg className="w-4 h-4" fill={isRecording ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
+          </svg>
+        </button>
+        <button 
+          type="submit" 
+          disabled={isLoading} 
+          className="bg-slate-900 text-white px-4 rounded-lg hover:bg-slate-800 disabled:opacity-50 flex items-center justify-center transition-all"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+        </button>
+      </form>
+    </div>
+  );
+};
