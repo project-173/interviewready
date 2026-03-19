@@ -61,7 +61,7 @@ export const CriticStep: React.FC<{ report: StructuralAssessment; onApprove: () 
         </div>
       </div>
     )}
-    
+
     <button onClick={onApprove} className="w-full bg-slate-900 text-white text-[13px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 active:scale-[0.98] transition-all">
       Run Content Strength Analysis
     </button>
@@ -155,7 +155,7 @@ export const AlignmentStep: React.FC<{
   isLoading: boolean;
 }> = ({ jd, onChangeJD, onAnalyze, isLoading }) => {
   const MAX_JD_LENGTH = 20000;
-  
+
   return (
     <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 space-y-6">
       <div className="flex items-center justify-between">
@@ -164,16 +164,16 @@ export const AlignmentStep: React.FC<{
           {jd.length.toLocaleString()} / {MAX_JD_LENGTH.toLocaleString()}
         </span>
       </div>
-      <textarea 
+      <textarea
         className="w-full h-48 p-4 rounded-xl bg-white border border-slate-200 focus:ring-1 focus:ring-slate-900 focus:outline-none text-xs transition-all scrollbar-thin"
         placeholder="Paste the target job description here..."
         value={jd}
         maxLength={MAX_JD_LENGTH}
         onChange={(e) => onChangeJD(e.target.value)}
       />
-      <button 
-        onClick={onAnalyze} 
-        disabled={!jd || isLoading} 
+      <button
+        onClick={onAnalyze}
+        disabled={!jd || isLoading}
         className="w-full bg-slate-900 disabled:opacity-50 text-white text-[13px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 transition-all"
       >
         {isLoading ? 'Scanning Requirements...' : 'Analyze Market Fit'}
@@ -242,58 +242,55 @@ export const AlignmentReportStep: React.FC<{ report: AlignmentReport; onStartInt
 export const InterviewStep: React.FC<{ 
   history: { role: 'user' | 'agent'; text: string }[]; 
   onSend: (msg: string) => void;
+  onSendAudio: (audio: Uint8Array) => void;
   isLoading: boolean;
   chatEndRef: React.RefObject<HTMLDivElement>;
-}> = ({ history, onSend, isLoading, chatEndRef }) => {
-  const [isRecording, setIsRecording] = useState(false);
-  const [speechSupported, setSpeechSupported] = useState(false);
-  const recognitionRef = useRef<any>(null);
+}> = ({ history, onSend, onSendAudio, isLoading, chatEndRef }) => {
+  const [isRecording, setIsRecording] = React.useState(false);
+  const [mediaRecorder, setMediaRecorder] = React.useState<MediaRecorder | null>(null);
+  const [audioChunks, setAudioChunks] = React.useState<Blob[]>([]);
 
-  useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    setSpeechSupported(!!SpeechRecognition);
-
-    if (!SpeechRecognition) return;
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-US';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-
-    recognition.onresult = (event: any) => {
-      const transcript = event.results?.[0]?.[0]?.transcript?.trim();
-      if (transcript) {
-        onSend(transcript);
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      console.warn('Speech recognition error', event);
-      setIsRecording(false);
-    };
-
-    recognition.onend = () => {
-      setIsRecording(false);
-    };
-
-    recognitionRef.current = recognition;
-  }, [onSend]);
-
-  const toggleRecording = () => {
-    if (!speechSupported) return;
-
-    if (isRecording) {
-      recognitionRef.current?.stop();
-      setIsRecording(false);
-      return;
-    }
-
+  const startRecording = async () => {
     try {
-      recognitionRef.current?.start();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const audioBlob = new Blob(chunks, { type: 'audio/wav' });
+        audioBlob.arrayBuffer().then(buffer => {
+          onSendAudio(new Uint8Array(buffer));
+        });
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      setMediaRecorder(recorder);
+      setAudioChunks(chunks);
+      recorder.start();
       setIsRecording(true);
-    } catch (err) {
-      console.warn('Failed to start speech recognition', err);
+    } catch (error) {
+      console.error('Error starting recording:', error);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder && isRecording) {
+      mediaRecorder.stop();
       setIsRecording(false);
+    }
+  };
+
+  const handleMicClick = () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
     }
   };
 
@@ -305,9 +302,8 @@ export const InterviewStep: React.FC<{
             <div className={`max-w-[88%] p-3.5 rounded-xl text-[13px] leading-relaxed shadow-sm transition-all ${
               msg.role === 'user' ? 'bg-slate-900 text-white rounded-tr-none' : 'bg-white text-slate-800 rounded-tl-none border border-slate-200'
             }`}>
-              {/* Wrap ReactMarkdown in a div to handle styling as className is restricted on the component itself in this context */}
               <div className="prose prose-sm max-w-none prose-slate">
-                <ReactMarkdown 
+                <ReactMarkdown
                   components={{
                     p: ({children}) => <p className="mb-2 last:mb-0">{children}</p>,
                     ul: ({children}) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
@@ -324,7 +320,7 @@ export const InterviewStep: React.FC<{
         <div ref={chatEndRef} />
       </div>
 
-      <form 
+      <form
         className="flex gap-2 pt-4 border-t border-slate-100"
         onSubmit={(e) => {
           e.preventDefault();
@@ -334,43 +330,36 @@ export const InterviewStep: React.FC<{
           input.value = '';
         }}
       >
-      <input 
-        name="message" 
-        autoFocus
-        autoComplete="off"
-        maxLength={4000}
-        placeholder="Draft your response..." 
-        className="flex-1 px-4 py-2.5 rounded-lg bg-white border border-slate-200 text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none transition-all placeholder:text-slate-400" 
-      />
-        <button 
-          type="button" 
-          onClick={toggleRecording}
-          disabled={!speechSupported || isLoading}
-          className={`flex items-center justify-center rounded-lg px-3 ${isRecording ? 'bg-rose-500 text-white' : 'bg-slate-900 text-white hover:bg-slate-800'} disabled:opacity-50 transition-all`}
-          title={speechSupported ? (isRecording ? 'Stop recording' : 'Record audio') : 'Speech recognition not supported'}
+        <input
+          name="message"
+          autoFocus
+          autoComplete="off"
+          maxLength={4000}
+          placeholder="Draft your response..."
+          className="flex-1 px-4 py-2.5 rounded-lg bg-white border border-slate-200 text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none transition-all placeholder:text-slate-400"
+        />
+        <button
+          type="button"
+          onClick={handleMicClick}
+          disabled={isLoading}
+          className={`px-4 py-2.5 rounded-lg border transition-all flex items-center justify-center ${
+            isRecording 
+              ? 'bg-red-500 border-red-500 text-white animate-pulse' 
+              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+          } disabled:opacity-50`}
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1v11m0 0a3 3 0 003 3h0a3 3 0 003-3V1m-6 11a3 3 0 01-3 3h0a3 3 0 01-3-3V1m6 18v3" /></svg>
+          <svg className="w-4 h-4" fill={isRecording ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
+          </svg>
         </button>
-        <button 
-          type="submit" 
-          disabled={isLoading} 
+        <button
+          type="submit"
+          disabled={isLoading}
           className="bg-slate-900 text-white px-4 rounded-lg hover:bg-slate-800 disabled:opacity-50 flex items-center justify-center transition-all"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
         </button>
       </form>
-
-      {!speechSupported && (
-        <div className="mt-2 text-[10px] text-slate-500">
-          Voice input is not supported in this browser. Try Chrome or Edge.
-        </div>
-      )}
-
-      {isRecording && (
-        <div className="mt-2 text-[10px] text-rose-600 font-medium">
-          Recording... speak now. The transcript will be sent when recording stops.
-        </div>
-      )}
     </div>
   );
 };

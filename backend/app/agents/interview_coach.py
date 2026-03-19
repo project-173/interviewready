@@ -5,6 +5,7 @@ from typing import Optional
 from langfuse import observe
 from .base import BaseAgent
 from .gemini_service import GeminiLiveService
+from langfuse import observe
 from ..core.logging import logger
 from ..core.config import settings
 from ..core.security_constants import ANTI_JAILBREAK_DIRECTIVE
@@ -19,7 +20,36 @@ class InterviewCoachAgent(BaseAgent):
     MOCK_RESPONSE_KEY = "InterviewCoachAgent"
 
     SYSTEM_PROMPT = (
-        "You are an expert Interview Coach. Provide feedback and simulation for interview preparation."
+        """You are an expert Interview Coach specializing in personalized interview preparation.
+
+CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
+
+RULES:
+1. Your entire response must be exactly one JSON object
+2. Start with '{' and end with '}' - nothing else
+3. Do NOT include markdown code blocks (no ```json or ```)
+4. Do NOT include explanatory text, preamble, summary, or chat responses
+5. Do NOT include comments (// or /* */)
+6. Arrays must have 2+ items minimum
+7. Do NOT use null values - use empty strings or empty arrays
+
+Your role:
+1. Analyze the candidate's resume to understand background, skills, and experience
+2. Review the job description to identify key requirements and qualifications
+3. Provide tailored interview coaching that bridges the gap
+4. Simulate realistic interview scenarios
+5. Give constructive feedback highlighting strengths and improvements
+6. Suggest specific preparation strategies
+
+RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
+{
+  "interview_type": "behavioral|technical|situational|competency",
+  "questions": [
+    {"question": "interview question", "keywords": ["keyword1", "keyword2"], "tip": "how to approach this question"}
+  ],
+  "preparation_tips": ["tip 1", "tip 2", "tip 3"],
+  "common_mistakes": ["mistake 1", "mistake 2", "mistake 3"]
+}"""
         + ANTI_JAILBREAK_DIRECTIVE
     )
     CONFIDENCE_SCORE = 0.85
@@ -51,8 +81,8 @@ class InterviewCoachAgent(BaseAgent):
                     print(f"Failed to connect to Gemini Live: {e}")
             else:
                 print("GEMINI_API_KEY not set; Gemini Live will not be used.")
-
-    @observe
+    
+    @observe(name="interview_coach_process", as_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process interview coaching request.
 
@@ -66,79 +96,118 @@ class InterviewCoachAgent(BaseAgent):
         session_id = getattr(context, "session_id", "unknown")
         agent_name = self.get_name()
         processing_start_time = time.time()
+        input_type = "audio" if isinstance(input_text, bytes) else "text"
 
+        # Log processing start
         logger.debug(
-            "InterviewCoachAgent processing started",
+            f"InterviewCoachAgent processing started",
             session_id=session_id,
+            input_type=input_type,
             input_length=len(input_text),
-            input_preview=input_text[:100] + "..."
-            if len(input_text) > 100
-            else input_text,
+            input_preview=(
+                input_text[:100].decode("utf-8", errors="ignore") + "..."
+                if isinstance(input_text, bytes) and len(input_text) > 100
+                else (
+                    input_text.decode("utf-8", errors="ignore")
+                    if isinstance(input_text, bytes)
+                    else (
+                        input_text[:100] + "..."
+                        if len(input_text) > 100
+                        else input_text
+                    )
+                )
+            ),
         )
 
         try:
-            result = None
-            if self.USE_MOCK_RESPONSE:
-                result = self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
-                if result is None:
-                    logger.warning(
-                        "InterviewCoachAgent mock enabled but response key not found",
-                        session_id=session_id,
-                        mock_response_key=self.MOCK_RESPONSE_KEY,
-                    )
-
-            if result is None:
-                # Try to use Gemini Live first, fallback to regular Gemini
+            if isinstance(input_text, bytes):
+                # Handle audio input
                 gemini_live_available = (
                     hasattr(self.gemini_live_service, "connected")
                     and self.gemini_live_service.connected
                 )
                 logger.debug(
-                    "InterviewCoachAgent checking Gemini Live availability",
+                    f"InterviewCoachAgent processing audio input",
                     session_id=session_id,
                     gemini_live_available=gemini_live_available,
+                    audio_length=len(input_text),
                 )
 
                 if gemini_live_available:
-                    logger.debug(
-                        "InterviewCoachAgent using Gemini Live", session_id=session_id
+                    result = self._call_gemini_live_audio(
+                        input_text, self.system_prompt
                     )
-                    result = self._call_gemini_live(input_text)
-                    if not result or result.startswith("Error"):
+                    method_used = "gemini_live_audio"
+                else:
+                    result = "Audio processing is not available. Please ensure Gemini Live is connected."
+                    method_used = "audio_unavailable"
+            else:
+                # Handle text input
+                if self.USE_MOCK_RESPONSE:
+                    result = self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
+                    if result is None:
                         logger.warning(
-                            "InterviewCoachAgent Gemini Live failed, falling back to standard Gemini",
+                            "InterviewCoachAgent mock enabled but response key not found",
                             session_id=session_id,
-                            result_preview=result[:100] if result else "No result",
+                            mock_response_key=self.MOCK_RESPONSE_KEY,
                         )
-                        # Fallback to regular Gemini
                         result = self.call_gemini(input_text, context)
                         method_used = "standard_gemini_fallback"
                     else:
-                        method_used = "gemini_live"
+                        method_used = "mock_response_file"
                 else:
-                    logger.debug(
-                        "InterviewCoachAgent using standard Gemini (Live unavailable)",
-                        session_id=session_id,
+                    # Try to use Gemini Live first, fallback to regular Gemini
+                    gemini_live_available = (
+                        hasattr(self.gemini_live_service, "connected")
+                        and self.gemini_live_service.connected
                     )
-                    # Fallback to regular Gemini
-                    result = self.call_gemini(input_text, context)
-                    method_used = "standard_gemini"
+                    logger.debug(
+                        f"InterviewCoachAgent checking Gemini Live availability",
+                        session_id=session_id,
+                        gemini_live_available=gemini_live_available,
+                    )
 
-            # Validate that we got a meaningful response
-            if not result or not result.strip():
-                raise ValueError("Empty response received from Gemini API")
+                    if gemini_live_available:
+                        logger.debug(
+                            f"InterviewCoachAgent using Gemini Live",
+                            session_id=session_id,
+                        )
+                        result = self._call_gemini_live(input_text)
+                        if not result or result.startswith("Error"):
+                            logger.warning(
+                                f"InterviewCoachAgent Gemini Live failed, falling back to standard Gemini",
+                                session_id=session_id,
+                                result_preview=result[:100] if result else "No result",
+                            )
+                            # Fallback to regular Gemini
+                            result = self.call_gemini(input_text, context)
+                            method_used = "standard_gemini_fallback"
+                        else:
+                            method_used = "gemini_live"
+                    else:
+                        logger.debug(
+                            f"InterviewCoachAgent using standard Gemini (Live unavailable)",
+                            session_id=session_id,
+                        )
+                        # Fallback to regular Gemini
+                        result = self.call_gemini(input_text, context)
+                        method_used = "standard_gemini"
 
+            processing_time = time.time() - processing_start_time
             logger.debug(
-                "InterviewCoachAgent processing completed",
+                f"InterviewCoachAgent processing completed",
                 session_id=session_id,
+                input_type=input_type,
                 processing_time_ms=round(processing_time * 1000, 2),
+                method_used=method_used,
                 result_length=len(result),
                 result_preview=result[:100] + "..." if len(result) > 100 else result,
             )
 
             # Build decision trace for auditability
+            input_type = "audio" if isinstance(input_text, bytes) else "text"
             decision_trace = [
-                "InterviewCoachAgent: Generated interview coaching feedback",
+                f"InterviewCoachAgent: Generated interview coaching feedback for {input_type} input",
                 f"InterviewCoachAgent: Used coaching model with confidence {self.CONFIDENCE_SCORE}",
                 f"InterviewCoachAgent: Method used: {method_used}",
             ]
@@ -148,9 +217,17 @@ class InterviewCoachAgent(BaseAgent):
                 decision_trace.append(
                     "InterviewCoachAgent: Used Gemini Live for real-time response"
                 )
+            elif method_used == "gemini_live_audio":
+                decision_trace.append(
+                    "InterviewCoachAgent: Used Gemini Live for audio analysis and feedback"
+                )
             elif method_used == "mock_response_file":
                 decision_trace.append(
                     "InterviewCoachAgent: Used mock response from backend/mock_responses.json"
+                )
+            elif method_used == "audio_unavailable":
+                decision_trace.append(
+                    "InterviewCoachAgent: Audio processing unavailable due to missing Gemini Live connection"
                 )
             else:
                 decision_trace.append(
@@ -158,11 +235,19 @@ class InterviewCoachAgent(BaseAgent):
                 )
 
             # Create SHARP metadata
+            analysis_type = (
+                "interview_coaching_audio"
+                if input_type == "audio"
+                else "interview_coaching"
+            )
             sharp_metadata = {
-                "analysis_type": "interview_coaching",
+                "analysis_type": analysis_type,
                 "confidence_score": self.CONFIDENCE_SCORE,
-                "gemini_live_available": (method_used == "gemini_live"),
+                "gemini_live_available": (
+                    method_used in ["gemini_live", "gemini_live_audio"]
+                ),
                 "method_used": method_used,
+                "input_type": input_type,
             }
 
             response = AgentResponse(
@@ -177,12 +262,11 @@ class InterviewCoachAgent(BaseAgent):
             # Log response creation
             logger.debug(
                 f"InterviewCoachAgent response created",
-                session_id=session_id,
+                session_id=session_id,input_type=input_type,
                 confidence_score=self.CONFIDENCE_SCORE,
-                analysis_type="interview_coaching",
+                analysis_type=analysis_type,
                 method_used=method_used,
             )
-
             return response
 
         except Exception as e:
@@ -196,13 +280,14 @@ class InterviewCoachAgent(BaseAgent):
                 error_message=str(e),
             )
             raise
-
-    def _call_gemini_live(self, input_text: str) -> Optional[str]:
-        """Call Gemini Live service with timeout.
-
+@observe(name="_call_gemini_live_audio", as_type="tool")
+    def _call_gemini_live_audio(
+        self, audio_data: bytes, system_prompt: str
+    ) -> Optional[str]:
+        """Call Gemini Live service with audio data.
         Args:
-            input_text: Input text for coaching
-
+            audio_data: Audio data as bytes
+            system_prompt: System prompt
         Returns:
             Response from Gemini Live or None if error
         """
@@ -219,40 +304,41 @@ class InterviewCoachAgent(BaseAgent):
 
         try:
             logger.debug(
-                "InterviewCoachAgent calling Gemini Live",
+                "InterviewCoachAgent calling Gemini Live with audio",
                 session_id=session_id,
-                input_length=len(input_text),
+                audio_length=len(audio_data),
             )
 
-            # Send input as text and wait for response (10s timeout)
+            # Send audio and wait for response (10s timeout)
             live_start_time = time.time()
-            raw = self.gemini_live_service.send_textAndWaitResponse(input_text, 10000)
+            raw = self.gemini_live_service.send_audio_and_wait_response(
+                audio_data, system_prompt, timeout_ms=10000
+            )
             live_execution_time = time.time() - live_start_time
 
             if not raw or raw.strip() == "":
                 logger.warning(
-                    "InterviewCoachAgent Gemini Live returned empty response",
+                    "InterviewCoachAgent Gemini Live audio returned empty response",
                     session_id=session_id,
                     execution_time_ms=round(live_execution_time * 1000, 2),
                 )
-                return "(No response from Gemini Live)"
+                return "(No response from Gemini Live for audio)"
 
             logger.debug(
-                "InterviewCoachAgent Gemini Live call successful",
+                "InterviewCoachAgent Gemini Live audio call successful",
                 session_id=session_id,
                 execution_time_ms=round(live_execution_time * 1000, 2),
                 response_length=len(raw),
                 response_preview=raw[:100] + "..." if len(raw) > 100 else raw,
             )
 
-            # The live API returns richer messages; here we return the raw response
             return raw
         except Exception as e:
-            logger.log_agent_error("InterviewCoachAgent-GeminiLive", e, session_id)
+            logger.log_agent_error("InterviewCoachAgent-GeminiLiveAudio", e, session_id)
             logger.error(
-                "InterviewCoachAgent Gemini Live call failed",
+                "InterviewCoachAgent Gemini Live audio call failed",
                 session_id=session_id,
                 error_type=type(e).__name__,
                 error_message=str(e),
             )
-            return f"Error contacting Gemini Live: {str(e)}"
+            return f"Error contacting Gemini Live for audio: {str(e)}"

@@ -8,8 +8,10 @@ from typing import Any
 
 from app.agents.base import BaseAgent
 from app.core.logging import logger
-from app.core.security_constants import ANTI_JAILBREAK_DIRECTIVE
+from langfuse import observe
+from ..core.config import settings
 from app.models import AgentResponse, Resume, ResumeDocument
+from app.core.security_constants import ANTI_JAILBREAK_DIRECTIVE
 from app.models.session import SessionContext
 from app.utils.pdf_parser import parse_pdf_base64
 from app.utils.json_parser import parse_json_object
@@ -19,37 +21,50 @@ from app.utils.validators import is_valid_url, is_full_url, is_valid_date
 class ExtractorAgent(BaseAgent):
     """LLM-powered resume extraction agent with structured output."""
 
-    SYSTEM_PROMPT = (
-        """You are an expert resume parser. Extract structured information from resume text and return it as JSON.
+    USE_MOCK_RESPONSE = settings.MOCK_EXTRACTOR_AGENT
+    MOCK_RESPONSE_KEY = "ExtractorAgent"
+    CONFIDENCE_SCORE = 0.95
 
-    Instructions:
-    1. Parse the resume text carefully - ONLY extract information that is explicitly stated in the text
-    2. Extract the following JSON Resume sections (basics excluded):
-       work, education, awards, certificates, skills, projects
-    3. Return valid JSON that matches the Resume model structure
-    4. If a section is missing, return an empty array for that field
-    5. CRITICAL - URL Handling:
+    SYSTEM_PROMPT = ("""You are an expert resume parser. Extract structured information from resume text and return it as JSON.
+
+CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
+
+JSON RULES:
+1. Your entire response must be exactly one JSON object
+2. Start with '{' and end with '}' - nothing else
+3. Do NOT include markdown code blocks (no ```json or ```)
+4. Do NOT include explanatory text, preamble, or summary text
+5. Do NOT include comments (// or /* */)
+6. Every field must be present and valid
+7. Use null only for optional URL fields
+8. Use empty arrays [] for missing sections
+9. Use empty strings "" for missing optional text fields
+
+EXTRACTION RULES:
+1. Parse the resume text carefully - ONLY extract information explicitly stated in the text
+2. Extract the following JSON Resume sections: work, education, awards, certificates, skills, projects, languages, interests, references
+3. CRITICAL - URL Handling:
        - Only include a url field if a URL is EXPLICITLY mentioned in the resume text
        - Do NOT infer, guess, or hallucinate URLs that are not in the source text
        - If no URL is mentioned, use null for the url field
        - Common mistakes to avoid: adding "https://github.com" when only project name is mentioned, adding company URLs when only company name is given
-    6. For work entries: name, position, url, startDate, endDate, summary, highlights (array)
+4. For work entries: name, position, url, startDate, endDate, summary, highlights (array)
        - url MUST be a valid URL string present in the text or null
        - Do NOT use company names or non-URL strings as url
-    7. For education entries: institution, url, area, studyType, startDate, endDate, score, courses (array)
+5. For education entries: institution, url, area, studyType, startDate, endDate, score, courses (array)
        - url MUST be a valid URL present in the text or null
-    8. For awards: title, date, awarder, summary
-    9. For certificates: name, date, issuer, url
+6. For awards: title, date, awarder, summary
+7. For certificates: name, date, issuer, url
        - url MUST be a valid URL present in the text or null
-    10. For skills: name, level, keywords (array)
-    11. For projects: name, startDate, endDate, description, highlights (array), url
+8. For skills: name, level, keywords (array)
+9. For projects: name, startDate, endDate, description, highlights (array), url
         - url MUST be a valid URL present in the text (e.g., "https://github.com/user/project") or null
         - If the resume only mentions "Github" without a URL, use null
-    12. CRITICAL - Date format: Use YYYY-MM-DD format ONLY
+10. CRITICAL - Date format: Use YYYY-MM-DD format ONLY
         - For current positions, use an empty string "" for endDate (NOT "Present", "Current", or any other text)
         - For ongoing education, use an empty string "" for endDate
 
-    Output format:
+Output format:
     {
         "work": [
             {
@@ -60,17 +75,6 @@ class ExtractorAgent(BaseAgent):
                 "endDate": "2023-01-01",
                 "summary": "Role summary",
                 "highlights": ["achievement1", "achievement2"]
-            }
-        ],
-        "volunteer": [
-            {
-                "organization": "Organization",
-                "position": "Volunteer",
-                "url": "https://organization.com",
-                "startDate": "2019-01-01",
-                "endDate": "2020-01-01",
-                "summary": "Volunteer summary",
-                "highlights": ["impact1", "impact2"]
             }
         ],
         "education": [
@@ -101,38 +105,11 @@ class ExtractorAgent(BaseAgent):
                 "url": "https://certificate.com"
             }
         ],
-        "publications": [
-            {
-                "name": "Publication Title",
-                "publisher": "Publisher",
-                "releaseDate": "2021-01-01",
-                "url": "https://publication.com",
-                "summary": "Publication summary"
-            }
-        ],
         "skills": [
             {
                 "name": "Web Development",
                 "level": "Advanced",
                 "keywords": ["HTML", "CSS", "JavaScript"]
-            }
-        ],
-        "languages": [
-            {
-                "language": "English",
-                "fluency": "Native speaker"
-            }
-        ],
-        "interests": [
-            {
-                "name": "Wildlife",
-                "keywords": ["Ferrets", "Unicorns"]
-            }
-        ],
-        "references": [
-            {
-                "name": "Jane Doe",
-                "reference": "Reference text"
             }
         ],
         "projects": [
@@ -149,60 +126,109 @@ class ExtractorAgent(BaseAgent):
         + ANTI_JAILBREAK_DIRECTIVE
     )
 
-    def __init__(self, gemini_service: object):
+    def __init__(self, gemini_service):
         super().__init__(
             gemini_service=gemini_service,
             system_prompt=self.SYSTEM_PROMPT,
             name="ExtractorAgent",
         )
 
+    @observe(name="extractor_process", as_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         session_id = getattr(context, "session_id", "unknown")
+        agent_name = self.get_name()
         start_time = time.time()
 
-        payload = self._parse_payload(input_text)
-        file_type = str(payload.get("fileType", "")).lower()
-        if file_type != "pdf":
-            raise ValueError(f"Unsupported resume file type: {file_type or 'missing'}")
-
-        base64_data = payload.get("data")
-        if not isinstance(base64_data, str) or not base64_data.strip():
-            raise ValueError("resumeFile.data must be a non-empty base64 string")
-
-        extracted_text = parse_pdf_base64(base64_data.strip())
-        if not extracted_text:
-            raise ValueError("Failed to extract text from resume PDF payload")
-
-        resume = self._extract_resume_with_llm(extracted_text, extracted_text)
-        resume_document = ResumeDocument(
-            source="resumeFile",
-            raw_text=extracted_text,
-            parse_confidence=0.95,
-        )
-        metadata = {
-            "source": "resumeFile",
-            "fileType": "pdf",
-            "extractedTextLength": len(extracted_text),
-            "resume_document": resume_document.model_dump(exclude_none=True),
-        }
-        trace = [
-            "ExtractorAgent: Used LLM to parse resume PDF and extract structured data"
-        ]
-        elapsed_ms = round((time.time() - start_time) * 1000, 2)
         logger.debug(
-            "ExtractorAgent completed LLM-based extraction",
+            "ExtractorAgent processing started",
             session_id=session_id,
-            extracted_text_length=len(extracted_text),
-            processing_time_ms=elapsed_ms,
+            input_length=len(input_text),
         )
-        return AgentResponse(
-            agent_name=self.get_name(),
-            content=json.dumps(resume.model_dump(), indent=2),
-            reasoning="Extracted and structured resume data using LLM.",
-            confidence_score=0.95,
-            decision_trace=trace,
-            sharp_metadata=metadata,
-        )
+
+        try:
+            raw_result = (
+                self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
+                if self.USE_MOCK_RESPONSE
+                else None
+            )
+
+            if self.USE_MOCK_RESPONSE and raw_result is None:
+                logger.warning(
+                    "Mock enabled but response key not found",
+                    session_id=session_id,
+                    mock_response_key=self.MOCK_RESPONSE_KEY,
+                )
+
+            payload = self._parse_payload(input_text)
+            file_type = str(payload.get("fileType", "")).lower()
+            if file_type != "pdf":
+                raise ValueError(
+                    f"Unsupported resume file type: {file_type or 'missing'}"
+                )
+
+            base64_data = payload.get("data")
+            if not isinstance(base64_data, str) or not base64_data.strip():
+                raise ValueError("resumeFile.data must be a non-empty base64 string")
+
+            extracted_text = parse_pdf_base64(base64_data.strip())
+            if not extracted_text:
+                raise ValueError("Failed to extract text from resume PDF payload")
+
+            resume = self._extract_resume_with_llm(
+                extracted_text, extracted_text, context
+            )
+            resume_document = ResumeDocument(
+                source="resumeFile",
+                raw_text=extracted_text,
+                parse_confidence=self.CONFIDENCE_SCORE,
+            )
+            metadata = {
+                "source": "resumeFile",
+                "fileType": "pdf",
+                "extractedTextLength": len(extracted_text),
+                "resume_document": resume_document.model_dump(exclude_none=True),
+                "analysis_type": "resume_extraction",
+                "confidence_score": self.CONFIDENCE_SCORE,
+            }
+            decision_trace = [
+                "ExtractorAgent: Used LLM to parse resume PDF and extract structured data"
+            ]
+            elapsed_ms = round((time.time() - start_time) * 1000, 2)
+            logger.debug(
+                "ExtractorAgent completed LLM-based extraction",
+                session_id=session_id,
+                extracted_text_length=len(extracted_text),
+                processing_time_ms=elapsed_ms,
+            )
+            response = AgentResponse(
+                agent_name=self.get_name(),
+                content=json.dumps(resume.model_dump(), indent=2),
+                reasoning="Extracted and structured resume data using LLM.",
+                confidence_score=self.CONFIDENCE_SCORE,
+                decision_trace=decision_trace,
+                sharp_metadata=metadata,
+            )
+
+            logger.debug(
+                "ExtractorAgent response created",
+                session_id=session_id,
+                confidence_score=self.CONFIDENCE_SCORE,
+                analysis_type="resume_extraction",
+            )
+
+            return response
+
+        except Exception as e:
+            elapsed_ms = round((time.time() - start_time) * 1000, 2)
+            logger.log_agent_error(agent_name, e, session_id)
+            logger.error(
+                "ExtractorAgent processing failed",
+                session_id=session_id,
+                processing_time_ms=elapsed_ms,
+                error_type=type(e).__name__,
+                error_message=str(e),
+            )
+            raise
 
     @staticmethod
     def _parse_payload(input_text: str) -> dict[str, Any]:
@@ -216,13 +242,15 @@ class ExtractorAgent(BaseAgent):
             raise ValueError("ExtractorAgent payload must be a JSON object")
         return payload
 
-    def _extract_resume_with_llm(self, text: str, source_text: str) -> Resume:
+    def _extract_resume_with_llm(
+        self, text: str, source_text: str, source_text: str, context: SessionContext
+    ) -> Resume:
         """Use LLM to extract structured resume data from text."""
 
         user_input = f"Extract structured information from the following resume text:\n\n{text}\n\nReturn the result as valid JSON following the specified format."
 
         try:
-            raw_result = self.call_gemini(user_input, None)
+            raw_result = self.call_gemini(user_input, context)
 
             if not raw_result or not raw_result.strip():
                 raise ValueError("Empty response received from Gemini API")

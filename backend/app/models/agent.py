@@ -1,7 +1,7 @@
 """Agent-related models."""
 
 from typing import Optional, List, Dict, Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from .resume import Resume
 
 
@@ -52,6 +52,55 @@ class ChatRequest(BaseModel):
     resumeFile: Optional[ResumeFile] = None
     jobDescription: Optional[str] = Field(default="", max_length=20000)
     messageHistory: Optional[List[InterviewMessage]] = Field(default_factory=list)
+    audioData: Optional[bytes] = None
+
+    @field_validator('audioData', mode='before')
+    @classmethod
+    def decode_audio_data(cls, v):
+        if isinstance(v, str):
+            import base64
+            return base64.b64decode(v)
+        return v  # Audio data for interview coaching
+
+
+class ResumeDocument(BaseModel):
+    """Normalized resume document (lite)."""
+
+    id: Optional[str] = None
+    source: Optional[str] = None
+    raw_text: Optional[str] = None
+    parse_confidence: Optional[float] = None
+    warnings: List[str] = Field(default_factory=list)
+    sections: Optional[Dict[str, str]] = None
+    spans: Optional[List[Dict[str, Any]]] = None
+
+
+class AnalysisArtifact(BaseModel):
+    """Structured output captured from an agent."""
+
+    agent: Optional[str] = None
+    artifact_type: Optional[str] = None
+    payload: Optional[Dict[str, Any] | List[Any] | str] = None
+    confidence_score: Optional[float] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ActionPlan(BaseModel):
+    """Synthesis plan for resume edits or next steps."""
+
+    summary: Optional[str] = None
+    actions: List[str] = Field(default_factory=list)
+    priority: Optional[str] = None
+    no_change: Optional[bool] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class NormalizationFailure(BaseModel):
+    """Normalization failure details."""
+
+    reason: str
+    recovery_steps: Optional[str] = None
+    details: Optional[str] = None
 
 
 class ResumeDocument(BaseModel):

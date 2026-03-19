@@ -28,6 +28,22 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str
     GOOGLE_AI_API_KEY: Optional[str] = None
 
+    MOCK_GEMINI: bool = False
+    LOG_MOCK_CALLS: bool = False
+    
+    # Firebase Configuration
+    FIREBASE_ENABLED: bool = False
+    FIREBASE_CONFIG_PATH: str = "classpath:architecting-ai-systems-e71af-firebase-adminsdk-fbsvc-0033ba2601.json"
+    FIREBASE_PROJECT_ID: Optional[str] = None
+    FIREBASE_PRIVATE_KEY_ID: Optional[str] = None
+    FIREBASE_PRIVATE_KEY: Optional[str] = None
+    FIREBASE_CLIENT_EMAIL: Optional[str] = None
+    FIREBASE_CLIENT_ID: Optional[str] = None
+    FIREBASE_AUTH_URI: str = "https://accounts.google.com/o/oauth2/auth"
+    FIREBASE_TOKEN_URI: str = "https://oauth2.googleapis.com/token"
+    GEMINI_API_KEY: str
+    GOOGLE_AI_API_KEY: Optional[str] = None
+
     # Security
     SECURITY_FILTER_ORDER: int = 5
     AUTH_ENABLED: bool = True
@@ -59,7 +75,21 @@ class Settings(BaseSettings):
 
     # Environment
     APP_ENV: str = "development"
+# Langfuse
+    LANGFUSE_PUBLIC_KEY: Optional[str] = None
+    LANGFUSE_SECRET_KEY: Optional[str] = None
+    LANGFUSE_HOST: Optional[str] = None
 
+    # Environment
+    APP_ENV: str = "development"
+
+    # Mock agent response
+    MOCK_RESUME_CRITIC_AGENT: bool = True
+    MOCK_EXTRACTOR_AGENT: bool = True
+    MOCK_CONTENT_STRENGTH_AGENT: bool = True
+    MOCK_JOB_ALIGNMENT_AGENT: bool = True
+    MOCK_INTERVIEW_COACH_AGENT: bool = True
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

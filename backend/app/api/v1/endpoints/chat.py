@@ -10,6 +10,10 @@ from app.api.v1.services import (
     get_or_create_session_context,
     get_orchestration_agent,
 )
+from app.core.auth import get_current_user
+from langfuse import Langfuse, observe, propagate_attributes
+
+langfuse = Langfuse()
 from app.models import AgentResponse, ChatApiResponse, ChatRequest
 from app.utils.json_parser import parse_json_payload
 
@@ -22,21 +26,26 @@ langfuse = get_client()
 async def chat_endpoint(
     request: ChatRequest,
     session_id: Annotated[str, Query(alias="sessionId")],
+    current_user: dict[str, Any] = Depends(get_current_user),
 ) -> ChatApiResponse:
     """Run orchestration for the chat message within a user-owned session."""
     user_id = "dev-user"
 
-    with propagate_attributes(
-        session_id=session_id,
+    with langfuse.start_as_current_observation(
+        as_type="span",
+        name="chat_api_request",
         metadata={
             "endpoint": "/api/v1/chat",
             "method": "POST",
         }
     ):
-        try:
-            context = get_or_create_session_context(session_id=session_id, user_id=user_id)
-        except PermissionError as exc:
-            langfuse.update_current_span(
+        with propagate_attributes(user_id=user_id, session_id=session_id):
+            try:
+                context = get_or_create_session_context(
+                    session_id=session_id, user_id=user_id
+                )
+            except PermissionError as exc:
+                langfuse.update_current_span(
                 output={"error": "permission_denied", "reason": str(exc)}
             )
             raise HTTPException(
@@ -44,10 +53,10 @@ async def chat_endpoint(
                 detail=str(exc),
             ) from exc
 
-        try:
-            orchestrator = get_orchestration_agent()
-        except Exception as exc:
-            langfuse.update_current_span(
+            try:
+                orchestrator = get_orchestration_agent()
+            except Exception as exc:
+                langfuse.update_current_span(
                 output={"error": "orchestrator_unavailable", "reason": str(exc)}
             )
             raise HTTPException(
@@ -55,24 +64,24 @@ async def chat_endpoint(
                 detail=f"Orchestration service unavailable: {exc}",
             ) from exc
 
-        try:
-            internal_response = await run_in_threadpool(
-                orchestrator.orchestrate, request, context
-            )
-            result = ChatApiResponse(
-                agent=internal_response.agent_name,
-                payload=_extract_api_payload(internal_response),
-            )
-            langfuse.update_current_span(
-                output={
-                    "success": True,
-                    "agent": internal_response.agent_name,
-                    "response_length": len(str(result.payload)),
-                }
-            )
-            return result
-        except Exception as exc:
-            langfuse.update_current_span(
+            try:
+                internal_response = await run_in_threadpool(
+                    orchestrator.orchestrate, request, context
+                )
+                result = ChatApiResponse(
+                    agent=internal_response.agent_name,
+                    payload=_extract_api_payload(internal_response),
+                )
+                langfuse.update_current_span(
+                    output={
+                        "success": True,
+                        "agent": internal_response.agent_name,
+                        "response_length": len(str(result.payload)),
+                    }
+                )
+                return result
+            except Exception as exc:
+                langfuse.update_current_span(
                 output={"error": "orchestration_failed", "reason": str(exc)}
             )
             raise HTTPException(

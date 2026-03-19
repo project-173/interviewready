@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, TypedDict
+from typing import Any, TypedDict, Union
 
 from langgraph.graph import END, StateGraph
 from langfuse import get_client, observe, propagate_attributes
 
 from app.agents.base import BaseAgentProtocol
+from app.agents.gemini_service import GeminiService
+from langfuse import Langfuse, observe, propagate_attributes
+
+langfuse = Langfuse()
 from app.core.logging import logger
 from app.governance.sharp_governance_service import SharpGovernanceService
 from app.models.agent import (
@@ -24,14 +28,12 @@ from app.models.resume import Resume
 from app.models.session import SessionContext
 from app.utils.json_parser import parse_json_object, parse_json_payload
 
-langfuse = get_client()
-
 
 class OrchestrationState(TypedDict):
     """Workflow state used by LangGraph orchestration."""
 
-    original_input: str
-    current_input: str
+    original_input: Union[str, bytes]
+    current_input: Union[str, bytes]
     context: SessionContext
     agent_sequence: list[str]
     current_index: int
@@ -49,6 +51,7 @@ class OrchestrationAgent:
     ) -> None:
         self.agents = {agent.get_name(): agent for agent in agent_list}
         self.governance = governance
+        self.intent_gemini_service: GeminiService | None = None
         self.workflow = self._build_workflow()
 
     @observe(name="orchestration_execution")
@@ -58,55 +61,55 @@ class OrchestrationAgent:
         session_id = getattr(context, 'session_id', 'unknown')
         user_id = getattr(context, 'user_id', None)
 
-        with propagate_attributes(session_id=session_id):
-            langfuse.update_current_span(
-                metadata={
-                    "user_id": user_id,
-                    "intent": request.intent,
-                }
-            )
+        with langfuse.start_as_current_observation(
+            as_type="span",
+            name="orchestration_execution",
+        ) as trace:
+            with propagate_attributes(user_id=user_id, session_id=session_id):
+                # Extract intent from request and build input text for agents
+                intent = request.intent
+                if intent not in {"RESUME_CRITIC", "CONTENT_STRENGTH", "ALIGNMENT", "INTERVIEW_COACH"}:
+                    raise ValueError(f"Unsupported intent: {intent}")
 
-            # Extract intent from request and build input text for agents
-            intent = request.intent
-            if intent not in {"RESUME_CRITIC", "CONTENT_STRENGTH", "ALIGNMENT", "INTERVIEW_COACH"}:
-                raise ValueError(f"Unsupported intent: {intent}")
+                logger.log_state_transition("orchestration_start", "normalize_resume", session_id, intent=intent)
+                normalization_result = self._normalize_resume(request, context)
+                if isinstance(normalization_result, NormalizationFailure):
+                    logger.log_state_transition(
+                        "normalize_resume",
+                        "normalize_failed",
+                        session_id,
+                        reason=normalization_result.reason,
+                    )
+                    return self._build_normalization_failure_response(normalization_result, context)
 
-            logger.log_state_transition("orchestration_start", "normalize_resume", session_id, intent=intent)
-            normalization_result = self._normalize_resume(request, context)
-            if isinstance(normalization_result, NormalizationFailure):
-                logger.log_state_transition(
-                    "normalize_resume",
-                    "normalize_failed",
-                    session_id,
-                    reason=normalization_result.reason,
+                resume_model, _resume_document = normalization_result
+                resume_data = (
+                    resume_model.model_dump(exclude_none=True)
+                    if resume_model is not None
+                    else {}
                 )
-                return self._build_normalization_failure_response(normalization_result, context)
+                job_description = request.jobDescription or ""
+                message_history = request.messageHistory or []
 
-            resume_model, _resume_document = normalization_result
-            resume_data = (
-                resume_model.model_dump(exclude_none=True)
-                if resume_model is not None
-                else {}
-            )
-            job_description = request.jobDescription or ""
-            message_history = request.messageHistory or []
+                # Extract audio data if present — routed only to INTERVIEW_COACH
+                audio_data: bytes | None = getattr(request, "audioData", None)
 
-            # Build input text based on intent and available data
-            input_text = self._build_agent_input(intent, resume_data, job_description, message_history)
+                #Build input text based on intent and available data
+            input_text = self._build_agent_input(intent, resume_data, job_description, audio_data)
 
-            # Log orchestration start
-            logger.log_orchestration_start(input_text, session_id, user_id)
+                # Log orchestration start
+                logger.log_orchestration_start(input_text, session_id, user_id)
 
-            try:
-                # Map intent to agent sequence directly
+                try:
+                    # Map intent to agent sequence directly
                 agent_sequence = self._map_intent_to_agents(intent)
 
-                langfuse.update_current_span(
+                    langfuse.update_current_span(
                     output={"agent_sequence": agent_sequence}
                 )
 
                 logger.log_state_transition("normalize_resume", "route_agents", session_id)
-                logger.log_intent_analysis(input_text, agent_sequence, "intent_direct", session_id)
+                    logger.log_intent_analysis(input_text, agent_sequence, "intent_direct", session_id)
 
                 state: OrchestrationState = {
                     "original_input": input_text,
@@ -132,13 +135,13 @@ class OrchestrationAgent:
 
                 langfuse.update_current_span(
                     output={"success": True, "duration_s": total_time}
-                )
+                    )
                 return current_response
 
             except Exception as e:
                 langfuse.update_current_span(output={"error": str(e)})
-                logger.log_agent_error("OrchestrationAgent", e, session_id)
-                raise
+                    logger.log_agent_error("OrchestrationAgent", e, session_id)
+                    raise
 
     def get_agents(self) -> dict[str, BaseAgentProtocol]:
         """Expose registered agent map."""
@@ -183,21 +186,19 @@ class OrchestrationAgent:
         current_input = state["current_input"]
         logger.log_agent_execution_start(agent_name, current_input, session_id, current_index)
 
-        agent_start_time = time.time()
+        user_id = getattr(context, "user_id", None)
 
         with langfuse.start_as_current_observation(
             as_type="span",
-            name=f"execute_{agent_name}",
-        ):
-            with propagate_attributes(session_id=session_id):
-                langfuse.update_current_span(
-                    metadata={
-                        "agent": agent_name,
-                        "agent_index": current_index,
-                        "current_input_length": len(current_input),
-                    }
-                )
-
+            name="orchestrator_agent_execution",
+            metadata={
+                "agent": agent_name,
+                "agent_index": current_index,
+                "current_input_length": len(current_input),
+            },
+        ) as span:
+            with propagate_attributes(user_id=user_id, session_id=session_id):
+                agent_start_time = time.time()
                 try:
                     response = agent.process(current_input, context)
                     agent_execution_time = time.time() - agent_start_time
@@ -213,7 +214,8 @@ class OrchestrationAgent:
                 except Exception as e:
                     agent_execution_time = time.time() - agent_start_time
                     langfuse.update_current_span(
-                        output={"error": str(e), "duration_ms": round(agent_execution_time * 1000, 2)}
+                        output={"error": str(e), "duration_ms": round(agent_execution_time * 1000, 2),
+                        }
                     )
                     logger.log_agent_error(agent_name, e, session_id)
                     raise
@@ -253,25 +255,28 @@ class OrchestrationAgent:
             return "end"
         return "continue"
 
-    def _build_agent_input(self, intent: str, resume_data: dict, job_description: str, message_history: list) -> str:
-        """Build input text for agents based on intent and available data."""
+    def _build_agent_input(
+        self,
+        intent: str,
+        resume_data: dict,
+        job_description: str,
+        audio_data: bytes | None = None,
+    ) -> str | bytes:
+        """Build input for agents: audio bytes for INTERVIEW_COACH, text for all others."""
+        if audio_data is not None and intent == "INTERVIEW_COACH":
+            # For interview coaching with audio, return the audio data directly
+            return audio_data
+
         if intent == "RESUME_CRITIC":
             return f"Resume data: {json.dumps(resume_data, indent=2)}"
 
-        elif intent == "CONTENT_STRENGTH":
+        if intent == "CONTENT_STRENGTH":
             return f"Resume data: {json.dumps(resume_data, indent=2)}"
 
-        elif intent == "ALIGNMENT":
+        if intent == "ALIGNMENT":
             return f"Resume data: {json.dumps(resume_data, indent=2)}\nJob Description: {job_description}"
 
-        elif intent == "INTERVIEW_COACH":
-            history_str = json.dumps(
-                [{"role": msg.role, "text": msg.text} for msg in message_history], indent=2
-            )
-            return f"Alignment data: {job_description}\nConversation history: {history_str}"
-
-        else:
-            return f"Request data: {json.dumps(resume_data, indent=2)}"
+        return f"Request data: {json.dumps(resume_data, indent=2)}"
 
     def _normalize_resume(
         self, request: ChatRequest, context: SessionContext

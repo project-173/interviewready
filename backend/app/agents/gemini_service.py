@@ -39,12 +39,18 @@ class GeminiService:
         """
         self.api_key = api_key or settings.GEMINI_API_KEY
         self.model_name = model_name or settings.GEMINI_MODEL
+self.client = None
+        self.mock_mode = False
 
-        if not self.api_key:
-            raise ValueError("GEMINI_API_KEY environment variable must be set")
+        if self.api_key:
 
         self.client = genai.Client(api_key=self.api_key)
-
+else:
+            # Gracefully degrade to mock mode when API key is not available
+            from ..core.logging import logger
+            logger.warning("GEMINI_API_KEY not configured - using mock responses")
+            self.mock_mode = True
+    
     def generate_response(
         self,
         system_prompt: str,
@@ -61,6 +67,10 @@ class GeminiService:
         Returns:
             Generated response text
         """
+        # Return mock response if in mock mode
+        if self.mock_mode:
+            return self._generate_mock_response(system_prompt, user_input)
+
         # Construct the full prompt
         user_message = self._construct_user_message(user_input, context)
 
@@ -75,7 +85,117 @@ class GeminiService:
             )
             return response.text
         except Exception as e:
+            from ..core.logging import logger
+            logger.error(f"Gemini API call failed: {str(e)}")
             return f"Error calling Gemini API: {str(e)}"
+def _generate_mock_response(self, system_prompt: str, user_input: str) -> str:
+        """Generate a mock response based on the system prompt.
+
+        Args:
+            system_prompt: System prompt to determine response format
+            user_input: User input text
+
+        Returns:
+            Mock JSON response
+        """
+        # Detect response type based on system prompt
+        if "resume" in system_prompt.lower() and "critic" in system_prompt.lower():
+            # Resume Critic mock response
+            mock_data = {
+                "resume_data": {
+                    "title": "Professional Resume",
+                    "summary": "Experienced professional with strong background",
+                    "contact": {
+                        "fullName": "John Doe",
+                        "email": "john@example.com",
+                        "phone": "555-0123"
+                    },
+                    "skills": ["Python", "JavaScript", "Project Management"],
+                    "experiences": [
+                        {
+                            "title": "Senior Developer",
+                            "company": "Tech Corp",
+                            "start_date": "2020-01",
+                            "end_date": "present",
+                            "description": "Led development of core platform features"
+                        }
+                    ],
+                    "educations": [
+                        {
+                            "school": "State University",
+                            "degree": "BS Computer Science",
+                            "start_date": "2015-09",
+                            "end_date": "2019-05"
+                        }
+                    ]
+                },
+                "critique": {
+                    "score": 78,
+                    "readability": "Good structure with clear sections",
+                    "formattingRecommendations": [
+                        "Use bullet points for better readability",
+                        "Ensure consistent date formatting"
+                    ],
+                    "suggestions": [
+                        "Add quantifiable metrics to achievements",
+                        "Highlight technical skills more prominently"
+                    ]
+                }
+            }
+        elif "alignment" in system_prompt.lower():
+            # Job Alignment mock response
+            mock_data = {
+                "alignment_score": 0.82,
+                "matching_skills": ["Python", "Project Management"],
+                "missing_skills": ["Kubernetes", "Docker"],
+                "strengths": [
+                    "Strong technical foundation",
+                    "Proven leadership experience"
+                ],
+                "gaps": [
+                    "Limited DevOps experience",
+                    "No containerization background"
+                ],
+                "recommendations": [
+                    "Learn containerization technologies",
+                    "Pursue Docker and Kubernetes certifications"
+                ]
+            }
+        elif "strength" in system_prompt.lower():
+            # Content Strength mock response
+            mock_data = {
+                "overall_score": 75,
+                "content_analysis": {
+                    "clarity": 8,
+                    "relevance": 7,
+                    "completeness": 6,
+                    "impact": 7
+                },
+                "strengths": [
+                    "Clear communication",
+                    "Well-organized content"
+                ],
+                "weaknesses": [
+                    "Lacks specific metrics",
+                    "Could benefit from more examples"
+                ],
+                "suggestions": [
+                    "Add quantifiable results",
+                    "Include more specific achievements"
+                ]
+            }
+        else:
+            # Generic response
+            mock_data = {
+                "status": "processed",
+                "analysis": "Mock response generated",
+                "recommendations": [
+                    "Continue professional development",
+                    "Expand skill set"
+                ]
+            }
+
+        return json.dumps(mock_data)
 
     def _construct_user_message(
         self, user_input: str, context: Optional[SessionContext] = None
@@ -134,26 +254,37 @@ class GeminiLiveService:
             self.connected = False
             raise Exception(f"Failed to connect to Gemini Live: {str(e)}")
 
-    def send_textAndWaitResponse(
-        self, text: str, timeout_ms: int = 10000
+    def send_audio_and_wait_response(
+        self, audio_data: bytes, system_prompt: str, mime_type: str = "audio/wav", text_prompt: str = "", timeout_ms: int = 10000
     ) -> Optional[str]:
-        """Send text and wait for response.
-
+        """Send audio data and wait for response.
         Args:
-            text: Text to send
+            audio_data: Audio data as bytes
+            system_prompt: System prompt for the model
+            mime_type: MIME type of the audio (default: audio/wav)
+            text_prompt: Optional text prompt to accompany audio
             timeout_ms: Timeout in milliseconds
 
         Returns:
-            Response text or None if timeout/error
+            Response text or None if error
         """
         if not self.connected or not self.client:
             return None
 
         try:
+            from google.genai import types
+            audio_part = types.Part.from_bytes(data=audio_data, mime_type=mime_type)
+            contents = [audio_part]
+            if text_prompt:
+                contents.insert(0, text_prompt)
+
             response = self.client.models.generate_content(
                 model=self.model_name,
-                contents=text,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                )
             )
             return response.text
         except Exception as e:
-            return f"Error in Gemini Live: {str(e)}"
+            return f"Error in Gemini Live Audio: {str(e)}"

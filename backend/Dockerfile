@@ -35,7 +35,7 @@ COPY . .
 
 # Verify that all dependencies are installed, including Langfuse
 # This step will fail the build if a core dependency is missing
-RUN python -c "import langfuse; from importlib.metadata import version; print('Langfuse version:', version('langfuse'))"
+RUN python -c "from langfuse import Langfuse; from importlib.metadata import version; print('Langfuse version:', version('langfuse'))"
 
 # Expose the port
 EXPOSE 8080

@@ -147,6 +147,8 @@ jobs:
           region: ${{ env.REGION }}
           image: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.BACKEND_SERVICE_NAME }}:${{ github.sha }}
           env_vars: |
+            APP_ENV=staging
+            FIREBASE_ENABLED=False
             AUTH_ENABLED=False
             FRONTEND_URL=${{ steps.frontend-url.outputs.url }}
             BACKEND_URL=https://interviewready-backend-266623940622.asia-southeast1.run.app

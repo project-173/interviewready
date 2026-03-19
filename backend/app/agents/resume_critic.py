@@ -5,33 +5,63 @@ import time
 from typing import Dict, Any
 from langfuse import observe
 from .base import BaseAgent
+from langfuse import observe
 from ..core.logging import logger
+from ..core.config import settings
 from ..core.security_constants import ANTI_JAILBREAK_DIRECTIVE
 from ..models.agent import AgentResponse, StructuralAssessment
 from ..models.session import SessionContext
 from ..utils.json_parser import parse_json_object
 
-
 class ResumeCriticAgent(BaseAgent):
     """Agent for analyzing resume structure, ATS compatibility, and impact."""
-
-    USE_MOCK_RESPONSE = False
+    USE_MOCK_RESPONSE = settings.MOCK_RESUME_CRITIC_AGENT
     MOCK_RESPONSE_KEY = "ResumeCriticAgent"
 
-    SYSTEM_PROMPT = (
-        """
-    You are an expert Resume Critic. Analyze the resume for structure, ATS compatibility, and impact.
+    SYSTEM_PROMPT = ("""
+You are an expert Resume Critic analyzing resumes for structure, ATS compatibility, and impact.
 
-    Return ONLY valid JSON with this exact schema:
-    {
-      "score": 0-100 number,
-      "readability": "short text summary",
-      "formattingRecommendations": ["recommendation 1", "recommendation 2"],
-      "suggestions": ["actionable suggestion 1", "actionable suggestion 2"]
-    }
-    """
-        + ANTI_JAILBREAK_DIRECTIVE
-    )
+CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
+
+RULES:
+1. Your entire response must be exactly one JSON object
+2. Start with '{' and end with '}' - nothing else
+3. Do NOT include any markdown code blocks (no ```json or ```)
+4. Do NOT include any explanatory text, preamble, or summary
+5. Do NOT include comments (// or /* */)
+6. Every field must be present and valid
+7. String arrays must contain 2+ non-empty items
+8. Score must be a number between 0-100
+9. If you cannot provide data, use empty strings/arrays, never null
+
+RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
+{
+  "resume_data": {
+    "title": "resume title",
+    "summary": "professional summary",
+    "contact": {
+      "fullName": "full name",
+      "email": "email address",
+      "phone": "phone number"
+    },
+    "skills": ["skill 1", "skill 2", "skill 3"],
+    "experiences": [
+      {"title": "job title", "company": "company name", "start_date": "YYYY-MM", "end_date": "YYYY-MM", "description": "accomplishments"}
+    ],
+    "educations": [
+      {"school": "school name", "degree": "degree type", "start_date": "YYYY-MM", "end_date": "YYYY-MM"}
+    ]
+  },
+  "critique": {
+    "score": 75,
+    "readability": "assessment of resume readability",
+    "formattingRecommendations": ["recommendation 1", "recommendation 2", "recommendation 3"],
+    "suggestions": ["actionable suggestion 1", "actionable suggestion 2", "actionable suggestion 3"]
+  }
+}
+"""
+    + ANTI_JAILBREAK_DIRECTIVE
+)
     CONFIDENCE_SCORE = 0.9
 
     def __init__(self, gemini_service):
@@ -45,8 +75,8 @@ class ResumeCriticAgent(BaseAgent):
             system_prompt=self.SYSTEM_PROMPT,
             name="ResumeCriticAgent",
         )
-
-    @observe
+    
+    @observe(name="resume_critic_process", as_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process resume text and provide critique.
 
@@ -69,58 +99,34 @@ class ResumeCriticAgent(BaseAgent):
             if len(input_text) > 100
             else input_text,
         )
-
         try:
-            raw_result = None
-            if self.USE_MOCK_RESPONSE:
-                raw_result = self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
-                if raw_result is None:
-                    logger.warning(
-                        "ResumeCriticAgent mock enabled but response key not found",
-                        session_id=session_id,
-                        mock_response_key=self.MOCK_RESPONSE_KEY,
-                    )
+            raw_result = (
+                self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
+                if self.USE_MOCK_RESPONSE
+                else None
+            )
 
-            if raw_result is None:
-                raw_result = self.call_gemini(input_text, context)
-
-            if not raw_result or not raw_result.strip():
-                raise ValueError("Empty response received from Gemini API")
-
-            parsed_result = parse_json_object(raw_result)
-
-            if not parsed_result:
-                raise ValueError(
-                    f"Failed to parse valid JSON from Gemini response: {raw_result[:200]}..."
+            if self.USE_MOCK_RESPONSE and raw_result is None:
+                logger.warning(
+                    "Mock enabled but response key not found",
+                    session_id=session_id,
+                    mock_response_key=self.MOCK_RESPONSE_KEY,
                 )
 
-            validated_result = StructuralAssessment.model_validate(parsed_result)
-            structured_result = validated_result.model_dump()
+            raw_result = raw_result or self.call_gemini(input_text, context)
 
-            if not structured_result.get(
-                "formattingRecommendations"
-            ) and not structured_result.get("suggestions"):
-                raise ValueError(
-                    "Gemini API returned empty recommendations and suggestions"
-                )
+            structured_result = self.parse_and_validate(raw_result, StructuralAssessment).model_dump()
 
             processing_time = time.time() - processing_start_time
-
-            logger.debug(
-                "ResumeCriticAgent processing completed",
-                session_id=session_id,
-                processing_time_ms=round(processing_time * 1000, 2),
-                result_length=len(raw_result),
-                result_preview=raw_result[:100] + "..."
-                if len(raw_result) > 100
-                else raw_result,
-            )
+            
+            logger.debug("ResumeCriticAgent processing completed",
+                        session_id=session_id,
+                        processing_time_ms=round(processing_time * 1000, 2))
 
             decision_trace = [
                 "ResumeCriticAgent: Analyzed resume structure and content impact",
                 f"ResumeCriticAgent: Generated critique with confidence {self.CONFIDENCE_SCORE}",
             ]
-
             sharp_metadata = {
                 "analysis_type": "resume_critique",
                 "confidence_score": self.CONFIDENCE_SCORE,
@@ -143,7 +149,6 @@ class ResumeCriticAgent(BaseAgent):
                 analysis_type="resume_critique",
                 ats_compatibility_checked=True,
             )
-
             return response
 
         except Exception as e:

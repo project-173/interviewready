@@ -441,7 +441,7 @@ async def login(
 
 @router.get("/me", response_model=schemas.UserResponse)
 async def get_me(current_user: models.User = Depends(get_current_user)):
-    return current_user
+    return get_current_user
 ```
 
 ### Protect Routes

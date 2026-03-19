@@ -26,7 +26,6 @@ async def lifespan(app: FastAPI):
     yield
     # Cleanup can be added here
 
-
 app = FastAPI(
     title=settings.APP_NAME,
     description="Production-Ready Multi-Agent AI Backend with Gemini",
