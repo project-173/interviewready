@@ -5,6 +5,7 @@ on:
     branches:
       - CICD
       - langfuse
+      - security
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
