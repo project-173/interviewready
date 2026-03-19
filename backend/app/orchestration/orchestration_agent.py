@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, TypedDict
+from typing import Any, TypedDict, Union
 
 from langgraph.graph import END, StateGraph
 from langfuse import get_client, observe, propagate_attributes
@@ -30,8 +30,8 @@ langfuse = get_client()
 class OrchestrationState(TypedDict):
     """Workflow state used by LangGraph orchestration."""
 
-    original_input: str
-    current_input: str
+    original_input: Union[str, bytes]
+    current_input: Union[str, bytes]
     context: SessionContext
     agent_sequence: list[str]
     current_index: int
@@ -91,8 +91,13 @@ class OrchestrationAgent:
             job_description = request.jobDescription or ""
             message_history = request.messageHistory or []
 
+            # Extract audio data if present — routed only to INTERVIEW_COACH
+            audio_data: bytes | None = getattr(request, "audioData", None)
+
             # Build input text based on intent and available data
-            input_text = self._build_agent_input(intent, resume_data, job_description, message_history)
+            input_text = self._build_agent_input(
+                intent, resume_data, job_description, audio_data
+            )
 
             # Log orchestration start
             logger.log_orchestration_start(input_text, session_id, user_id)
@@ -253,25 +258,28 @@ class OrchestrationAgent:
             return "end"
         return "continue"
 
-    def _build_agent_input(self, intent: str, resume_data: dict, job_description: str, message_history: list) -> str:
-        """Build input text for agents based on intent and available data."""
+    def _build_agent_input(
+        self,
+        intent: str,
+        resume_data: dict,
+        job_description: str,
+        audio_data: bytes | None = None,
+    ) -> str | bytes:
+        """Build input for agents: audio bytes for INTERVIEW_COACH, text for all others."""
+        if audio_data is not None and intent == "INTERVIEW_COACH":
+            # For interview coaching with audio, return the audio data directly
+            return audio_data
+
         if intent == "RESUME_CRITIC":
             return f"Resume data: {json.dumps(resume_data, indent=2)}"
 
-        elif intent == "CONTENT_STRENGTH":
+        if intent == "CONTENT_STRENGTH":
             return f"Resume data: {json.dumps(resume_data, indent=2)}"
 
-        elif intent == "ALIGNMENT":
+        if intent == "ALIGNMENT":
             return f"Resume data: {json.dumps(resume_data, indent=2)}\nJob Description: {job_description}"
 
-        elif intent == "INTERVIEW_COACH":
-            history_str = json.dumps(
-                [{"role": msg.role, "text": msg.text} for msg in message_history], indent=2
-            )
-            return f"Alignment data: {job_description}\nConversation history: {history_str}"
-
-        else:
-            return f"Request data: {json.dumps(resume_data, indent=2)}"
+        return f"Request data: {json.dumps(resume_data, indent=2)}"
 
     def _normalize_resume(
         self, request: ChatRequest, context: SessionContext

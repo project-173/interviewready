@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import Protocol, Optional, Dict, Any
+from typing import Protocol, Optional, Dict, Any, Union
 from ..core.logging import logger
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
@@ -17,7 +17,7 @@ class BaseAgentProtocol(Protocol):
         """Get the agent name."""
         ...
     
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
+    def process(self, input_data: Union[str, bytes], context: SessionContext) -> AgentResponse:
         """Process input and return agent response."""
         ...
     

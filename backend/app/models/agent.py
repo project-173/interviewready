@@ -1,7 +1,7 @@
 """Agent-related models."""
 
 from typing import Optional, List, Dict, Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from .resume import Resume
 
 
@@ -50,6 +50,15 @@ class ChatRequest(BaseModel):
     resumeFile: Optional[ResumeFile] = None
     jobDescription: Optional[str] = ""
     messageHistory: Optional[List[InterviewMessage]] = Field(default_factory=list)
+    audioData: Optional[bytes] = None
+    
+    @field_validator('audioData', mode='before')
+    @classmethod
+    def decode_audio_data(cls, v):
+        if isinstance(v, str):
+            import base64
+            return base64.b64decode(v)
+        return v  # Audio data for interview coaching
 
 
 class ResumeDocument(BaseModel):
