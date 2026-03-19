@@ -12,39 +12,51 @@ from ..utils.json_parser import parse_json_object
 
 class ResumeCriticAgent(BaseAgent):
     """Agent for analyzing resume structure, ATS compatibility, and impact."""
-    USE_MOCK_RESPONSE = True
+    USE_MOCK_RESPONSE = False
     MOCK_RESPONSE_KEY = "ResumeCriticAgent"
 
     SYSTEM_PROMPT = """
-    You are an expert Resume Critic. Parse the resume and analyze it for structure, ATS compatibility, and impact.
+You are an expert Resume Critic analyzing resumes for structure, ATS compatibility, and impact.
 
-    IMPORTANT: You must return ONLY raw JSON matching this exact schema. Do not include markdown code blocks, do not include introductory text, do not explain your response. Start the response with '{' and end with '}':
-    
-    {
-      "resume_data": {
-        "title": "string",
-        "summary": "string",
-        "contact": {
-          "fullName": "string",
-          "email": "string",
-          "phone": "string"
-        },
-        "skills": ["skill 1", "skill 2"],
-        "experiences": [
-          {"title": "role", "company": "company", "start_date": "date", "end_date": "date", "description": "achievements or description"}
-        ],
-        "educations": [
-          {"school": "institution", "degree": "degree", "start_date": "date", "end_date": "date"}
-        ]
-      },
-      "critique": {
-        "score": 0-100, // Replace with an actual number 0-100 representing the score
-        "readability": "short text summary",
-        "formattingRecommendations": ["recommendation 1", "recommendation 2"],
-        "suggestions": ["actionable suggestion 1", "actionable suggestion 2"]
-      }
-    }
-    """
+CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
+
+RULES:
+1. Your entire response must be exactly one JSON object
+2. Start with '{' and end with '}' - nothing else
+3. Do NOT include any markdown code blocks (no ```json or ```)
+4. Do NOT include any explanatory text, preamble, or summary
+5. Do NOT include comments (// or /* */)
+6. Every field must be present and valid
+7. String arrays must contain 2+ non-empty items
+8. Score must be a number between 0-100
+9. If you cannot provide data, use empty strings/arrays, never null
+
+RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
+{
+  "resume_data": {
+    "title": "resume title",
+    "summary": "professional summary",
+    "contact": {
+      "fullName": "full name",
+      "email": "email address",
+      "phone": "phone number"
+    },
+    "skills": ["skill 1", "skill 2", "skill 3"],
+    "experiences": [
+      {"title": "job title", "company": "company name", "start_date": "YYYY-MM", "end_date": "YYYY-MM", "description": "accomplishments"}
+    ],
+    "educations": [
+      {"school": "school name", "degree": "degree type", "start_date": "YYYY-MM", "end_date": "YYYY-MM"}
+    ]
+  },
+  "critique": {
+    "score": 75,
+    "readability": "assessment of resume readability",
+    "formattingRecommendations": ["recommendation 1", "recommendation 2", "recommendation 3"],
+    "suggestions": ["actionable suggestion 1", "actionable suggestion 2", "actionable suggestion 3"]
+  }
+}
+"""
     CONFIDENCE_SCORE = 0.9
     
     def __init__(self, gemini_service):

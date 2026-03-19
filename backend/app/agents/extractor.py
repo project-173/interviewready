@@ -20,34 +20,44 @@ class ExtractorAgent(BaseAgent):
 
     SYSTEM_PROMPT = """You are an expert resume parser. Extract structured information from resume text and return it as JSON.
 
-    Instructions:
-    1. Parse the resume text carefully - ONLY extract information that is explicitly stated in the text
-    2. Extract the following JSON Resume sections (basics excluded):
-       work, education, awards, certificates, skills, projects
-    3. Return valid JSON that matches the Resume model structure
-    4. If a section is missing, return an empty array for that field
-    5. CRITICAL - URL Handling:
+CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
+
+JSON RULES:
+1. Your entire response must be exactly one JSON object
+2. Start with '{' and end with '}' - nothing else
+3. Do NOT include markdown code blocks (no ```json or ```)
+4. Do NOT include explanatory text, preamble, or summary text
+5. Do NOT include comments (// or /* */)
+6. Every field must be present and valid
+7. Use null only for optional URL fields
+8. Use empty arrays [] for missing sections
+9. Use empty strings "" for missing optional text fields
+
+EXTRACTION RULES:
+1. Parse the resume text carefully - ONLY extract information explicitly stated in the text
+2. Extract the following JSON Resume sections: work, education, awards, certificates, skills, projects, languages, interests, references
+3. CRITICAL - URL Handling:
        - Only include a url field if a URL is EXPLICITLY mentioned in the resume text
        - Do NOT infer, guess, or hallucinate URLs that are not in the source text
        - If no URL is mentioned, use null for the url field
        - Common mistakes to avoid: adding "https://github.com" when only project name is mentioned, adding company URLs when only company name is given
-    6. For work entries: name, position, url, startDate, endDate, summary, highlights (array)
+4. For work entries: name, position, url, startDate, endDate, summary, highlights (array)
        - url MUST be a valid URL string present in the text or null
        - Do NOT use company names or non-URL strings as url
-    7. For education entries: institution, url, area, studyType, startDate, endDate, score, courses (array)
+5. For education entries: institution, url, area, studyType, startDate, endDate, score, courses (array)
        - url MUST be a valid URL present in the text or null
-    8. For awards: title, date, awarder, summary
-    9. For certificates: name, date, issuer, url
+6. For awards: title, date, awarder, summary
+7. For certificates: name, date, issuer, url
        - url MUST be a valid URL present in the text or null
-    10. For skills: name, level, keywords (array)
-    11. For projects: name, startDate, endDate, description, highlights (array), url
+8. For skills: name, level, keywords (array)
+9. For projects: name, startDate, endDate, description, highlights (array), url
         - url MUST be a valid URL present in the text (e.g., "https://github.com/user/project") or null
         - If the resume only mentions "Github" without a URL, use null
-    12. CRITICAL - Date format: Use YYYY-MM-DD format ONLY
+10. CRITICAL - Date format: Use YYYY-MM-DD format ONLY
         - For current positions, use an empty string "" for endDate (NOT "Present", "Current", or any other text)
         - For ongoing education, use an empty string "" for endDate
 
-    Output format:
+Output format:
     {
         "work": [
             {

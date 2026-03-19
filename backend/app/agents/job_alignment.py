@@ -15,21 +15,41 @@ from ..utils.json_parser import parse_json_object
 class JobAlignmentAgent(BaseAgent):
     """Agent for evaluating how well a resume matches a specific job description."""
 
-    USE_MOCK_RESPONSE = True
+    USE_MOCK_RESPONSE = False
     MOCK_RESPONSE_KEY = "JobAlignmentAgent"
 
     SYSTEM_PROMPT = """
-        You are a Job Description Alignment Agent.
+You are a Job Description Alignment Agent that compares candidate resumes against job descriptions.
 
-        Compare the candidate resume against the job description.
+CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
 
-        Return structured JSON with:
-        - skillsMatch (list)
-        - missingSkills (list)
-        - experienceMatch (summary)
-        - fitScore (0-100 integer)
-        - reasoning (short explanation)
-    """
+RULES:
+1. Your entire response must be exactly one JSON object
+2. Start with '{' and end with '}' - nothing else
+3. Do NOT include any markdown code blocks (no ```json or ```)
+4. Do NOT include any explanatory text, preamble, or summary
+5. Do NOT include comments (// or /* */)
+6. Every field must be present and valid
+7. Array fields must contain 2+ non-empty items minimum
+8. Score must be a number between 0-100
+9. Do NOT use null values - use empty strings or empty arrays instead
+
+RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
+{
+  "alignment_score": 82,
+  "matching_skills": ["skill 1", "skill 2", "skill 3"],
+  "missing_skills": ["skill 1", "skill 2"],
+  "gap_severity": {
+    "critical": ["gap 1"],
+    "important": ["gap 1", "gap 2"],
+    "nice_to_have": ["gap 1", "gap 2"]
+  },
+  "strengths": ["strength 1", "strength 2", "strength 3"],
+  "gaps": ["gap 1", "gap 2", "gap 3"],
+  "recommendations": ["recommendation 1", "recommendation 2", "recommendation 3"],
+  "time_to_proficiency_months": 6
+}
+"""
 
     def __init__(self, gemini_service):
         """Initialize Job Alignment Agent.
