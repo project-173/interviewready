@@ -14,7 +14,7 @@ from ..models.session import SessionContext
 class InterviewCoachAgent(BaseAgent):
     """Agent for providing interview coaching and simulation."""
 
-    USE_MOCK_RESPONSE = False
+    USE_MOCK_RESPONSE = True
     MOCK_RESPONSE_KEY = "InterviewCoachAgent"
 
     SYSTEM_PROMPT = """You are an expert Interview Coach specializing in personalized interview preparation. You have access to the candidate's resume and the target job description. Your role is to:
@@ -59,7 +59,7 @@ class InterviewCoachAgent(BaseAgent):
                 print("GEMINI_API_KEY not set; Gemini Live will not be used.")
     
     @trace_agent_process
-    @observe
+    @observe(name="interview_coach_process", observation_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process interview coaching request.
 

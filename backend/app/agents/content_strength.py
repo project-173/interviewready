@@ -12,7 +12,7 @@ from ..utils.json_parser import parse_json_object
 
 class ContentStrengthAgent(BaseAgent):
     """Agent for analyzing content strength, skills reasoning, and evidence evaluation."""
-    USE_MOCK_RESPONSE = False
+    USE_MOCK_RESPONSE = True
     MOCK_RESPONSE_KEY = "ContentStrengthAgent"
     
     SYSTEM_PROMPT = """
@@ -90,7 +90,7 @@ class ContentStrengthAgent(BaseAgent):
         )
     
     @trace_agent_process
-    @observe
+    @observe(name="content_strength_process", observation_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process resume text and analyze content strength.
         

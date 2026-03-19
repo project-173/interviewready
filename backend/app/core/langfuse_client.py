@@ -259,10 +259,8 @@ class _NoopContextManager:
 def observe(name: str, observation_type: str = "tool"):
     """Decorator to track function execution in Langfuse.
 
-    Supports three fallback modes:
-    1. Try native Langfuse @observe decorator (if SDK supports observation_type param)
-    2. Fall back to wrapping with langfuse.trace()
-    3. No-op if Langfuse unavailable
+    Works with both functions and instance methods.
+    Always uses langfuse.trace() wrapper for compatibility.
 
     Args:
         name: Name of the observation (e.g., "parse-json")
@@ -270,20 +268,8 @@ def observe(name: str, observation_type: str = "tool"):
     """
 
     def decorator(func):
-        # Try native Langfuse decorator first (only if SDK is installed)
-        if Langfuse:
-            try:
-                from langfuse.decorators import observe as langfuse_observe  # type: ignore
-                # Try with observation_type parameter (newer SDK versions)
-                try:
-                    return langfuse_observe(name=name, observation_type=observation_type)(func)
-                except TypeError:
-                    # Fall back to name-only (older SDK versions)
-                    return langfuse_observe(name=name)(func)
-            except (ImportError, AttributeError):
-                pass
-
-        # Fall back to trace wrapper
+        # Always use the trace wrapper for consistency and compatibility
+        # The native Langfuse @observe has issues with instance methods
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             with langfuse.trace(name=name, metadata={"observation_type": observation_type}):

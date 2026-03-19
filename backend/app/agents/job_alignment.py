@@ -15,7 +15,7 @@ from ..utils.json_parser import parse_json_object
 class JobAlignmentAgent(BaseAgent):
     """Agent for evaluating how well a resume matches a specific job description."""
 
-    USE_MOCK_RESPONSE = False
+    USE_MOCK_RESPONSE = True
     MOCK_RESPONSE_KEY = "JobAlignmentAgent"
 
     SYSTEM_PROMPT = """
@@ -116,7 +116,7 @@ class JobAlignmentAgent(BaseAgent):
             return fallback.model_dump()
 
     @trace_agent_process
-    @observe
+    @observe(name="job_alignment_process", observation_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process resume and job description to evaluate alignment.
 

@@ -48,6 +48,7 @@ class OrchestrationAgent:
     ) -> None:
         self.agents = {agent.get_name(): agent for agent in agent_list}
         self.governance = governance
+        self.intent_gemini_service: GeminiService | None = None
         self.workflow = self._build_workflow()
 
     @observe(name="orchestration_execution")

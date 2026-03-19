@@ -12,7 +12,7 @@ from ..utils.json_parser import parse_json_object
 
 class ResumeCriticAgent(BaseAgent):
     """Agent for analyzing resume structure, ATS compatibility, and impact."""
-    USE_MOCK_RESPONSE = False
+    USE_MOCK_RESPONSE = True
     MOCK_RESPONSE_KEY = "ResumeCriticAgent"
 
     SYSTEM_PROMPT = """
@@ -60,7 +60,7 @@ class ResumeCriticAgent(BaseAgent):
         )
     
     @trace_agent_process
-    @observe
+    @observe(name="resume_critic_process", observation_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process resume text and provide critique.
         
