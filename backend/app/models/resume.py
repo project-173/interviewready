@@ -1,23 +1,23 @@
 """Resume-related models."""
 
-from typing import Optional, List
+from typing import List
 from pydantic import BaseModel, Field
-from .base import Contact, Experience, Education, Project, Certification, Award
+from .base import (
+    Award,
+    Certificate,
+    Education,
+    Project,
+    Skill,
+    Work,
+)
 
 
 class Resume(BaseModel):
-    """Resume model containing all resume information."""
-    
-    id: Optional[str] = None
-    title: Optional[str] = None
-    summary: Optional[str] = None
-    is_master: Optional[bool] = False
-    
-    skills: Optional[List[str]] = Field(default_factory=list)
-    experiences: Optional[List[Experience]] = Field(default_factory=list)
-    educations: Optional[List[Education]] = Field(default_factory=list)
-    projects: Optional[List[Project]] = Field(default_factory=list)
-    certifications: Optional[List[Certification]] = Field(default_factory=list)
-    awards: Optional[List[Award]] = Field(default_factory=list)
-    
-    contact: Optional[Contact] = None
+    """JSON Resume-compatible model (basics excluded)."""
+
+    work: List[Work] = Field(default_factory=list)
+    education: List[Education] = Field(default_factory=list)
+    awards: List[Award] = Field(default_factory=list)
+    certificates: List[Certificate] = Field(default_factory=list)
+    skills: List[Skill] = Field(default_factory=list)
+    projects: List[Project] = Field(default_factory=list)

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "interviewready-backend"
 version = "1.0.0"
-description = "Production-Ready Multi-Agent AI Backend with Gemini and Firebase"
+description = "Production-Ready Multi-Agent AI Backend with Gemini"
 authors = [
     {name = "InterviewReady Team", email = "team@interviewready.com"},
 ]
@@ -15,17 +15,10 @@ dependencies = [
     "pydantic>=2.4.0",
     "pydantic-settings>=2.0.0",
     "sqlalchemy>=2.0.0",
-    "alembic>=1.12.0",
-    "google-generativeai>=0.3.0",
-    "firebase-admin>=6.0.0",
-    "python-jose[cryptography]>=3.3.0",
-    "python-multipart>=0.0.6",
-    "langgraph>=0.0.20",
-    "langchain>=0.1.0",
-    "langchain-google-genai>=0.0.5",
-    "psycopg2-binary>=2.9.0",
+    "google-genai==1.67.0",
+    "langgraph==0.0.40",
     "python-dotenv>=1.0.0",
-    "PyPDF2>=3.0.0",
+    "pypdf>=6.9.1",
     "langfuse>=2.0.0",
 ]
 requires-python = ">=3.11"
@@ -62,7 +55,6 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [dependency-groups]

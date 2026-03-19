@@ -7,11 +7,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.api.v1.services import get_orchestration_agent
 from app.core.auth import get_current_user
 from app.core.langfuse_client import langfuse
+from fastapi import APIRouter, HTTPException, Query, status
+from langfuse import get_client, observe, propagate_attributes
+
+from app.api.v1.services import get_orchestration_agent
 
 router = APIRouter()
 
+langfuse = get_client()
 
 @router.get("", response_model=dict[str, str])
+@observe(name="list_agents")
 async def list_agents(
     session_id: str | None = Query(None, alias="sessionId"),
     current_user: dict[str, Any] = Depends(get_current_user),  # noqa: ARG001

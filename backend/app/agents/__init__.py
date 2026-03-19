@@ -2,6 +2,8 @@
 
 from .base import BaseAgent, BaseAgentProtocol
 from .gemini_service import GeminiService
+from .registry import AgentRegistry
+from .extractor import ExtractorAgent
 from .resume_critic import ResumeCriticAgent
 from .content_strength import ContentStrengthAgent
 from .job_alignment import JobAlignmentAgent
@@ -11,6 +13,8 @@ __all__ = [
     "BaseAgent",
     "BaseAgentProtocol", 
     "GeminiService",
+    "AgentRegistry",
+    "ExtractorAgent",
     "ResumeCriticAgent",
     "ContentStrengthAgent",
     "JobAlignmentAgent",

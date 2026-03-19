@@ -1,11 +1,10 @@
 """Chat endpoint for interacting with the agentic system."""
 
-import json
-import re
-from typing import Any, Dict
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.concurrency import run_in_threadpool
+from langfuse import get_client, observe, propagate_attributes
 
 from app.api.v1.services import (
     get_or_create_session_context,
@@ -14,15 +13,17 @@ from app.api.v1.services import (
 from app.core.auth import get_current_user
 from app.core.langfuse_client import langfuse
 from app.models import AgentResponse, ChatApiResponse, ChatRequest
+from app.utils.json_parser import parse_json_payload
 
 router = APIRouter()
 
+langfuse = get_client()
 
-@router.post("", response_model=ChatApiResponse)
+@router.post("")
+@observe(name="chat_endpoint")
 async def chat_endpoint(
     request: ChatRequest,
-    session_id: str = Query(..., alias="sessionId"),
-    current_user: dict = Depends(get_current_user),
+    session_id: Annotated[str, Query(alias="sessionId")],
 ) -> ChatApiResponse:
     """Run orchestration for the chat message within a user-owned session."""
     user_id = str(
@@ -91,7 +92,7 @@ async def chat_endpoint(
         ) from exc
 
 
-def _extract_api_payload(response: AgentResponse) -> Dict[str, Any] | list[Any] | str:
+def _extract_api_payload(response: AgentResponse) -> dict[str, Any] | list[Any] | str:
     """Convert internal AgentResponse content into external API payload."""
     content = (response.content or "").strip()
     if not content:
@@ -104,31 +105,9 @@ def _extract_api_payload(response: AgentResponse) -> Dict[str, Any] | list[Any] 
     return content
 
 
-def _parse_json_payload(content: str) -> Dict[str, Any] | list[Any] | None:
+def _parse_json_payload(content: str) -> dict[str, Any] | list[Any] | None:
     """Parse JSON payload from raw content or fenced markdown code block."""
-    fenced_match = re.search(
-        r"```(?:json)?\s*(\{[\s\S]*\}|\[[\s\S]*\])\s*```",
-        content,
-        flags=re.IGNORECASE,
-    )
-    if fenced_match:
-        json_text = fenced_match.group(1).strip()
-        try:
-            parsed = json.loads(json_text)
-            if isinstance(parsed, (dict, list)):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-
-    candidate_match = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", content)
-    if not candidate_match:
-        return None
-
-    try:
-        parsed = json.loads(candidate_match.group(1).strip())
-        if isinstance(parsed, (dict, list)):
-            return parsed
-    except json.JSONDecodeError:
-        return None
-
+    parsed = parse_json_payload(content, allow_array=True)
+    if isinstance(parsed, (dict, list)):
+        return parsed
     return None

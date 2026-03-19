@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     FIREBASE_CLIENT_ID: Optional[str] = None
     FIREBASE_AUTH_URI: str = "https://accounts.google.com/o/oauth2/auth"
     FIREBASE_TOKEN_URI: str = "https://oauth2.googleapis.com/token"
+    GEMINI_API_KEY: str
+    GOOGLE_AI_API_KEY: Optional[str] = None
     
     # Security
     SECURITY_FILTER_ORDER: int = 5
@@ -89,6 +91,14 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: Optional[str] = None
     LANGFUSE_SECRET_KEY: Optional[str] = None
     LANGFUSE_HOST: Optional[str] = "https://cloud.langfuse.com"
+    
+    # Langfuse
+    LANGFUSE_PUBLIC_KEY: Optional[str] = None
+    LANGFUSE_SECRET_KEY: Optional[str] = None
+    LANGFUSE_HOST: Optional[str] = None
+    
+    # Environment
+    APP_ENV: str = "development"
     
     class Config:
         env_file = ".env"

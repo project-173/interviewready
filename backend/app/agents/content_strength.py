@@ -1,18 +1,20 @@
 """Content Strength Agent implementation."""
 
 import json
-import re
 import time
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any
 from .base import BaseAgent
 from ..core.langfuse_client import trace_agent_process, observe
 from ..core.logging import logger
 from ..models.agent import AgentResponse, ContentAnalysisReport
 from ..models.session import SessionContext
-
+from ..utils.json_parser import parse_json_object
+from langfuse import observe
 
 class ContentStrengthAgent(BaseAgent):
     """Agent for analyzing content strength, skills reasoning, and evidence evaluation."""
+    USE_MOCK_RESPONSE = False
+    MOCK_RESPONSE_KEY = "ContentStrengthAgent"
     
     SYSTEM_PROMPT = """
         You are a Content Strength & Skills Reasoning Agent. Your role is to analyze resumes to identify key skills, achievements, and evidence of impact.
@@ -89,6 +91,7 @@ class ContentStrengthAgent(BaseAgent):
         )
     
     @trace_agent_process
+    @observe
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process resume text and analyze content strength.
         
@@ -103,23 +106,50 @@ class ContentStrengthAgent(BaseAgent):
         agent_name = self.get_name()
         processing_start_time = time.time()
         
-        # Log processing start
-        logger.debug(f"ContentStrengthAgent processing started", 
+        logger.debug("ContentStrengthAgent processing started", 
                     session_id=session_id, 
                     input_length=len(input_text),
                     input_preview=input_text[:100] + "..." if len(input_text) > 100 else input_text)
         
         try:
-            raw_result = self.call_gemini(input_text, context)
+            raw_result = None
+            if self.USE_MOCK_RESPONSE:
+                raw_result = self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
+                if raw_result is None:
+                    logger.warning(
+                        "ContentStrengthAgent mock enabled but response key not found",
+                        session_id=session_id,
+                        mock_response_key=self.MOCK_RESPONSE_KEY,
+                    )
+
+            if raw_result is None:
+                raw_result = self.call_gemini(input_text, context)
+            
+            # Validate that we got a meaningful response
+            if not raw_result or not raw_result.strip():
+                raise ValueError("Empty response received from Gemini API")
+            
             processing_time = time.time() - processing_start_time
             
-            # Log Gemini API call completion
-            logger.debug(f"ContentStrengthAgent Gemini call completed", 
+            logger.debug("ContentStrengthAgent processing completed", 
                         session_id=session_id, 
                         processing_time_ms=round(processing_time * 1000, 2),
-                        raw_result_length=len(raw_result))
+                        result_length=len(raw_result),
+                        result_preview=raw_result[:100] + "..." if len(raw_result) > 100 else raw_result)
             
-            parsed = self._parse_json(raw_result)
+            parsed = parse_json_object(raw_result)
+
+            # Validate that parsing succeeded
+            if not parsed:
+                raise ValueError(f"Failed to parse valid JSON from Gemini response: {raw_result[:200]}...")
+
+            if parsed:
+                logger.debug("ContentStrengthAgent JSON parsing successful",
+                            session_id=session_id, keys_found=list(parsed.keys()))
+            else:
+                logger.warning("ContentStrengthAgent JSON parsing failed",
+                            session_id=session_id, text_preview=raw_result[:200])
+                
             normalized = self._normalize_content_analysis(parsed)
             
             # Log parsing results

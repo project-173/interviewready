@@ -1,67 +1,63 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
-export interface Experience {
-  company: string;
-  role: string;
-  duration: string;
-  achievements: string[];
+export interface Work {
+  name?: string;
+  position?: string;
+  url?: string;
+  startDate?: string;
+  endDate?: string;
+  summary?: string;
+  highlights?: string[];
 }
 
 export interface Education {
-  institution: string;
-  degree: string;
-  year: string;
-}
-
-export interface Project {
-  title: string;
-  description: string;
-  date: string;
-}
-
-export interface Certification {
-  name: string;
-  issuer: string;
-  date: string;
+  institution?: string;
+  url?: string;
+  area?: string;
+  studyType?: string;
+  startDate?: string;
+  endDate?: string;
+  score?: string;
+  courses?: string[];
 }
 
 export interface Award {
-  title: string;
-  issuer: string;
-  date: string;
+  title?: string;
+  date?: string;
+  awarder?: string;
+  summary?: string;
+}
+
+export interface Certificate {
+  name?: string;
+  date?: string;
+  issuer?: string;
+  url?: string;
+}
+
+export interface Skill {
+  name?: string;
+  level?: string;
+  keywords?: string[];
+}
+
+export interface Project {
+  name?: string;
+  startDate?: string;
+  endDate?: string;
+  description?: string;
+  highlights?: string[];
+  url?: string;
 }
 
 export interface ResumeSchema {
-  id?: string;
-  name?: string;
-  email?: string;
-  phone?: string;
-  location?: string;
-  summary?: string;
-  skills?: string[];
-  experience?: Experience[];
+  work?: Work[];
   education?: Education[];
-  projects?: Project[];
-  certifications?: Certification[];
   awards?: Award[];
-  timestamp?: string;
-  // Backward compatibility properties
-  title?: string;
-  isMaster?: boolean;
-  contact?: {
-    fullName: string;
-    email: string;
-    phone: string;
-    city: string;
-    country: string;
-    linkedin: string;
-    github: string;
-    portfolio: string;
-  };
-  // Plural forms for backward compatibility
-  experiences?: Experience[];
-  educations?: Education[];
+  certificates?: Certificate[];
+  skills?: Skill[];
+  projects?: Project[];
 }
 
 // Backward compatibility alias
@@ -119,51 +115,101 @@ export interface AlignmentReport {
   sources?: { title: string; uri: string }[];
 }
 
-const experienceSchema = z.object({
-  company: z.string(),
-  role: z.string(),
-  duration: z.string(),
-  achievements: z.array(z.string()),
-});
+const workSchema = z.object({
+  name: z.string(),
+  position: z.string(),
+  url: z.string(),
+  startDate: z.string(),
+  endDate: z.string(),
+  summary: z.string(),
+  highlights: z.array(z.string()),
+}).partial();
+
+const volunteerSchema = z.object({
+  organization: z.string(),
+  position: z.string(),
+  url: z.string(),
+  startDate: z.string(),
+  endDate: z.string(),
+  summary: z.string(),
+  highlights: z.array(z.string()),
+}).partial();
 
 const educationSchema = z.object({
   institution: z.string(),
-  degree: z.string(),
-  year: z.string(),
-});
-
-const projectSchema = z.object({
-  title: z.string(),
-  description: z.string(),
-  date: z.string(),
-});
-
-const certificationSchema = z.object({
-  name: z.string(),
-  issuer: z.string(),
-  date: z.string(),
-});
+  url: z.string(),
+  area: z.string(),
+  studyType: z.string(),
+  startDate: z.string(),
+  endDate: z.string(),
+  score: z.string(),
+  courses: z.array(z.string()),
+}).partial();
 
 const awardSchema = z.object({
   title: z.string(),
-  issuer: z.string(),
   date: z.string(),
-});
+  awarder: z.string(),
+  summary: z.string(),
+}).partial();
+
+const certificateSchema = z.object({
+  name: z.string(),
+  date: z.string(),
+  issuer: z.string(),
+  url: z.string(),
+}).partial();
+
+const publicationSchema = z.object({
+  name: z.string(),
+  publisher: z.string(),
+  releaseDate: z.string(),
+  url: z.string(),
+  summary: z.string(),
+}).partial();
+
+const skillSchema = z.object({
+  name: z.string(),
+  level: z.string(),
+  keywords: z.array(z.string()),
+}).partial();
+
+const languageSchema = z.object({
+  language: z.string(),
+  fluency: z.string(),
+}).partial();
+
+const interestSchema = z.object({
+  name: z.string(),
+  keywords: z.array(z.string()),
+}).partial();
+
+const referenceSchema = z.object({
+  name: z.string(),
+  reference: z.string(),
+}).partial();
+
+const projectSchema = z.object({
+  name: z.string(),
+  startDate: z.string(),
+  endDate: z.string(),
+  description: z.string(),
+  highlights: z.array(z.string()),
+  url: z.string(),
+}).partial();
 
 export const resumeJsonSchema = zodToJsonSchema(z.object({
-  id: z.string(),
-  name: z.string(),
-  email: z.string(),
-  phone: z.string().optional(),
-  location: z.string().optional(),
-  summary: z.string().optional(),
-  skills: z.array(z.string()),
-  experience: z.array(experienceSchema),
-  education: z.array(educationSchema),
-  projects: z.array(projectSchema),
-  certifications: z.array(certificationSchema),
-  awards: z.array(awardSchema),
-  timestamp: z.string(),
+  work: z.array(workSchema).optional(),
+  volunteer: z.array(volunteerSchema).optional(),
+  education: z.array(educationSchema).optional(),
+  awards: z.array(awardSchema).optional(),
+  certificates: z.array(certificateSchema).optional(),
+  publications: z.array(publicationSchema).optional(),
+  skills: z.array(skillSchema).optional(),
+  languages: z.array(languageSchema).optional(),
+  interests: z.array(interestSchema).optional(),
+  references: z.array(referenceSchema).optional(),
+  projects: z.array(projectSchema).optional(),
 }), 'resumeSchema');
 
 export const structuralAssessmentJsonSchema = zodToJsonSchema(z.object({
@@ -225,11 +271,18 @@ export enum WorkflowStatus {
   COMPLETED = 'COMPLETED'
 }
 
+export interface ResumeFile {
+  data: string;
+  fileType: 'pdf';
+}
+
 export interface ChatRequest {
   intent: 'RESUME_CRITIC' | 'CONTENT_STRENGTH' | 'ALIGNMENT' | 'INTERVIEW_COACH';
-  resumeData: ResumeSchema;
+  resumeData?: ResumeSchema | null;
   jobDescription: string;
   messageHistory: InterviewMessage[];
+  resumeFile?: ResumeFile;
+  audioData?: Uint8Array | null;
 }
 
 export interface InterviewMessage {

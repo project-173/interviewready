@@ -5,7 +5,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
-from app.core.firebase import init_firebase
 from app.api.v1 import api_router
 
 # Safe import for Langfuse
@@ -39,10 +38,9 @@ async def lifespan(app: FastAPI):
     yield
     print(f"Shutting down {settings.APP_NAME}...")
 
-
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Production-Ready Multi-Agent AI Backend with Gemini and Firebase",
+    description="Production-Ready Multi-Agent AI Backend with Gemini",
     version=settings.VERSION,
     lifespan=lifespan,
     redirect_slashes=False,
@@ -129,5 +127,5 @@ if __name__ == "__main__":
         "app.main:app",
         host="0.0.0.0",
         port=settings.SERVER_PORT,
-        reload=settings.DEBUG,
+        reload=settings.LOG_LEVEL == "DEBUG",
     )

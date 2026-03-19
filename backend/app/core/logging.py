@@ -1,8 +1,8 @@
-import os
 import json
 import time
+from datetime import datetime, timezone
 from typing import Any, Optional, Dict
-from datetime import datetime
+from app.core.config import settings
 
 
 class OrchestrationLogger:
@@ -10,7 +10,7 @@ class OrchestrationLogger:
     
     def __init__(self, service_name: str = "interviewready"):
         self.service_name = service_name
-        self.log_level = os.getenv("LOG_LEVEL", "DEBUG").upper()
+        self.log_level = settings.LOG_LEVEL.upper()
         
     def _should_log(self, level: str) -> bool:
         """Check if we should log at this level."""
@@ -20,7 +20,7 @@ class OrchestrationLogger:
     def _format_message(self, level: str, message: str, **kwargs) -> str:
         """Format a structured log message."""
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "service": self.service_name,
             "level": level,
             "message": message,

@@ -43,7 +43,25 @@ class BackendService {
     return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
+  private hasResumeContent(resume?: Resume | null): boolean {
+    if (!resume) return false;
+    return Object.values(resume).some((value) => {
+      if (Array.isArray(value)) {
+        return value.length > 0;
+      }
+      return Boolean(value);
+    });
+  }
+
+  getSessionId(): string {
+    return this.sessionId;
+  }
+
   async callChatEndpoint(request: ChatRequest): Promise<ChatResponse> {
+    const requestBody = {
+      ...request,
+      audioData: request.audioData ? btoa(String.fromCharCode(...request.audioData)) : null,
+    };
     const response = await fetch(`${API_BASE_URL}/api/v1/chat?sessionId=${this.sessionId}`, {
       method: 'POST',
       headers: {
@@ -58,6 +76,28 @@ class BackendService {
     }
 
     return await response.json();
+  }
+
+  async fetchCurrentResume(): Promise<Resume | null> {
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/sessions/${this.sessionId}/resume`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.getAuthToken()}`,
+        },
+      }
+    );
+
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error(`Backend API error: ${response.status} ${response.statusText}`);
+    }
+
+    return (await response.json()) as Resume;
   }
 
   private getAuthToken(): string {
@@ -85,15 +125,16 @@ class BackendService {
       console.error('Failed to parse resume critic response:', error);
       throw new Error('Invalid response from resume critic agent');
     }
+    throw new Error('Invalid response from resume critic agent');
   }
 
-  async contentStrengthAgent(resume: Resume): Promise<ContentAnalysisReport> {
+  async contentStrengthAgent(resume?: Resume | null): Promise<ContentAnalysisReport> {
     const request: ChatRequest = {
       intent: 'CONTENT_STRENGTH',
-      resumeData: resume,
       jobDescription: '',
       messageHistory: []
     };
+    if (this.hasResumeContent(resume)) request.resumeData = resume;
     
     const response = await this.callChatEndpoint(request);
     
@@ -106,15 +147,16 @@ class BackendService {
       console.error('Failed to parse content strength response:', error);
       throw new Error('Invalid response from content strength agent');
     }
+    throw new Error('Invalid response from content strength agent');
   }
 
-  async alignmentAgent(resume: Resume, jd: string): Promise<AlignmentReport> {
+  async alignmentAgent(resume: Resume | null | undefined, jd: string): Promise<AlignmentReport> {
     const request: ChatRequest = {
       intent: 'ALIGNMENT',
-      resumeData: resume,
       jobDescription: jd,
       messageHistory: []
     };
+    if (this.hasResumeContent(resume)) request.resumeData = resume;
     
     const response = await this.callChatEndpoint(request);
     
@@ -137,27 +179,13 @@ class BackendService {
     alignment: AlignmentReport, 
     history: { role: 'user' | 'agent'; text: string }[]
   ): Promise<string> {
-    // Create a minimal resume object for the interview coach
     const resume: Resume = {
-      title: '',
-      summary: '',
-      isMaster: false,
-      contact: {
-        fullName: '',
-        email: '',
-        phone: '',
-        city: '',
-        country: '',
-        linkedin: '',
-        github: '',
-        portfolio: ''
-      },
+      work: [],
+      education: [],
+      awards: [],
+      certificates: [],
       skills: [],
-      experiences: [],
-      educations: [],
-      projects: [],
-      certifications: [],
-      awards: []
+      projects: []
     };
 
     const request: ChatRequest = {
@@ -176,6 +204,6 @@ export const backendService = new BackendService();
 
 // Export individual functions for backward compatibility
 export const resumeCriticAgent = (resume: Resume) => backendService.resumeCriticAgent(resume);
-export const contentStrengthAgent = (resume: Resume) => backendService.contentStrengthAgent(resume);
-export const alignmentAgent = (resume: Resume, jd: string) => backendService.alignmentAgent(resume, jd);
+export const contentStrengthAgent = (resume?: Resume | null) => backendService.contentStrengthAgent(resume);
+export const alignmentAgent = (resume: Resume | null | undefined, jd: string) => backendService.alignmentAgent(resume, jd);
 export const interviewCoachAgent = (alignment: AlignmentReport, history: { role: 'user' | 'agent'; text: string }[]) => backendService.interviewCoachAgent(alignment, history);

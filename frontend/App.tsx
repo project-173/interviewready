@@ -1,13 +1,10 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   SharedState, 
   WorkflowStatus, 
-  Resume,
   ChatRequest
 } from './types';
 import { 
-  resumeCriticAgent, 
   contentStrengthAgent, 
   alignmentAgent, 
   interviewCoachAgent,
@@ -66,26 +63,32 @@ const App: React.FC = () => {
   }, []);
 
   const handleStepClick = useCallback((status: WorkflowStatus) => {
-    let canNavigate = false;
+    const canNavigate: Partial<Record<WorkflowStatus, boolean>> = {
+      [WorkflowStatus.IDLE]: true,
+      [WorkflowStatus.CRITIQUING]: !!state.currentResume,
+      [WorkflowStatus.ANALYZING_CONTENT]: !!state.criticReport,
+      [WorkflowStatus.ALIGNING_JD]: !!state.contentReport,
+      [WorkflowStatus.INTERVIEWING]: !!state.alignmentReport,
+    };
 
-    if (status === WorkflowStatus.IDLE) canNavigate = true;
-    if (status === WorkflowStatus.CRITIQUING && state.currentResume) canNavigate = true;
-    if (status === WorkflowStatus.ANALYZING_CONTENT && state.criticReport) canNavigate = true;
-    if (status === WorkflowStatus.ALIGNING_JD && state.contentReport) canNavigate = true;
-    if (status === WorkflowStatus.INTERVIEWING && state.alignmentReport) canNavigate = true;
+    if (!canNavigate[status]) return;
 
-    if (canNavigate) {
-      let targetStatus = status;
-      if (status === WorkflowStatus.CRITIQUING && state.criticReport) {
-        targetStatus = WorkflowStatus.AWAITING_CRITIC_APPROVAL;
-      } else if (status === WorkflowStatus.ANALYZING_CONTENT && state.contentReport) {
-        targetStatus = WorkflowStatus.AWAITING_CONTENT_APPROVAL;
-      } else if (status === WorkflowStatus.ALIGNING_JD && state.alignmentReport) {
-        targetStatus = WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL;
-      }
+    const completedStatus: Partial<Record<WorkflowStatus, WorkflowStatus>> = {
+      [WorkflowStatus.CRITIQUING]: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
+      [WorkflowStatus.ANALYZING_CONTENT]: WorkflowStatus.AWAITING_CONTENT_APPROVAL,
+      [WorkflowStatus.ALIGNING_JD]: WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL,
+    };
 
-      setState(prev => ({ ...prev, status: targetStatus }));
-    }
+    const reportAvailable: Partial<Record<WorkflowStatus, boolean>> = {
+      [WorkflowStatus.CRITIQUING]: !!state.criticReport,
+      [WorkflowStatus.ANALYZING_CONTENT]: !!state.contentReport,
+      [WorkflowStatus.ALIGNING_JD]: !!state.alignmentReport,
+    };
+
+    const targetStatus =
+      (reportAvailable[status] && completedStatus[status]) || status;
+
+    setState(prev => ({ ...prev, status: targetStatus }));
   }, [state.currentResume, state.criticReport, state.contentReport, state.alignmentReport]);
 
   const fileToBase64 = (file: File): Promise<string> => {
@@ -107,37 +110,21 @@ const App: React.FC = () => {
     try {
       if (file.type === 'application/pdf') {
         const base64 = await fileToBase64(file);
-        // Create a minimal resume object for file upload
-        const uploadResume: Resume = {
-          title: 'Uploaded Resume',
-          summary: '',
-          isMaster: false,
-          contact: {
-            fullName: '',
-            email: '',
-            phone: '',
-            city: '',
-            country: '',
-            linkedin: '',
-            github: '',
-            portfolio: ''
-          },
-          skills: [],
-          experiences: [],
-          educations: [],
-          projects: [],
-          certifications: [],
-          awards: []
-        };
 
         const request: ChatRequest = {
           intent: 'RESUME_CRITIC',
-          resumeData: uploadResume,
-          jobDescription: `Parse and analyze this resume file. File data: ${base64}, MIME type: ${file.type}`,
-          messageHistory: []
+          resumeData: null,
+          jobDescription: '',
+          messageHistory: [],
+          resumeFile: { data: base64, fileType: 'pdf' }
         };
         
         const response = await backendService.callChatEndpoint(request);
+        const parsedResume = await backendService.fetchCurrentResume();
+        const critiqueData =
+          response.payload && typeof response.payload === 'object' && !Array.isArray(response.payload)
+            ? response.payload
+            : {};
         
         // Parse the structured JSON response from backend
         let responseData;
@@ -177,13 +164,13 @@ const App: React.FC = () => {
         
         setState(prev => ({ 
           ...prev, 
-          currentResume: resume, 
-          history: [...prev.history, resume],
+          currentResume: parsedResume || prev.currentResume,
+          history: parsedResume ? [...prev.history, parsedResume] : prev.history,
           criticReport: {
-            score: critiqueData.score || 85,
-            readability: critiqueData.readability || 'Resume processed successfully',
-            formattingRecommendations: critiqueData.formattingRecommendations || [],
-            suggestions: critiqueData.suggestions || []
+            score: Number((critiqueData as any).score) || 85,
+            readability: String((critiqueData as any).readability || 'Resume processed successfully'),
+            formattingRecommendations: Array.isArray((critiqueData as any).formattingRecommendations) ? (critiqueData as any).formattingRecommendations : [],
+            suggestions: Array.isArray((critiqueData as any).suggestions) ? (critiqueData as any).suggestions : []
           },
           status: WorkflowStatus.AWAITING_CRITIC_APPROVAL 
         }));
@@ -281,32 +268,11 @@ const App: React.FC = () => {
     }
   };
 
-  const processExtractedResume = (schema: Resume) => {
-    setState(prev => ({ 
-      ...prev, 
-      currentResume: schema, 
-      history: [...prev.history, schema],
-      status: WorkflowStatus.AWAITING_CRITIC_APPROVAL 
-    }));
-  };
-
-  const runCritic = async (resume: Resume) => {
-    setIsLoading(true);
-    try {
-      const report = await resumeCriticAgent(resume);
-      setState(prev => ({ ...prev, criticReport: report, status: WorkflowStatus.AWAITING_CRITIC_APPROVAL }));
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const approveCritic = async () => {
     setState(prev => ({ ...prev, status: WorkflowStatus.ANALYZING_CONTENT }));
     setIsLoading(true);
     try {
-      const report = await contentStrengthAgent(state.currentResume!);
+      const report = await contentStrengthAgent(state.currentResume);
       setState(prev => ({ ...prev, contentReport: report, status: WorkflowStatus.AWAITING_CONTENT_APPROVAL }));
     } catch (err: any) {
       setError(err.message);
@@ -321,7 +287,7 @@ const App: React.FC = () => {
     if (!state.jobDescription) return;
     setIsLoading(true);
     try {
-      const report = await alignmentAgent(state.currentResume!, state.jobDescription);
+      const report = await alignmentAgent(state.currentResume, state.jobDescription);
       setState(prev => ({ ...prev, alignmentReport: report, status: WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL }));
     } catch (err: any) {
       setError(err.message);
@@ -343,7 +309,29 @@ const App: React.FC = () => {
     setState(prev => ({ ...prev, interviewHistory: updatedHistory }));
     setIsLoading(true);
     try {
-      const responseText = await interviewCoachAgent(state.alignmentReport!, updatedHistory);
+      const responseText = await interviewCoachAgent(state.alignmentReport, updatedHistory);
+      setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleInterviewAudioMessage = async (audio: Uint8Array) => {
+    const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: '[Audio response]' }];
+    setState(prev => ({ ...prev, interviewHistory: updatedHistory }));
+    setIsLoading(true);
+    try {
+      const request: ChatRequest = {
+        intent: 'INTERVIEW_COACH',
+        resumeData: state.currentResume,
+        jobDescription: state.jobDescription,
+        messageHistory: updatedHistory,
+        audioData: audio,
+      };
+      const response = await backendService.callChatEndpoint(request);
+      const responseText = typeof response.payload === 'string' ? response.payload : JSON.stringify(response.payload);
       setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
     } catch (err: any) {
       setError(err.message);
@@ -412,7 +400,7 @@ const App: React.FC = () => {
               {(state.status === WorkflowStatus.ANALYZING_CONTENT || state.status === WorkflowStatus.AWAITING_CONTENT_APPROVAL) && state.contentReport && <ContentStep report={state.contentReport} onApprove={approveContent} />}
               {(state.status === WorkflowStatus.ALIGNING_JD) && <AlignmentStep jd={state.jobDescription} onChangeJD={(val) => setState(prev => ({ ...prev, jobDescription: val }))} onAnalyze={runAlignment} isLoading={isLoading} />}
               {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterview} />}
-              {state.status === WorkflowStatus.INTERVIEWING && <InterviewStep history={state.interviewHistory} onSend={handleInterviewMessage} isLoading={isLoading} chatEndRef={chatEndRef} />}
+              {state.status === WorkflowStatus.INTERVIEWING && <InterviewStep history={state.interviewHistory} onSend={handleInterviewMessage} onSendAudio={handleInterviewAudioMessage} isLoading={isLoading} chatEndRef={chatEndRef} />}
             </div>
           </div>
 
@@ -436,13 +424,13 @@ const App: React.FC = () => {
               <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm w-64 max-h-[300px] overflow-y-auto">
                  <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-3">Recent Uploads</h4>
                  <div className="space-y-1.5">
-                   {state.history.map((h, i) => (
+                   {state.history.map((h, index) => (
                      <button 
-                       key={i} 
+                       key={index}
                        onClick={() => setState(prev => ({ ...prev, currentResume: h, status: WorkflowStatus.CRITIQUING }))}
                        className="w-full p-2.5 rounded-lg text-left text-[11px] font-medium text-slate-600 hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-all truncate"
                      >
-                        {h.contact?.fullName || 'Untitled Resume'}
+                        Resume {index + 1}
                      </button>
                    ))}
                  </div>
