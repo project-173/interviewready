@@ -2,9 +2,9 @@
 
 import time
 from typing import Optional
-from langfuse import observe
 from .base import BaseAgent
 from .gemini_service import GeminiLiveService
+from ..core.langfuse_client import trace_agent_process, observe
 from ..core.logging import logger
 from ..core.config import settings
 from ..models.agent import AgentResponse
@@ -17,17 +17,36 @@ class InterviewCoachAgent(BaseAgent):
     USE_MOCK_RESPONSE = False
     MOCK_RESPONSE_KEY = "InterviewCoachAgent"
 
-    SYSTEM_PROMPT = """You are an expert Interview Coach specializing in personalized interview preparation. You have access to the candidate's resume and the target job description. Your role is to:
+    SYSTEM_PROMPT = """You are an expert Interview Coach specializing in personalized interview preparation.
 
-        1. Analyze the candidate's resume to understand their background, skills, and experience
-        2. Review the job description to identify key requirements, responsibilities, and qualifications
-        3. Provide tailored interview coaching that bridges the gap between the candidate's profile and job requirements
-        4. Simulate realistic interview scenarios based on the job description
-        5. Give constructive feedback on responses, highlighting strengths and areas for improvement
-        6. For audio inputs, analyze speech clarity, confidence, and content delivery
-        7. Suggest specific preparation strategies to address skill gaps or experience mismatches
+CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
 
-        Always provide actionable, encouraging feedback that helps the candidate succeed in their job interview."""
+RULES:
+1. Your entire response must be exactly one JSON object
+2. Start with '{' and end with '}' - nothing else
+3. Do NOT include markdown code blocks (no ```json or ```)
+4. Do NOT include explanatory text, preamble, summary, or chat responses
+5. Do NOT include comments (// or /* */)
+6. Arrays must have 2+ items minimum
+7. Do NOT use null values - use empty strings or empty arrays
+
+Your role:
+1. Analyze the candidate's resume to understand background, skills, and experience
+2. Review the job description to identify key requirements and qualifications
+3. Provide tailored interview coaching that bridges the gap
+4. Simulate realistic interview scenarios
+5. Give constructive feedback highlighting strengths and improvements
+6. Suggest specific preparation strategies
+
+RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
+{
+  "interview_type": "behavioral|technical|situational|competency",
+  "questions": [
+    {"question": "interview question", "keywords": ["keyword1", "keyword2"], "tip": "how to approach this question"}
+  ],
+  "preparation_tips": ["tip 1", "tip 2", "tip 3"],
+  "common_mistakes": ["mistake 1", "mistake 2", "mistake 3"]
+}"""
     CONFIDENCE_SCORE = 0.85
     DEFAULT_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 
@@ -58,7 +77,8 @@ class InterviewCoachAgent(BaseAgent):
             else:
                 print("GEMINI_API_KEY not set; Gemini Live will not be used.")
     
-    @observe
+    @trace_agent_process
+    @observe(name="interview_coach_process", observation_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process interview coaching request.
 
@@ -258,7 +278,8 @@ class InterviewCoachAgent(BaseAgent):
                 error_message=str(e),
             )
             raise
-
+    
+    @observe(name="_call_gemini_live_audio", observation_type="tool") 
     def _call_gemini_live_audio(
         self, audio_data: bytes, system_prompt: str
     ) -> Optional[str]:

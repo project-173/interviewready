@@ -3,8 +3,8 @@
 import json
 import time
 from typing import Dict, Any
-from langfuse import observe
 from .base import BaseAgent
+from ..core.langfuse_client import trace_agent_process, observe
 from ..core.logging import logger
 from ..models.agent import AgentResponse, StructuralAssessment
 from ..models.session import SessionContext
@@ -16,16 +16,47 @@ class ResumeCriticAgent(BaseAgent):
     MOCK_RESPONSE_KEY = "ResumeCriticAgent"
 
     SYSTEM_PROMPT = """
-    You are an expert Resume Critic. Analyze the resume for structure, ATS compatibility, and impact.
+You are an expert Resume Critic analyzing resumes for structure, ATS compatibility, and impact.
 
-    Return ONLY valid JSON with this exact schema:
-    {
-      "score": 0-100 number,
-      "readability": "short text summary",
-      "formattingRecommendations": ["recommendation 1", "recommendation 2"],
-      "suggestions": ["actionable suggestion 1", "actionable suggestion 2"]
-    }
-    """
+CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
+
+RULES:
+1. Your entire response must be exactly one JSON object
+2. Start with '{' and end with '}' - nothing else
+3. Do NOT include any markdown code blocks (no ```json or ```)
+4. Do NOT include any explanatory text, preamble, or summary
+5. Do NOT include comments (// or /* */)
+6. Every field must be present and valid
+7. String arrays must contain 2+ non-empty items
+8. Score must be a number between 0-100
+9. If you cannot provide data, use empty strings/arrays, never null
+
+RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
+{
+  "resume_data": {
+    "title": "resume title",
+    "summary": "professional summary",
+    "contact": {
+      "fullName": "full name",
+      "email": "email address",
+      "phone": "phone number"
+    },
+    "skills": ["skill 1", "skill 2", "skill 3"],
+    "experiences": [
+      {"title": "job title", "company": "company name", "start_date": "YYYY-MM", "end_date": "YYYY-MM", "description": "accomplishments"}
+    ],
+    "educations": [
+      {"school": "school name", "degree": "degree type", "start_date": "YYYY-MM", "end_date": "YYYY-MM"}
+    ]
+  },
+  "critique": {
+    "score": 75,
+    "readability": "assessment of resume readability",
+    "formattingRecommendations": ["recommendation 1", "recommendation 2", "recommendation 3"],
+    "suggestions": ["actionable suggestion 1", "actionable suggestion 2", "actionable suggestion 3"]
+  }
+}
+"""
     CONFIDENCE_SCORE = 0.9
     
     def __init__(self, gemini_service):
@@ -40,7 +71,8 @@ class ResumeCriticAgent(BaseAgent):
             name="ResumeCriticAgent"
         )
     
-    @observe
+    @trace_agent_process
+    @observe(name="resume_critic_process", observation_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process resume text and provide critique.
         
@@ -134,6 +166,7 @@ class ResumeCriticAgent(BaseAgent):
                         error_message=str(e))
             raise
 
+    @observe(name="parse-json", observation_type="tool")
     def _parse_json(self, text: str) -> Dict[str, Any]:
         """Parse JSON from raw or fenced markdown text."""
         if not text:
@@ -166,6 +199,7 @@ class ResumeCriticAgent(BaseAgent):
 
         return {}
 
+    @observe(name="normalize-assessment", observation_type="tool")
     def _normalize_structural_assessment(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize parsed content into StructuralAssessment schema."""
         fallback_suggestions = [

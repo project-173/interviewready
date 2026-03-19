@@ -3,9 +3,9 @@
 import json
 import time
 from typing import List, Dict, Any
-from langfuse import observe
 
 from .base import BaseAgent
+from ..core.langfuse_client import trace_agent_process, observe, observe
 from ..core.logging import logger
 from ..models.agent import AgentResponse, AlignmentReport
 from ..models.session import SessionContext
@@ -19,17 +19,37 @@ class JobAlignmentAgent(BaseAgent):
     MOCK_RESPONSE_KEY = "JobAlignmentAgent"
 
     SYSTEM_PROMPT = """
-        You are a Job Description Alignment Agent.
+You are a Job Description Alignment Agent that compares candidate resumes against job descriptions.
 
-        Compare the candidate resume against the job description.
+CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
 
-        Return structured JSON with:
-        - skillsMatch (list)
-        - missingSkills (list)
-        - experienceMatch (summary)
-        - fitScore (0-100 integer)
-        - reasoning (short explanation)
-    """
+RULES:
+1. Your entire response must be exactly one JSON object
+2. Start with '{' and end with '}' - nothing else
+3. Do NOT include any markdown code blocks (no ```json or ```)
+4. Do NOT include any explanatory text, preamble, or summary
+5. Do NOT include comments (// or /* */)
+6. Every field must be present and valid
+7. Array fields must contain 2+ non-empty items minimum
+8. Score must be a number between 0-100
+9. Do NOT use null values - use empty strings or empty arrays instead
+
+RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
+{
+  "alignment_score": 82,
+  "matching_skills": ["skill 1", "skill 2", "skill 3"],
+  "missing_skills": ["skill 1", "skill 2"],
+  "gap_severity": {
+    "critical": ["gap 1"],
+    "important": ["gap 1", "gap 2"],
+    "nice_to_have": ["gap 1", "gap 2"]
+  },
+  "strengths": ["strength 1", "strength 2", "strength 3"],
+  "gaps": ["gap 1", "gap 2", "gap 3"],
+  "recommendations": ["recommendation 1", "recommendation 2", "recommendation 3"],
+  "time_to_proficiency_months": 6
+}
+"""
 
     def __init__(self, gemini_service):
         """Initialize Job Alignment Agent.
@@ -43,6 +63,25 @@ class JobAlignmentAgent(BaseAgent):
             name="JobAlignmentAgent",
         )
 
+    def _get_final_prompt(self, resume: str, job_desc: str) -> str:
+        """Build the final prompt by appending resume and job description to system prompt."""
+        resume_prompt = f"Resume is: {resume}\n\n Job Description is: {job_desc}"
+        self.system_prompt = self.system_prompt + "\n\n" + resume_prompt
+        return self.system_prompt
+
+    def _call_llm(self, prompt: str) -> str:
+        """Call LLM — currently returns hardcoded mock response."""
+        return """
+        {
+            "skillsMatch": ["Java", "Spring Boot"],
+            "missingSkills": ["AWS", "Kubernetes"],
+            "experienceMatch": "Strong backend experience",
+            "fitScore": 78,
+            "reasoning": "Good backend alignment but missing cloud exposure."
+        }
+        """
+
+    @observe(name="parse-json", observation_type="tool")
     def _parse_json(self, raw: str) -> Dict[str, Any]:
         """Parse JSON string into a dict, returning empty dict on failure."""
         session_id = "unknown"  # We don't have session context here
@@ -62,12 +101,14 @@ class JobAlignmentAgent(BaseAgent):
             )
         return result
 
+    @observe(name="compute-confidence", observation_type="tool")
     def _compute_confidence(self, fit_score: int, missing_skills: List[str]) -> float:
         """Compute confidence score from fit score and missing skills count."""
         base = fit_score / 100.0
         penalty = len(missing_skills) * 0.02
         return max(0.3, min(0.95, base - penalty))
 
+    @observe(name="normalize-alignment", observation_type="tool")
     def _normalize_alignment_output(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize parsed content into AlignmentReport schema."""
         data = {
@@ -94,7 +135,8 @@ class JobAlignmentAgent(BaseAgent):
             )
             return fallback.model_dump()
 
-    @observe
+    @trace_agent_process
+    @observe(name="job_alignment_process", observation_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process resume and job description to evaluate alignment.
 

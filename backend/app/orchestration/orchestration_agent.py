@@ -7,9 +7,10 @@ import time
 from typing import Any, TypedDict, Union
 
 from langgraph.graph import END, StateGraph
-from langfuse import get_client, observe, propagate_attributes
 
 from app.agents.base import BaseAgentProtocol
+from app.agents.gemini_service import GeminiService
+from app.core.langfuse_client import langfuse, observe
 from app.core.logging import logger
 from app.governance.sharp_governance_service import SharpGovernanceService
 from app.models.agent import (
@@ -23,8 +24,6 @@ from app.models.agent import (
 from app.models.resume import Resume
 from app.models.session import SessionContext
 from app.utils.json_parser import parse_json_object, parse_json_payload
-
-langfuse = get_client()
 
 
 class OrchestrationState(TypedDict):
@@ -49,23 +48,24 @@ class OrchestrationAgent:
     ) -> None:
         self.agents = {agent.get_name(): agent for agent in agent_list}
         self.governance = governance
+        self.intent_gemini_service: GeminiService | None = None
         self.workflow = self._build_workflow()
 
     @observe(name="orchestration_execution")
     def orchestrate(self, request: ChatRequest, context: SessionContext) -> AgentResponse:
         """Run intent analysis and execute selected agent sequence."""
         start_time = time.time()
-        session_id = getattr(context, 'session_id', 'unknown')
-        user_id = getattr(context, 'user_id', None)
+        session_id = getattr(context, "session_id", "unknown")
+        user_id = getattr(context, "user_id", None)
 
-        with propagate_attributes(session_id=session_id):
-            langfuse.update_current_span(
-                metadata={
-                    "user_id": user_id,
-                    "intent": request.intent,
-                }
-            )
-
+        with langfuse.trace(
+            name="orchestration_execution",
+            session_id=session_id,
+            user_id=user_id,
+            metadata={
+                "intent": request.intent,
+            },
+        ) as trace:
             # Extract intent from request and build input text for agents
             intent = request.intent
             if intent not in {"RESUME_CRITIC", "CONTENT_STRENGTH", "ALIGNMENT", "INTERVIEW_COACH"}:
@@ -103,16 +103,17 @@ class OrchestrationAgent:
             logger.log_orchestration_start(input_text, session_id, user_id)
 
             try:
-                # Map intent to agent sequence directly
-                agent_sequence = self._map_intent_to_agents(intent)
+                # DYNAMIC INTENT ANALYSIS: Use LLM if available and requested intent is general/missing
+                if self.intent_gemini_service and (not intent or intent == "GENERAL"):
+                    logger.debug("Using dynamic LLM intent analysis", session_id=session_id)
+                    agent_sequence = self._analyze_intent_with_llm(input_text, context)
+                else:
+                    # Map intent to agent sequence directly (legacy/explicit mode)
+                    agent_sequence = self._map_intent_to_agents(intent)
 
-                langfuse.update_current_span(
-                    output={"agent_sequence": agent_sequence}
-                )
-
-                logger.log_state_transition("normalize_resume", "route_agents", session_id)
-                logger.log_intent_analysis(input_text, agent_sequence, "intent_direct", session_id)
-
+                trace.update(session_id=session_id, output={"agent_sequence": agent_sequence})
+                logger.log_intent_analysis(input_text, agent_sequence, "hybrid_routing", session_id)
+                
                 state: OrchestrationState = {
                     "original_input": input_text,
                     "current_input": input_text,
@@ -120,28 +121,23 @@ class OrchestrationAgent:
                     "agent_sequence": agent_sequence,
                     "current_index": 0,
                     "current_response": None,
-                    "artifacts": [],
                 }
-
-                logger.log_state_transition(
-                    "orchestration_start", "workflow_execution", session_id, agent_sequence=agent_sequence
-                )
+                
+                logger.log_state_transition("orchestration_start", "workflow_execution", session_id, agent_sequence=agent_sequence)
                 result = self.workflow.invoke(state)
                 current_response = result.get("current_response")
-
+                
                 if current_response is None:
                     raise RuntimeError("Orchestration completed without an agent response.")
-
+                
                 total_time = time.time() - start_time
                 logger.log_orchestration_complete(session_id, total_time, agent_sequence)
-
-                langfuse.update_current_span(
-                    output={"success": True, "duration_s": total_time}
-                )
+                
+                trace.update(session_id=session_id, output={"success": True, "duration_s": total_time})
                 return current_response
-
+                
             except Exception as e:
-                langfuse.update_current_span(output={"error": str(e)})
+                trace.update(session_id=session_id, output={"error": str(e)})
                 logger.log_agent_error("OrchestrationAgent", e, session_id)
                 raise
 
@@ -188,46 +184,47 @@ class OrchestrationAgent:
         current_input = state["current_input"]
         logger.log_agent_execution_start(agent_name, current_input, session_id, current_index)
 
-        agent_start_time = time.time()
+        with langfuse.trace(
+            name="orchestrator_agent_execution",
+            session_id=session_id,
+            metadata={
+                "agent": agent_name,
+                "agent_index": current_index,
+                "current_input_length": len(current_input),
+            },
+        ) as span:
+            agent_start_time = time.time()
+            try:
+                response = agent.process(current_input, context)
+                agent_execution_time = time.time() - agent_start_time
 
-        with langfuse.start_as_current_observation(
-            as_type="span",
-            name=f"execute_{agent_name}",
-        ):
-            with propagate_attributes(session_id=session_id):
-                langfuse.update_current_span(
-                    metadata={
-                        "agent": agent_name,
-                        "agent_index": current_index,
-                        "current_input_length": len(current_input),
+                span.update(
+                    output={
+                        "response_length": len(str(response.content or "")),
+                        "duration_ms": round(agent_execution_time * 1000, 2),
                     }
                 )
 
-                try:
-                    response = agent.process(current_input, context)
-                    agent_execution_time = time.time() - agent_start_time
+                # Log successful agent execution
+                logger.log_agent_execution_complete(agent_name, response, session_id, agent_execution_time)
 
-                    langfuse.update_current_span(
-                        output={
-                            "response_length": len(str(response.content or "")),
-                            "duration_ms": round(agent_execution_time * 1000, 2),
-                        }
-                    )
-                    logger.log_agent_execution_complete(agent_name, response, session_id, agent_execution_time)
-
-                except Exception as e:
-                    agent_execution_time = time.time() - agent_start_time
-                    langfuse.update_current_span(
-                        output={"error": str(e), "duration_ms": round(agent_execution_time * 1000, 2)}
-                    )
-                    logger.log_agent_error(agent_name, e, session_id)
-                    raise
+            except Exception as e:
+                agent_execution_time = time.time() - agent_start_time
+                span.update(output={"error": str(e), "duration_ms": round(agent_execution_time * 1000, 2)})
+                logger.log_agent_error(agent_name, e, session_id)
+                raise
 
         trace = list(context.decision_trace or [])
         trace.append(f"Orchestrator: Routed to {agent_name} based on intent analysis.")
         response.decision_trace = trace
 
         audited_response = self.governance.audit(response, current_input)
+
+        # ADD SHAP METADATA TO LANGFUSE (Mocked if langfuse not enabled)
+        if hasattr(audited_response, 'scores') and audited_response.scores:
+            logger.debug("Attaching SHAP scores to decision trace", session_id=session_id)
+            trace.append(f"SHAP Analysis: {json.dumps(audited_response.scores)}")
+
         context.add_to_history(audited_response)
         context.decision_trace = trace
 

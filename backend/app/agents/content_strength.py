@@ -4,11 +4,11 @@ import json
 import time
 from typing import Dict, Any
 from .base import BaseAgent
+from ..core.langfuse_client import trace_agent_process, observe
 from ..core.logging import logger
 from ..models.agent import AgentResponse, ContentAnalysisReport
 from ..models.session import SessionContext
 from ..utils.json_parser import parse_json_object
-from langfuse import observe
 
 class ContentStrengthAgent(BaseAgent):
     """Agent for analyzing content strength, skills reasoning, and evidence evaluation."""
@@ -16,66 +16,48 @@ class ContentStrengthAgent(BaseAgent):
     MOCK_RESPONSE_KEY = "ContentStrengthAgent"
     
     SYSTEM_PROMPT = """
-        You are a Content Strength & Skills Reasoning Agent. Your role is to analyze resumes to identify key skills, achievements, and evidence of impact.
-        
-        ## Your Responsibilities
-        1. Identify key skills and achievements from the resume
-        2. Evaluate the strength of evidence supporting each claim
-        3. Suggest stronger phrasing WITHOUT fabricating new content
-        4. Apply confidence scoring and consistency checks
-        
-        ## Evidence Strength Classification
-        - HIGH: Quantifiable results (e.g., "increased revenue by 25%", "led team of 12")
-        - MEDIUM: Specific details but not quantified (e.g., "led cross-functional team", "implemented new system")
-        - LOW: Vague claims (e.g., "improved processes", "worked on various projects")
-        
-        ## Faithful Transformation Rules
-        - NEVER invent new skills, achievements, or experiences
-        - NEVER add numbers or metrics that don't exist in the original
-        - ONLY suggest phrasing that preserves the original meaning
-        - FLAG any suggestion that cannot be directly traced to source content
-        - If you cannot improve phrasing without fabrication, mark as faithful=false
-        
-        ## Output Format
-        Return a JSON object with this exact structure:
-        {
-          "skills": [
-            {
-              "name": "skill name",
-              "category": "Technical|Soft|Domain|Tool",
-              "confidenceScore": 0.0-1.0,
-              "evidenceStrength": "HIGH|MEDIUM|LOW",
-              "evidence": "direct quote from resume supporting this skill"
-            }
-          ],
-          "achievements": [
-            {
-              "description": "achievement description",
-              "impact": "HIGH|MEDIUM|LOW",
-              "quantifiable": true|false,
-              "confidenceScore": 0.0-1.0,
-              "originalText": "original text from resume"
-            }
-          ],
-          "suggestions": [
-            {
-              "original": "original phrasing from resume",
-              "suggested": "improved phrasing (must be faithful to original)",
-              "rationale": "why this change improves clarity",
-              "faithful": true|false,
-              "confidenceScore": 0.0-1.0
-            }
-          ],
-          "hallucinationRisk": 0.0-1.0,
-          "summary": "brief summary of analysis"
-        }
-        
-        ## Hallucination Risk Calculation
-        - 0.0-0.2: All claims well-evidenced, suggestions fully faithful
-        - 0.3-0.5: Some vague claims, minor rewording suggestions
-        - 0.6-0.8: Multiple unsupported claims, some aggressive suggestions
-        - 0.9-1.0: High risk of fabrication, flag for human review
-        """
+You are a Content Strength & Skills Reasoning Agent analyzing resumes to identify key skills, achievements, and evidence of impact.
+
+CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
+
+RULES:
+1. Your entire response must be exactly one JSON object
+2. Start with '{' and end with '}' - nothing else
+3. Do NOT include markdown, explanatory text, preamble, or summary
+4. Do NOT include comments (// or /* */)
+5. All array fields must have 2+ items minimum
+6. All scores must be numbers 0-1.0 (not percentages)
+7. Do NOT use null - use empty strings/arrays/0
+
+Your Responsibilities:
+1. Identify key skills and achievements from the resume
+2. Evaluate the strength of evidence supporting each claim
+3. Suggest stronger phrasing WITHOUT fabricating new content
+4. Apply confidence scoring and consistency checks
+
+Evidence Strength: HIGH (quantified results) | MEDIUM (specific but not quantified) | LOW (vague claims)
+
+Faithful Transformation Rules:
+- NEVER invent new skills, achievements, or experiences
+- NEVER add numbers or metrics that don't exist
+- ONLY suggest phrasing that preserves original meaning
+- If suggestion requires fabrication, mark faithful=false
+
+RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
+{
+  "skills": [
+    {"name": "skill name", "category": "Technical|Soft|Domain|Tool", "confidenceScore": 0.85, "evidenceStrength": "HIGH|MEDIUM|LOW", "evidence": "quote from resume"}
+  ],
+  "achievements": [
+    {"description": "achievement", "impact": "HIGH|MEDIUM|LOW", "quantifiable": true, "confidenceScore": 0.9, "originalText": "original text"}
+  ],
+  "suggestions": [
+    {"original": "original phrasing", "suggested": "improved phrasing", "rationale": "why this helps", "faithful": true, "confidenceScore": 0.8}
+  ],
+  "hallucinationRisk": 0.15,
+  "summary": "brief summary of analysis"
+}
+"""
     
     def __init__(self, gemini_service):
         """Initialize Content Strength Agent.
@@ -89,7 +71,8 @@ class ContentStrengthAgent(BaseAgent):
             name="ContentStrengthAgent"
         )
     
-    @observe
+    @trace_agent_process
+    @observe(name="content_strength_process", observation_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process resume text and analyze content strength.
         
@@ -210,6 +193,32 @@ class ContentStrengthAgent(BaseAgent):
                         error_message=str(e))
             raise
     
+    @observe(name="parse-json", observation_type="tool")
+    def _parse_json(self, text: str) -> Dict[str, Any]:
+        """Parse JSON from text with regex fallback.
+        
+        Args:
+            text: Text containing JSON
+            
+        Returns:
+            Parsed JSON dictionary
+        """
+        session_id = "unknown"  # We don't have session context here
+        
+        try:
+            json_pattern = re.compile(r'\{[\s\S]*\}', re.MULTILINE)
+            matcher = json_pattern.search(text)
+            if matcher:
+                result = json.loads(matcher.group())
+                logger.debug("JSON parsing successful with regex", session_id=session_id, keys_found=list(result.keys()))
+                return result
+            
+            result = json.loads(text)
+            logger.debug("JSON parsing successful without regex", session_id=session_id, keys_found=list(result.keys()))
+            return result
+        except Exception as e:
+            logger.warning("JSON parsing failed, returning empty dict", session_id=session_id, error=str(e), text_preview=text[:200])
+            return {}
     
     def _calculate_overall_confidence(self, node: Dict[str, Any]) -> float:
         """Calculate overall confidence from parsed data.
@@ -304,6 +313,7 @@ class ContentStrengthAgent(BaseAgent):
         except (ValueError, TypeError):
             return 0.0
 
+    @observe(name="normalize-content-analysis", observation_type="tool")
     def _normalize_content_analysis(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize parsed JSON to match ContentAnalysisReport model."""
         data: Dict[str, Any] = {
