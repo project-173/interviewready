@@ -15,9 +15,6 @@ COPY pyproject.toml uv.lock ./
 # if the lock file is out of sync.
 RUN uv sync --no-install-project --no-dev
 
-# Install spaCy language models for LLM Guard scanners (English only)
-RUN /app/.venv/bin/python -m spacy download en_core_web_sm
-
 # Final stage
 FROM python:3.11-slim-bookworm
 
@@ -34,7 +31,7 @@ COPY . .
 
 # Verify that all dependencies are installed, including Langfuse
 # This step will fail the build if a core dependency is missing
-RUN python -c "from langfuse import Langfuse; from importlib.metadata import version; print('Langfuse version:', version('langfuse'))"
+RUN python -c "import langfuse; from importlib.metadata import version; print('Langfuse version:', version('langfuse'))"
 
 # Expose the port
 EXPOSE 8080
@@ -42,3 +39,7 @@ EXPOSE 8080
 # Run the application
 # We use python -m uvicorn to ensure it uses the correct site-packages in the virtual environment
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--forwarded-allow-ips", "*"]
+
+
+# Install spaCy language models for LLM Guard scanners (English only)
+# RUN /app/.venv/bin/python -m spacy download en_core_web_sm
