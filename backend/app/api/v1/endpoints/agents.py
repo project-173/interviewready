@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.v1.services import get_orchestration_agent
 from app.core.auth import get_current_user
-from app.core.langfuse_client import langfuse, observe
+from langfuse import Langfuse, observe, propagate_attributes
+
+langfuse = Langfuse()
 
 router = APIRouter()
 
@@ -25,28 +27,32 @@ async def list_agents(
         or ""
     )
 
-    with langfuse.trace(
+    effective_session_id = session_id or user_id
+
+    with langfuse.start_as_current_observation(
+        as_type="span",
         name="list_agents",
-        session_id=session_id or user_id,
-        user_id=user_id,
         metadata={
             "endpoint": "/api/v1/agents",
             "method": "GET",
         },
     ) as trace:
-        try:
-            orchestrator = get_orchestration_agent()
-        except Exception as exc:
-            trace.update(session_id=session_id, output={"error": "orchestrator_unavailable", "reason": str(exc)})
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Orchestration service unavailable: {exc}",
-            ) from exc
+        with propagate_attributes(user_id=user_id, session_id=effective_session_id):
+            try:
+                orchestrator = get_orchestration_agent()
+            except Exception as exc:
+                trace.update(
+                    output={"error": "orchestrator_unavailable", "reason": str(exc)}
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Orchestration service unavailable: {exc}",
+                ) from exc
 
-        result = {
-            name: agent.get_system_prompt()
-            for name, agent in orchestrator.get_agents().items()
-        }
+            result = {
+                name: agent.get_system_prompt()
+                for name, agent in orchestrator.get_agents().items()
+            }
 
-        trace.update(session_id=session_id, output={"success": True, "agent_count": len(result)})
-        return result
+            trace.update(output={"success": True, "agent_count": len(result)})
+            return result

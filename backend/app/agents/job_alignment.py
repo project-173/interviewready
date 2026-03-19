@@ -5,7 +5,7 @@ import time
 from typing import List, Dict, Any
 
 from .base import BaseAgent
-from ..core.langfuse_client import trace_agent_process, observe, observe
+from langfuse import observe
 from ..core.logging import logger
 from ..core.config import settings
 from ..models.agent import AgentResponse, AlignmentReport
@@ -64,7 +64,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             name="JobAlignmentAgent",
         )
 
-    @observe(name="parse-json", observation_type="tool")
+    @observe(name="parse-json", as_type="tool")
     def _parse_json(self, raw: str) -> Dict[str, Any]:
         """Parse JSON string into a dict, returning empty dict on failure."""
         session_id = "unknown"  # We don't have session context here
@@ -84,15 +84,14 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             )
         return result
 
-    @observe(name="compute-confidence", observation_type="tool")
+    @observe(name="compute-confidence", as_type="tool")
     def _compute_confidence(self, fit_score: int, missing_skills: List[str]) -> float:
         """Compute confidence score from fit score and missing skills count."""
         base = fit_score / 100.0
         penalty = len(missing_skills) * 0.02
         return max(0.3, min(0.95, base - penalty))
 
-    @trace_agent_process
-    @observe(name="job_alignment_process", observation_type="agent")
+    @observe(name="job_alignment_process", as_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process resume and job description to evaluate alignment.
 

@@ -10,7 +10,9 @@ from langgraph.graph import END, StateGraph
 
 from app.agents.base import BaseAgentProtocol
 from app.agents.gemini_service import GeminiService
-from app.core.langfuse_client import langfuse, observe
+from langfuse import Langfuse, observe, propagate_attributes
+
+langfuse = Langfuse()
 from app.core.logging import logger
 from app.governance.sharp_governance_service import SharpGovernanceService
 from app.models.agent import (
@@ -58,88 +60,85 @@ class OrchestrationAgent:
         session_id = getattr(context, "session_id", "unknown")
         user_id = getattr(context, "user_id", None)
 
-        with langfuse.trace(
+        with langfuse.start_as_current_observation(
+            as_type="span",
             name="orchestration_execution",
-            session_id=session_id,
-            user_id=user_id,
-            metadata={
-                "intent": request.intent,
-            },
         ) as trace:
-            # Extract intent from request and build input text for agents
-            intent = request.intent
-            if intent not in {"RESUME_CRITIC", "CONTENT_STRENGTH", "ALIGNMENT", "INTERVIEW_COACH"}:
-                raise ValueError(f"Unsupported intent: {intent}")
+            with propagate_attributes(user_id=user_id, session_id=session_id):
+                # Extract intent from request and build input text for agents
+                intent = request.intent
+                if intent not in {"RESUME_CRITIC", "CONTENT_STRENGTH", "ALIGNMENT", "INTERVIEW_COACH"}:
+                    raise ValueError(f"Unsupported intent: {intent}")
 
-            logger.log_state_transition("orchestration_start", "normalize_resume", session_id, intent=intent)
-            normalization_result = self._normalize_resume(request, context)
-            if isinstance(normalization_result, NormalizationFailure):
-                logger.log_state_transition(
-                    "normalize_resume",
-                    "normalize_failed",
-                    session_id,
-                    reason=normalization_result.reason,
+                logger.log_state_transition("orchestration_start", "normalize_resume", session_id, intent=intent)
+                normalization_result = self._normalize_resume(request, context)
+                if isinstance(normalization_result, NormalizationFailure):
+                    logger.log_state_transition(
+                        "normalize_resume",
+                        "normalize_failed",
+                        session_id,
+                        reason=normalization_result.reason,
+                    )
+                    return self._build_normalization_failure_response(normalization_result, context)
+
+                resume_model, _resume_document = normalization_result
+                resume_data = (
+                    resume_model.model_dump(exclude_none=True)
+                    if resume_model is not None
+                    else {}
                 )
-                return self._build_normalization_failure_response(normalization_result, context)
+                job_description = request.jobDescription or ""
+                message_history = request.messageHistory or []
 
-            resume_model, _resume_document = normalization_result
-            resume_data = (
-                resume_model.model_dump(exclude_none=True)
-                if resume_model is not None
-                else {}
-            )
-            job_description = request.jobDescription or ""
-            message_history = request.messageHistory or []
+                # Extract audio data if present — routed only to INTERVIEW_COACH
+                audio_data: bytes | None = getattr(request, "audioData", None)
 
-            # Extract audio data if present — routed only to INTERVIEW_COACH
-            audio_data: bytes | None = getattr(request, "audioData", None)
+                # Build input text based on intent and available data
+                input_text = self._build_agent_input(
+                    intent, resume_data, job_description, audio_data
+                )
 
-            # Build input text based on intent and available data
-            input_text = self._build_agent_input(
-                intent, resume_data, job_description, audio_data
-            )
+                # Log orchestration start
+                logger.log_orchestration_start(input_text, session_id, user_id)
 
-            # Log orchestration start
-            logger.log_orchestration_start(input_text, session_id, user_id)
+                try:
+                    # DYNAMIC INTENT ANALYSIS: Use LLM if available and requested intent is general/missing
+                    if self.intent_gemini_service and (not intent or intent == "GENERAL"):
+                        logger.debug("Using dynamic LLM intent analysis", session_id=session_id)
+                        agent_sequence = self._analyze_intent_with_llm(input_text, context)
+                    else:
+                        # Map intent to agent sequence directly (legacy/explicit mode)
+                        agent_sequence = self._map_intent_to_agents(intent)
 
-            try:
-                # DYNAMIC INTENT ANALYSIS: Use LLM if available and requested intent is general/missing
-                if self.intent_gemini_service and (not intent or intent == "GENERAL"):
-                    logger.debug("Using dynamic LLM intent analysis", session_id=session_id)
-                    agent_sequence = self._analyze_intent_with_llm(input_text, context)
-                else:
-                    # Map intent to agent sequence directly (legacy/explicit mode)
-                    agent_sequence = self._map_intent_to_agents(intent)
-
-                trace.update(session_id=session_id, output={"agent_sequence": agent_sequence})
-                logger.log_intent_analysis(input_text, agent_sequence, "hybrid_routing", session_id)
-                
-                state: OrchestrationState = {
-                    "original_input": input_text,
-                    "current_input": input_text,
-                    "context": context,
-                    "agent_sequence": agent_sequence,
-                    "current_index": 0,
-                    "current_response": None,
-                }
-                
-                logger.log_state_transition("orchestration_start", "workflow_execution", session_id, agent_sequence=agent_sequence)
-                result = self.workflow.invoke(state)
-                current_response = result.get("current_response")
-                
-                if current_response is None:
-                    raise RuntimeError("Orchestration completed without an agent response.")
-                
-                total_time = time.time() - start_time
-                logger.log_orchestration_complete(session_id, total_time, agent_sequence)
-                
-                trace.update(session_id=session_id, output={"success": True, "duration_s": total_time})
-                return current_response
-                
-            except Exception as e:
-                trace.update(session_id=session_id, output={"error": str(e)})
-                logger.log_agent_error("OrchestrationAgent", e, session_id)
-                raise
+                    trace.update(output={"agent_sequence": agent_sequence})
+                    logger.log_intent_analysis(input_text, agent_sequence, "hybrid_routing", session_id)
+                    
+                    state: OrchestrationState = {
+                        "original_input": input_text,
+                        "current_input": input_text,
+                        "context": context,
+                        "agent_sequence": agent_sequence,
+                        "current_index": 0,
+                        "current_response": None,
+                    }
+                    
+                    logger.log_state_transition("orchestration_start", "workflow_execution", session_id, agent_sequence=agent_sequence)
+                    result = self.workflow.invoke(state)
+                    current_response = result.get("current_response")
+                    
+                    if current_response is None:
+                        raise RuntimeError("Orchestration completed without an agent response.")
+                    
+                    total_time = time.time() - start_time
+                    logger.log_orchestration_complete(session_id, total_time, agent_sequence)
+                    
+                    trace.update(output={"success": True, "duration_s": total_time})
+                    return current_response
+                    
+                except Exception as e:
+                    trace.update(output={"error": str(e)})
+                    logger.log_agent_error("OrchestrationAgent", e, session_id)
+                    raise
 
     def get_agents(self) -> dict[str, BaseAgentProtocol]:
         """Expose registered agent map."""
@@ -184,35 +183,43 @@ class OrchestrationAgent:
         current_input = state["current_input"]
         logger.log_agent_execution_start(agent_name, current_input, session_id, current_index)
 
-        with langfuse.trace(
+        user_id = getattr(context, "user_id", None)
+
+        with langfuse.start_as_current_observation(
+            as_type="span",
             name="orchestrator_agent_execution",
-            session_id=session_id,
             metadata={
                 "agent": agent_name,
                 "agent_index": current_index,
                 "current_input_length": len(current_input),
             },
         ) as span:
-            agent_start_time = time.time()
-            try:
-                response = agent.process(current_input, context)
-                agent_execution_time = time.time() - agent_start_time
+            with propagate_attributes(user_id=user_id, session_id=session_id):
+                agent_start_time = time.time()
+                try:
+                    response = agent.process(current_input, context)
+                    agent_execution_time = time.time() - agent_start_time
 
-                span.update(
-                    output={
-                        "response_length": len(str(response.content or "")),
-                        "duration_ms": round(agent_execution_time * 1000, 2),
-                    }
-                )
+                    span.update(
+                        output={
+                            "response_length": len(str(response.content or "")),
+                            "duration_ms": round(agent_execution_time * 1000, 2),
+                        }
+                    )
 
-                # Log successful agent execution
-                logger.log_agent_execution_complete(agent_name, response, session_id, agent_execution_time)
+                    # Log successful agent execution
+                    logger.log_agent_execution_complete(agent_name, response, session_id, agent_execution_time)
 
-            except Exception as e:
-                agent_execution_time = time.time() - agent_start_time
-                span.update(output={"error": str(e), "duration_ms": round(agent_execution_time * 1000, 2)})
-                logger.log_agent_error(agent_name, e, session_id)
-                raise
+                except Exception as e:
+                    agent_execution_time = time.time() - agent_start_time
+                    span.update(
+                        output={
+                            "error": str(e),
+                            "duration_ms": round(agent_execution_time * 1000, 2),
+                        }
+                    )
+                    logger.log_agent_error(agent_name, e, session_id)
+                    raise
 
         trace = list(context.decision_trace or [])
         trace.append(f"Orchestrator: Routed to {agent_name} based on intent analysis.")

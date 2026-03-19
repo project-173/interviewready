@@ -4,7 +4,7 @@ import json
 import time
 from typing import Dict, Any
 from .base import BaseAgent
-from ..core.langfuse_client import trace_agent_process, observe
+from langfuse import observe
 from ..core.logging import logger
 from ..core.config import settings
 from ..models.agent import AgentResponse, StructuralAssessment
@@ -72,8 +72,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             name="ResumeCriticAgent"
         )
     
-    @trace_agent_process
-    @observe(name="resume_critic_process", observation_type="agent")
+    @observe(name="resume_critic_process", as_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         """Process resume text and provide critique.
         
