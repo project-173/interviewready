@@ -128,7 +128,7 @@ class ContentStrengthAgent(BaseAgent):
 
             return AgentResponse(
                 agent_name=self.get_name(),
-                content=json.dumps(structured_result, indent=2),
+                content=structured_result,
                 reasoning=structured_result["summary"],
                 confidence_score=overall_confidence,
                 decision_trace=[

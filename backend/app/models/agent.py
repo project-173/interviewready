@@ -9,7 +9,7 @@ class AgentResponse(BaseModel):
     """Agent response model with SHARP compliance data."""
     
     agent_name: Optional[str] = None
-    content: Optional[str] = None
+    content: Optional[Dict[str, Any] | List[Any] | str] = None
     reasoning: Optional[str] = None  # Explainability
     confidence_score: Optional[float] = None  # Confidence Indicator
     decision_trace: Optional[List[str]] = Field(default_factory=list)  # Auditability

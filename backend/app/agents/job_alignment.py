@@ -81,7 +81,7 @@ class JobAlignmentAgent(BaseAgent):
 
             return AgentResponse(
                 agent_name=self.get_name(),
-                content=json.dumps(structured_result, indent=2),
+                content=structured_result,
                 reasoning=structured_result["reasoning"],
                 confidence_score=self._compute_confidence(fit_score, missing_skills),
                 decision_trace=[
