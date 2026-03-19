@@ -5,7 +5,7 @@ import re
 import time
 from typing import List, Dict, Any
 from .base import BaseAgent
-from ..core.langfuse_client import trace_agent_process
+from ..core.langfuse_client import trace_agent_process, observe
 from ..core.logging import logger
 from ..models.agent import AgentResponse, AlignmentReport
 from ..models.session import SessionContext
@@ -57,6 +57,7 @@ class JobAlignmentAgent(BaseAgent):
         }
         """
 
+    @observe(name="parse-json", observation_type="tool")
     def _parse_json(self, raw: str) -> Dict[str, Any]:
         """Parse JSON string into a dict, returning empty dict on failure."""
         session_id = "unknown"  # We don't have session context here
@@ -81,12 +82,14 @@ class JobAlignmentAgent(BaseAgent):
             logger.warning("JobAlignmentAgent JSON parsing failed, returning empty dict", session_id=session_id, error=str(e), raw_preview=raw[:200])
             return {}
 
+    @observe(name="compute-confidence", observation_type="tool")
     def _compute_confidence(self, fit_score: int, missing_skills: List[str]) -> float:
         """Compute confidence score from fit score and missing skills count."""
         base = fit_score / 100.0
         penalty = len(missing_skills) * 0.02
         return max(0.3, min(0.95, base - penalty))
 
+    @observe(name="normalize-alignment", observation_type="tool")
     def _normalize_alignment_output(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize parsed content into AlignmentReport schema."""
         data = {

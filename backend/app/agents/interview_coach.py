@@ -7,7 +7,7 @@ from .base import BaseAgent
 from .gemini_service import GeminiLiveService
 from .mock_config import MockConfig
 from .mock_gemini_service import MockGeminiLiveService
-from ..core.langfuse_client import trace_agent_process
+from ..core.langfuse_client import trace_agent_process, observe
 from ..core.logging import logger
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
@@ -151,6 +151,7 @@ class InterviewCoachAgent(BaseAgent):
                         error_message=str(e))
             raise
     
+    @observe(name="call-gemini-live", observation_type="tool")
     def _call_gemini_live(self, input_text: str) -> Optional[str]:
         """Call Gemini Live service with timeout.
         

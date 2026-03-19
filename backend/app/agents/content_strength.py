@@ -5,7 +5,7 @@ import re
 import time
 from typing import List, Dict, Any, Optional
 from .base import BaseAgent
-from ..core.langfuse_client import trace_agent_process
+from ..core.langfuse_client import trace_agent_process, observe
 from ..core.logging import logger
 from ..models.agent import AgentResponse, ContentAnalysisReport
 from ..models.session import SessionContext
@@ -182,6 +182,7 @@ class ContentStrengthAgent(BaseAgent):
                         error_message=str(e))
             raise
     
+    @observe(name="parse-json", observation_type="tool")
     def _parse_json(self, text: str) -> Dict[str, Any]:
         """Parse JSON from text with regex fallback.
         
@@ -301,6 +302,7 @@ class ContentStrengthAgent(BaseAgent):
         except (ValueError, TypeError):
             return 0.0
 
+    @observe(name="normalize-content-analysis", observation_type="tool")
     def _normalize_content_analysis(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize parsed JSON to match ContentAnalysisReport model."""
         data: Dict[str, Any] = {

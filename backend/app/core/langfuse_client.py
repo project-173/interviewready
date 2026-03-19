@@ -217,6 +217,53 @@ def trace_agent_process(func):
     return wrapper
 
 
+def observe(name: str, observation_type: str = "agent"):
+    """Decorator to add semantic observation tracking (agent, tool, guardrail).
+    
+    Works with Langfuse's @observe decorator if available, otherwise uses traces.
+    Gracefully handles Langfuse versions that don't support observation_type parameter.
+    
+    Args:
+        name: Name of the observation
+        observation_type: Type of observation ('agent', 'tool', 'guardrail', 'generation', etc.)
+    
+    Example:
+        @observe(name="medication-check", observation_type="tool")
+        def check_medication_interactions(medications: list):
+            return ...
+    """
+    
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            from app.core.langfuse_client import langfuse
+            
+            # Try to use Langfuse's native @observe if available
+            try:
+                from langfuse import observe as langfuse_observe
+                
+                # Try with observation_type first (newer versions)
+                try:
+                    observed_func = langfuse_observe(name=name, observation_type=observation_type)(func)
+                    return observed_func(*args, **kwargs)
+                except TypeError:
+                    # Fallback to older Langfuse version without observation_type
+                    observed_func = langfuse_observe(name=name)(func)
+                    return observed_func(*args, **kwargs)
+            except (ImportError, AttributeError, TypeError):
+                # Final fallback: use our trace wrapper with observation_type in metadata
+                with langfuse.trace(name=name, metadata={"observation_type": observation_type}) as trace:
+                    try:
+                        result = func(*args, **kwargs)
+                        trace.update(output={"status": "success"})
+                        return result
+                    except Exception as e:
+                        trace.update(output={"status": "error", "error": str(e)})
+                        raise
+        
+        return wrapper
+    return decorator
+
+
 try:
     from langfuse import Langfuse  # type: ignore
 except ImportError:  # pragma: no cover

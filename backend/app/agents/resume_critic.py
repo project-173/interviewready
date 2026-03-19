@@ -5,7 +5,7 @@ import re
 import time
 from typing import Dict, Any
 from .base import BaseAgent
-from ..core.langfuse_client import trace_agent_process
+from ..core.langfuse_client import trace_agent_process, observe
 from ..core.logging import logger
 from ..models.agent import AgentResponse, StructuralAssessment
 from ..models.session import SessionContext
@@ -133,6 +133,7 @@ class ResumeCriticAgent(BaseAgent):
                         error_message=str(e))
             raise
 
+    @observe(name="parse-json", observation_type="tool")
     def _parse_json(self, text: str) -> Dict[str, Any]:
         """Parse JSON from raw or fenced markdown text."""
         if not text:
@@ -165,6 +166,7 @@ class ResumeCriticAgent(BaseAgent):
 
         return {}
 
+    @observe(name="normalize-assessment", observation_type="tool")
     def _normalize_structural_assessment(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize parsed content into StructuralAssessment schema."""
         fallback_suggestions = [
