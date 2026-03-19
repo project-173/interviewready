@@ -41,4 +41,4 @@ EXPOSE 8080
 
 # Run the application
 # We use python -m uvicorn to ensure it uses the correct site-packages in the virtual environment
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --proxy-headers --forwarded-allow-ips '*'"]
