@@ -39,7 +39,7 @@ export const CriticStep: React.FC<{ report: StructuralAssessment; onApprove: () 
     <div className="space-y-3">
       <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Formatting Recommendations</h4>
       <div className="space-y-2">
-        {report.formattingRecommendations.map((rec, i) => (
+        {(report.formattingRecommendations || []).map((rec, i) => (
           <div key={i} className="flex items-start gap-3 p-3 bg-white border border-slate-200 rounded-lg text-xs text-slate-600 transition-colors hover:border-slate-300">
             <div className="mt-0.5 w-1.5 h-1.5 rounded-full bg-slate-400 flex-none"></div>
             {rec}
@@ -52,7 +52,7 @@ export const CriticStep: React.FC<{ report: StructuralAssessment; onApprove: () 
       <div className="space-y-3">
         <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Content Suggestions</h4>
         <div className="space-y-2">
-          {report.suggestions.map((suggestion, i) => (
+          {(report.suggestions || []).map((suggestion, i) => (
             <div key={i} className="flex items-start gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-slate-600 transition-colors hover:border-blue-300">
               <div className="mt-0.5 w-1.5 h-1.5 rounded-full bg-blue-400 flex-none"></div>
               {suggestion}
@@ -61,7 +61,7 @@ export const CriticStep: React.FC<{ report: StructuralAssessment; onApprove: () 
         </div>
       </div>
     )}
-    
+
     <button onClick={onApprove} className="w-full bg-slate-900 text-white text-[13px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 active:scale-[0.98] transition-all">
       Run Content Strength Analysis
     </button>
@@ -92,13 +92,13 @@ export const ContentStep: React.FC<{ report: ContentAnalysisReport; onApprove: (
 
       <div className="p-6 bg-white border border-slate-200 rounded-2xl">
         <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Key Achievements</h4>
-        <div className="space-y-3">
+         <div className="space-y-3">
           {(report.achievements || []).slice(0, 3).map((ach, i) => (
             <div key={i} className="text-[11px] text-slate-600 border-l-2 border-slate-200 pl-3">
-              <p className="font-medium text-slate-900">{ach.description}</p>
+              <p className="font-medium text-slate-900">{ach?.description}</p>
               <div className="flex gap-2 mt-1">
-                <span className={`text-[9px] uppercase font-bold ${ach.impact === 'HIGH' ? 'text-emerald-600' : 'text-amber-600'}`}>{ach.impact} Impact</span>
-                {ach.quantifiable && <span className="text-[9px] uppercase font-bold text-blue-600">Quantified</span>}
+                <span className={`text-[9px] uppercase font-bold ${ach?.impact === 'HIGH' ? 'text-emerald-600' : 'text-amber-600'}`}>{ach?.impact} Impact</span>
+                {ach?.quantifiable && <span className="text-[9px] uppercase font-bold text-blue-600">Quantified</span>}
               </div>
             </div>
           ))}
@@ -112,10 +112,10 @@ export const ContentStep: React.FC<{ report: ContentAnalysisReport; onApprove: (
          {(report.skills || []).slice(0, 6).map((skill, i) => (
            <div key={i} className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
              <div className="flex justify-between items-start mb-1">
-               <span className="text-[11px] font-bold text-slate-900">{skill.name}</span>
-               <span className="text-[9px] px-1.5 py-0.5 bg-white border border-slate-200 rounded text-slate-500">{skill.category}</span>
+               <span className="text-[11px] font-bold text-slate-900">{skill?.name}</span>
+               <span className="text-[9px] px-1.5 py-0.5 bg-white border border-slate-200 rounded text-slate-500">{skill?.category}</span>
              </div>
-             <p className="text-[10px] text-slate-500 line-clamp-2 italic">"{skill.evidence}"</p>
+             <p className="text-[10px] text-slate-500 line-clamp-2 italic">"{skill?.evidence}"</p>
            </div>
          ))}
        </div>
@@ -129,14 +129,14 @@ export const ContentStep: React.FC<{ report: ContentAnalysisReport; onApprove: (
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                <div>
                  <p className="text-[9px] font-bold text-amber-600 uppercase mb-1">Original</p>
-                 <p className="text-[11px] text-slate-500 line-through">{sug.original}</p>
+                 <p className="text-[11px] text-slate-500 line-through">{sug?.original}</p>
                </div>
                <div>
                  <p className="text-[9px] font-bold text-emerald-600 uppercase mb-1">Suggested</p>
-                 <p className="text-[11px] text-slate-900 font-medium">{sug.suggested}</p>
+                 <p className="text-[11px] text-slate-900 font-medium">{sug?.suggested}</p>
                </div>
              </div>
-             <p className="mt-3 text-[10px] text-slate-600 bg-white/50 p-2 rounded border border-amber-100/50">{sug.rationale}</p>
+             <p className="mt-3 text-[10px] text-slate-600 bg-white/50 p-2 rounded border border-amber-100/50">{sug?.rationale}</p>
            </div>
          ))}
        </div>
@@ -153,24 +153,34 @@ export const AlignmentStep: React.FC<{
   onChangeJD: (val: string) => void; 
   onAnalyze: () => void;
   isLoading: boolean;
-}> = ({ jd, onChangeJD, onAnalyze, isLoading }) => (
-  <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 space-y-6">
-    <h3 className="text-lg font-semibold">Role Fit Definition</h3>
-    <textarea 
-      className="w-full h-48 p-4 rounded-xl bg-white border border-slate-200 focus:ring-1 focus:ring-slate-900 focus:outline-none text-xs transition-all scrollbar-thin"
-      placeholder="Paste the target job description here..."
-      value={jd}
-      onChange={(e) => onChangeJD(e.target.value)}
-    />
-    <button 
-      onClick={onAnalyze} 
-      disabled={!jd || isLoading} 
-      className="w-full bg-slate-900 disabled:opacity-50 text-white text-[13px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 transition-all"
-    >
-      {isLoading ? 'Scanning Requirements...' : 'Analyze Market Fit'}
-    </button>
-  </div>
-);
+}> = ({ jd, onChangeJD, onAnalyze, isLoading }) => {
+  const MAX_JD_LENGTH = 20000;
+
+  return (
+    <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 space-y-6">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Role Fit Definition</h3>
+        <span className={`text-[10px] font-medium ${jd.length > MAX_JD_LENGTH ? 'text-red-500' : 'text-slate-400'}`}>
+          {jd.length.toLocaleString()} / {MAX_JD_LENGTH.toLocaleString()}
+        </span>
+      </div>
+      <textarea
+        className="w-full h-48 p-4 rounded-xl bg-white border border-slate-200 focus:ring-1 focus:ring-slate-900 focus:outline-none text-xs transition-all scrollbar-thin"
+        placeholder="Paste the target job description here..."
+        value={jd}
+        maxLength={MAX_JD_LENGTH}
+        onChange={(e) => onChangeJD(e.target.value)}
+      />
+      <button
+        onClick={onAnalyze}
+        disabled={!jd || isLoading}
+        className="w-full bg-slate-900 disabled:opacity-50 text-white text-[13px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 transition-all"
+      >
+        {isLoading ? 'Scanning Requirements...' : 'Analyze Market Fit'}
+      </button>
+    </div>
+  );
+};
 
 export const AlignmentReportStep: React.FC<{ report: AlignmentReport; onStartInterview: () => void }> = ({ report, onStartInterview }) => (
   <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 space-y-6">
@@ -293,7 +303,7 @@ export const InterviewStep: React.FC<{
               msg.role === 'user' ? 'bg-slate-900 text-white rounded-tr-none' : 'bg-white text-slate-800 rounded-tl-none border border-slate-200'
             }`}>
               <div className="prose prose-sm max-w-none prose-slate">
-                <ReactMarkdown 
+                <ReactMarkdown
                   components={{
                     p: ({children}) => <p className="mb-2 last:mb-0">{children}</p>,
                     ul: ({children}) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
@@ -309,8 +319,8 @@ export const InterviewStep: React.FC<{
         ))}
         <div ref={chatEndRef} />
       </div>
-      
-      <form 
+
+      <form
         className="flex gap-2 pt-4 border-t border-slate-100"
         onSubmit={(e) => {
           e.preventDefault();
@@ -320,14 +330,15 @@ export const InterviewStep: React.FC<{
           input.value = '';
         }}
       >
-        <input 
-          name="message" 
+        <input
+          name="message"
           autoFocus
-          autoComplete="off" 
-          placeholder="Draft your response..." 
-          className="flex-1 px-4 py-2.5 rounded-lg bg-white border border-slate-200 text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none transition-all placeholder:text-slate-400" 
+          autoComplete="off"
+          maxLength={4000}
+          placeholder="Draft your response..."
+          className="flex-1 px-4 py-2.5 rounded-lg bg-white border border-slate-200 text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none transition-all placeholder:text-slate-400"
         />
-        <button 
+        <button
           type="button"
           onClick={handleMicClick}
           disabled={isLoading}
@@ -341,9 +352,9 @@ export const InterviewStep: React.FC<{
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
           </svg>
         </button>
-        <button 
-          type="submit" 
-          disabled={isLoading} 
+        <button
+          type="submit"
+          disabled={isLoading}
           className="bg-slate-900 text-white px-4 rounded-lg hover:bg-slate-800 disabled:opacity-50 flex items-center justify-center transition-all"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>

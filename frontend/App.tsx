@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   SharedState, 
-  WorkflowStatus, 
+  WorkflowStatus,
   ChatRequest
 } from './types';
-import { 
+import {
   contentStrengthAgent, 
   alignmentAgent, 
   interviewCoachAgent,
@@ -91,8 +91,14 @@ const App: React.FC = () => {
     setState(prev => ({ ...prev, status: targetStatus }));
   }, [state.currentResume, state.criticReport, state.contentReport, state.alignmentReport]);
 
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
+      if (file.size > MAX_FILE_SIZE) {
+        reject(new Error(`File size exceeds ${MAX_FILE_SIZE / (1024 * 1024)}MB limit`));
+        return;
+      }
       const reader = new FileReader();
       reader.readAsDataURL(file);
       reader.onload = () => resolve((reader.result as string).split(',')[1]);
@@ -125,7 +131,7 @@ const App: React.FC = () => {
           response.payload && typeof response.payload === 'object' && !Array.isArray(response.payload)
             ? response.payload
             : {};
-        
+
         // Parse the structured JSON response from backend
         let responseData;
         try {
@@ -134,9 +140,9 @@ const App: React.FC = () => {
           console.error('Failed to parse backend response:', error);
           throw new Error('Invalid response from backend');
         }
-        
+
         const resumeData = responseData.resume_data || {};
-        
+
         const resume: Resume = {
           title: resumeData.title || 'Untitled Resume',
           summary: resumeData.summary || '',
@@ -160,9 +166,9 @@ const App: React.FC = () => {
           certifications: resumeData.certifications || [],
           awards: resumeData.awards || []
         };
-        
-        setState(prev => ({ 
-          ...prev, 
+
+        setState(prev => ({
+          ...prev,
           currentResume: parsedResume || prev.currentResume,
           history: parsedResume ? [...prev.history, parsedResume] : prev.history,
           criticReport: {
@@ -171,7 +177,7 @@ const App: React.FC = () => {
             formattingRecommendations: Array.isArray((critiqueData as any).formattingRecommendations) ? (critiqueData as any).formattingRecommendations : [],
             suggestions: Array.isArray((critiqueData as any).suggestions) ? (critiqueData as any).suggestions : []
           },
-          status: WorkflowStatus.AWAITING_CRITIC_APPROVAL 
+          status: WorkflowStatus.AWAITING_CRITIC_APPROVAL
         }));
       } else {
         const reader = new FileReader();
@@ -206,9 +212,9 @@ const App: React.FC = () => {
             jobDescription: `Parse and analyze this resume text: ${textContent}`,
             messageHistory: []
           };
-          
+
           const response = await backendService.callChatEndpoint(request);
-          
+
           // Parse the structured JSON response from backend
           let responseData;
           try {
@@ -217,8 +223,9 @@ const App: React.FC = () => {
             console.error('Failed to parse backend response:', error);
             throw new Error('Invalid response from backend');
           }
-          
+
           const resumeData = responseData.resume_data || {};
+          const critiqueData = responseData.critique_data || {};
           
           const resume: Resume = {
             title: resumeData.title || 'Untitled Resume',
@@ -249,7 +256,7 @@ const App: React.FC = () => {
             currentResume: resume, 
             history: [...prev.history, resume],
             criticReport: {
-              score: critiqueData.score || 85,
+              score: Number(critiqueData.score) || 85,
               readability: critiqueData.readability || 'Resume processed successfully',
               formattingRecommendations: critiqueData.formattingRecommendations || [],
               suggestions: critiqueData.suggestions || []

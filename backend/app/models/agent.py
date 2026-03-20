@@ -7,13 +7,15 @@ from .resume import Resume
 
 class AgentResponse(BaseModel):
     """Agent response model with SHARP compliance data."""
-    
+
     agent_name: Optional[str] = None
     content: Optional[str] = None
     reasoning: Optional[str] = None  # Explainability
     confidence_score: Optional[float] = None  # Confidence Indicator
     decision_trace: Optional[List[str]] = Field(default_factory=list)  # Auditability
-    sharp_metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)  # SHARP Compliance Data
+    sharp_metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict
+    )  # SHARP Compliance Data
 
 
 class ChatApiResponse(BaseModel):
@@ -25,21 +27,21 @@ class ChatApiResponse(BaseModel):
 
 class InterviewMessage(BaseModel):
     """Interview coaching message."""
-    
-    role: Optional[str] = None
-    text: Optional[str] = None
+
+    role: Optional[str] = Field(default=None, max_length=50)
+    text: Optional[str] = Field(default=None, max_length=4000)
 
 
 class ResumeFile(BaseModel):
     """Uploaded resume file payload."""
 
-    data: str
+    data: str = Field(..., max_length=15000000)
     fileType: Literal["pdf"] = "pdf"
 
 
 class ChatRequest(BaseModel):
     """Chat request model with rich JSON structure."""
-    
+
     intent: Literal[
         "RESUME_CRITIC",
         "CONTENT_STRENGTH",
@@ -48,10 +50,10 @@ class ChatRequest(BaseModel):
     ]
     resumeData: Optional[Resume] = None
     resumeFile: Optional[ResumeFile] = None
-    jobDescription: Optional[str] = ""
+    jobDescription: Optional[str] = Field(default="", max_length=20000)
     messageHistory: Optional[List[InterviewMessage]] = Field(default_factory=list)
     audioData: Optional[bytes] = None
-    
+
     @field_validator('audioData', mode='before')
     @classmethod
     def decode_audio_data(cls, v):
@@ -59,6 +61,46 @@ class ChatRequest(BaseModel):
             import base64
             return base64.b64decode(v)
         return v  # Audio data for interview coaching
+
+
+class ResumeDocument(BaseModel):
+    """Normalized resume document (lite)."""
+
+    id: Optional[str] = None
+    source: Optional[str] = None
+    raw_text: Optional[str] = None
+    parse_confidence: Optional[float] = None
+    warnings: List[str] = Field(default_factory=list)
+    sections: Optional[Dict[str, str]] = None
+    spans: Optional[List[Dict[str, Any]]] = None
+
+
+class AnalysisArtifact(BaseModel):
+    """Structured output captured from an agent."""
+
+    agent: Optional[str] = None
+    artifact_type: Optional[str] = None
+    payload: Optional[Dict[str, Any] | List[Any] | str] = None
+    confidence_score: Optional[float] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ActionPlan(BaseModel):
+    """Synthesis plan for resume edits or next steps."""
+
+    summary: Optional[str] = None
+    actions: List[str] = Field(default_factory=list)
+    priority: Optional[str] = None
+    no_change: Optional[bool] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class NormalizationFailure(BaseModel):
+    """Normalization failure details."""
+
+    reason: str
+    recovery_steps: Optional[str] = None
+    details: Optional[str] = None
 
 
 class ResumeDocument(BaseModel):
@@ -162,7 +204,7 @@ class StructuralAssessment(BaseModel):
 
 class WorkflowStatus(BaseModel):
     """Workflow execution status."""
-    
+
     session_id: Optional[str] = None
     current_agent: Optional[str] = None
     status: Optional[str] = None  # PENDING, IN_PROGRESS, COMPLETED, FAILED

@@ -2,14 +2,18 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
 from app.api.v1 import api_router
 
+MAX_REQUEST_SIZE = 20 * 1024 * 1024
+
 # Safe import for Langfuse
 try:
     from langfuse.callback import CallbackHandler
+
     HAS_LANGFUSE = True
 except ImportError:
     HAS_LANGFUSE = False
@@ -19,24 +23,8 @@ except ImportError:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    print(f"Starting {settings.APP_NAME} v{settings.VERSION} (env={settings.APP_ENV})...")
-    
-    # Initialize Firebase with error handling to prevent startup crashes
-    try:
-        if settings.FIREBASE_ENABLED:
-            print("Initializing Firebase...")
-            init_firebase()
-            print("Firebase initialized successfully.")
-        else:
-            print("Firebase is disabled via configuration.")
-    except Exception as e:
-        print(f"CRITICAL ERROR during Firebase initialization: {e}")
-        # We don't re-raise here to allow the container to start and serve health checks
-        # even if Firebase fails, allowing us to debug via logs.
-    
-    print(f"{settings.APP_NAME} lifespan startup complete.")
     yield
-    print(f"Shutting down {settings.APP_NAME}...")
+    # Cleanup can be added here
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -67,16 +55,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Middleware for logging requests (useful for Cloud Run debugging)
+@app.middleware("http")
+async def check_request_size(request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_REQUEST_SIZE:
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "error": "Request payload too large",
+                        "detail": f"Maximum request size is {MAX_REQUEST_SIZE // (1024 * 1024)}MB",
+                    },
+                )
+        except ValueError:
+            pass
+    response = await call_next(request)
+    return response
+
+
 @app.middleware("http")
 async def log_requests(request, call_next):
     import time
+
     start_time = time.time()
     origin = request.headers.get("origin")
     response = await call_next(request)
     duration = time.time() - start_time
-    print(f"DEBUG: {request.method} {request.url.path} status={response.status_code} duration={duration:.2f}s origin={origin}")
+    print(
+        f"DEBUG: {request.method} {request.url.path} status={response.status_code} duration={duration:.2f}s origin={origin}"
+    )
     return response
+
 
 # Include API routes
 app.include_router(api_router, prefix="/api/v1")
@@ -88,7 +100,7 @@ if HAS_LANGFUSE and settings.LANGFUSE_PUBLIC_KEY:
         langfuse_handler = CallbackHandler(
             public_key=settings.LANGFUSE_PUBLIC_KEY,
             secret_key=settings.LANGFUSE_SECRET_KEY,
-            host=settings.LANGFUSE_HOST
+            host=settings.LANGFUSE_HOST,
         )
         print("Langfuse callback handler initialized.")
     except Exception as e:
@@ -115,14 +127,12 @@ async def app_info():
 @app.get("/metrics")
 async def metrics():
     """Metrics endpoint placeholder."""
-    return {
-        "status": "metrics_placeholder",
-        "endpoints": ["health", "info", "metrics"]
-    }
+    return {"status": "metrics_placeholder", "endpoints": ["health", "info", "metrics"]}
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",

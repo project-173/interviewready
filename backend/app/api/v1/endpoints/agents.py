@@ -1,8 +1,7 @@
 """Agents endpoint for listing available agent prompts."""
 
-from typing import Any
-
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
+from langfuse import get_client, observe, propagate_attributes
 
 from app.api.v1.services import get_orchestration_agent
 from app.core.auth import get_current_user
@@ -16,7 +15,6 @@ router = APIRouter()
 @observe(name="list_agents")
 async def list_agents(
     session_id: str | None = Query(None, alias="sessionId"),
-    current_user: dict[str, Any] = Depends(get_current_user),  # noqa: ARG001
 ) -> dict[str, str]:
     """Return available agents mapped to their current system prompts."""
 
@@ -49,10 +47,12 @@ async def list_agents(
                     detail=f"Orchestration service unavailable: {exc}",
                 ) from exc
 
-            result = {
-                name: agent.get_system_prompt()
-                for name, agent in orchestrator.get_agents().items()
-            }
+        result = {
+            name: agent.get_system_prompt()
+            for name, agent in orchestrator.get_agents().items()
+        }
 
-            trace.update(output={"success": True, "agent_count": len(result)})
-            return result
+        langfuse.update_current_span(
+            output={"success": True, "agent_count": len(result)}
+        )
+        return result

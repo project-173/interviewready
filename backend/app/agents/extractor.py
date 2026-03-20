@@ -11,6 +11,7 @@ from app.core.logging import logger
 from langfuse import observe
 from ..core.config import settings
 from app.models import AgentResponse, Resume, ResumeDocument
+from app.core.security_constants import ANTI_JAILBREAK_DIRECTIVE
 from app.models.session import SessionContext
 from app.utils.pdf_parser import parse_pdf_base64
 from app.utils.json_parser import parse_json_object
@@ -24,7 +25,8 @@ class ExtractorAgent(BaseAgent):
     MOCK_RESPONSE_KEY = "ExtractorAgent"
     CONFIDENCE_SCORE = 0.95
 
-    SYSTEM_PROMPT = """You are an expert resume parser. Extract structured information from resume text and return it as JSON.
+    SYSTEM_PROMPT = (
+        """You are an expert resume parser. Extract structured information from resume text and return it as JSON.
 
 CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
 
@@ -122,6 +124,8 @@ Output format:
             }
         ]
     }"""
+        + ANTI_JAILBREAK_DIRECTIVE
+    )
 
     def __init__(self, gemini_service):
         super().__init__(
