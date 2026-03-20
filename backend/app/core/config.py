@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     
     # Gemini Model Configuration
     GEMINI_MODEL: str = "gemini-2.5-flash"
+    INTERVIEW_COACH_MODEL: str = "gemini-1.5-flash"  # Separate model for interview agent to manage rate limits
     GEMINI_API_KEY: str
     GOOGLE_AI_API_KEY: Optional[str] = None
     

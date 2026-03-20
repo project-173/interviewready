@@ -29,9 +29,9 @@ class InterviewCoachAgent(BaseAgent):
 
         Always provide actionable, encouraging feedback that helps the candidate succeed in their job interview."""
     CONFIDENCE_SCORE = 0.85
-    # Use the global Gemini model configured in settings (GEMINI_MODEL) for both standard and live calls.
-    # This ensures interview coaching uses the same model as other agents unless overridden via env vars.
-    DEFAULT_MODEL = settings.GEMINI_MODEL
+    # Use the interview-specific model configured in settings (INTERVIEW_COACH_MODEL) to manage rate limits.
+    # This allows the interview agent to use a different model than other agents.
+    DEFAULT_MODEL = settings.INTERVIEW_COACH_MODEL
 
     def __init__(self, gemini_service):
         """Initialize Interview Coach Agent.
