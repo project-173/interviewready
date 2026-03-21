@@ -40,7 +40,7 @@ InterviewReady transforms your resume into a powerful career tool through specia
 
 ### Local Development
 ```bash
-docker-compose up --build
+docker-compose up --build --build-arg VITE_API_BASE_URL=localhost:8080
 ```
 - Frontend: `http://localhost:80`
 - Backend: `http://localhost:8080`

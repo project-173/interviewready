@@ -29,7 +29,7 @@ The frontend follows a service-oriented architecture with clear separation of co
 ### Prerequisites
 
 - Node.js 18+
-- Backend server running on port 8080
+- Backend server running on port 8000
 
 ### Installation
 
@@ -45,18 +45,18 @@ cp .env.example .env
 
 3. Update `.env` with your backend URL:
 ```
-VITE_API_BASE_URL=http://localhost:8080
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
 ### Running the Application
 
-1. Ensure the backend is running on port 8080
+1. Ensure the backend is running on port 8000
 2. Start the development server:
 ```bash
 npm run dev
 ```
 
-The application will be available at `http://localhost:5173`
+The application will be available at `http://localhost:3000`
 
 ## Core Features
 
@@ -190,15 +190,15 @@ describe('Component/Service Name', () => {
 
 ## Environment Variables
 
-- `VITE_API_BASE_URL`: Backend API URL (default: `http://localhost:8080`)
+- `VITE_API_BASE_URL`: Backend API URL (default: `http://localhost:8000`)
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **CORS Errors**: Ensure backend allows frontend origin (localhost:5173)
+1. **CORS Errors**: Ensure backend allows frontend origin (localhost:3000)
 2. **Authentication Errors**: Verify backend authentication configuration
-3. **Backend Unavailable**: Check if backend is running on port 8080
+3. **Backend Unavailable**: Check if backend is running on port 8000
 4. **API Timeouts**: Verify backend performance and network connectivity
 
 ### Development Tips

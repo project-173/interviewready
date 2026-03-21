@@ -137,7 +137,6 @@ Output format:
     @observe(name="extractor_process", as_type="agent")
     def process(self, input_text: str, context: SessionContext) -> AgentResponse:
         session_id = getattr(context, "session_id", "unknown")
-        agent_name = self.get_name()
         start_time = time.time()
 
         logger.debug(
@@ -147,19 +146,6 @@ Output format:
         )
 
         try:
-            raw_result = (
-                self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
-                if self.USE_MOCK_RESPONSE
-                else None
-            )
-
-            if self.USE_MOCK_RESPONSE and raw_result is None:
-                logger.warning(
-                    "Mock enabled but response key not found",
-                    session_id=session_id,
-                    mock_response_key=self.MOCK_RESPONSE_KEY,
-                )
-
             payload = self._parse_payload(input_text)
             file_type = str(payload.get("fileType", "")).lower()
             if file_type != "pdf":
@@ -175,9 +161,11 @@ Output format:
             if not extracted_text:
                 raise ValueError("Failed to extract text from resume PDF payload")
 
-            resume = self._extract_resume_with_llm(
-                extracted_text, extracted_text, context
-            )
+            if self.USE_MOCK_RESPONSE:
+                resume = self._generate_mock_response(context)
+            else:
+                resume = self._generate_llm_response(extracted_text, context)
+
             resume_document = ResumeDocument(
                 source="resumeFile",
                 raw_text=extracted_text,
@@ -196,12 +184,14 @@ Output format:
             ]
             elapsed_ms = round((time.time() - start_time) * 1000, 2)
             logger.debug(
-                "ExtractorAgent completed LLM-based extraction",
+                "ExtractorAgent completed extraction",
                 session_id=session_id,
                 extracted_text_length=len(extracted_text),
                 processing_time_ms=elapsed_ms,
+                mock=self.USE_MOCK_RESPONSE,
             )
-            response = AgentResponse(
+
+            return AgentResponse(
                 agent_name=self.get_name(),
                 content=json.dumps(resume.model_dump(), indent=2),
                 reasoning="Extracted and structured resume data using LLM.",
@@ -210,18 +200,9 @@ Output format:
                 sharp_metadata=metadata,
             )
 
-            logger.debug(
-                "ExtractorAgent response created",
-                session_id=session_id,
-                confidence_score=self.CONFIDENCE_SCORE,
-                analysis_type="resume_extraction",
-            )
-
-            return response
-
         except Exception as e:
             elapsed_ms = round((time.time() - start_time) * 1000, 2)
-            logger.log_agent_error(agent_name, e, session_id)
+            logger.log_agent_error(self.get_name(), e, session_id)
             logger.error(
                 "ExtractorAgent processing failed",
                 session_id=session_id,
@@ -230,6 +211,52 @@ Output format:
                 error_message=str(e),
             )
             raise
+
+    def _generate_mock_response(self, context: SessionContext) -> Resume:
+        """Return a Resume built from the pre-configured mock response."""
+        session_id = getattr(context, "session_id", "unknown")
+
+        raw_result = self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
+        if raw_result is None:
+            logger.warning(
+                "Mock enabled but response key not found, returning empty Resume",
+                session_id=session_id,
+                mock_response_key=self.MOCK_RESPONSE_KEY,
+            )
+            return Resume()
+
+        parsed_result = parse_json_object(raw_result)
+        if not parsed_result:
+            raise ValueError(
+                f"Failed to parse valid JSON from mock response: {raw_result[:200]}..."
+            )
+
+        return Resume.model_validate(parsed_result)
+
+    def _generate_llm_response(
+        self, text: str, context: SessionContext
+    ) -> Resume:
+        """Use LLM to extract structured resume data from text."""
+        user_input = (
+            "Extract structured information from the following resume text:\n\n"
+            f"{text}\n\n"
+            "Return the result as valid JSON following the specified format."
+        )
+
+        raw_result = self.call_gemini(user_input, context)
+
+        if not raw_result or not raw_result.strip():
+            raise ValueError("Empty response received from Gemini API")
+
+        parsed_result = parse_json_object(raw_result)
+        if not parsed_result:
+            raise ValueError(
+                f"Failed to parse valid JSON from Gemini response: {raw_result[:200]}..."
+            )
+
+        validated_result = Resume.model_validate(parsed_result)
+        self._validate_data(validated_result, text)
+        return validated_result
 
     @staticmethod
     def _parse_payload(input_text: str) -> dict[str, Any]:
@@ -242,35 +269,6 @@ Output format:
         if not isinstance(payload, dict):
             raise ValueError("ExtractorAgent payload must be a JSON object")
         return payload
-
-    def _extract_resume_with_llm(
-        self, text: str, source_text: str, context: SessionContext
-    ) -> Resume:
-        """Use LLM to extract structured resume data from text."""
-
-        user_input = f"Extract structured information from the following resume text:\n\n{text}\n\nReturn the result as valid JSON following the specified format."
-
-        try:
-            raw_result = self.call_gemini(user_input, context)
-
-            if not raw_result or not raw_result.strip():
-                raise ValueError("Empty response received from Gemini API")
-
-            parsed_result = parse_json_object(raw_result)
-
-            if not parsed_result:
-                raise ValueError(
-                    f"Failed to parse valid JSON from Gemini response: {raw_result[:200]}..."
-                )
-
-            validated_result = Resume.model_validate(parsed_result)
-            self._validate_data(validated_result, source_text)
-            return validated_result
-
-        except Exception as e:
-            logger.error(f"LLM extraction failed: {e}")
-
-            return Resume()
 
     def _validate_data(self, resume: Resume, source_text: str) -> None:
         """Validate URLs and dates in resume data."""
@@ -331,4 +329,6 @@ Output format:
         for attr_name in ["startDate", "endDate", "date"]:
             attr_value = getattr(item, attr_name, None)
             if attr_value is not None and not is_valid_date(attr_value):
-                invalid_dates.append(f"{field}.{item_name}: {attr_name}='{attr_value}'")
+                invalid_dates.append(
+                    f"{field}.{item_name}: {attr_name}='{attr_value}'"
+                )

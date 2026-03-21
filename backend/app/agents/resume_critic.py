@@ -36,28 +36,10 @@ RULES:
 
 RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 {
-  "resume_data": {
-    "title": "resume title",
-    "summary": "professional summary",
-    "contact": {
-      "fullName": "full name",
-      "email": "email address",
-      "phone": "phone number"
-    },
-    "skills": ["skill 1", "skill 2", "skill 3"],
-    "experiences": [
-      {"title": "job title", "company": "company name", "start_date": "YYYY-MM", "end_date": "YYYY-MM", "description": "accomplishments"}
-    ],
-    "educations": [
-      {"school": "school name", "degree": "degree type", "start_date": "YYYY-MM", "end_date": "YYYY-MM"}
-    ]
-  },
-  "critique": {
     "score": 75,
     "readability": "assessment of resume readability",
     "formattingRecommendations": ["recommendation 1", "recommendation 2", "recommendation 3"],
     "suggestions": ["actionable suggestion 1", "actionable suggestion 2", "actionable suggestion 3"]
-  }
 }
 """
     + ANTI_JAILBREAK_DIRECTIVE
