@@ -28,6 +28,10 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000", 
         "http://localhost:5173", 
         "http://127.0.0.1:5173",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "http://localhost:3002",
+        "http://127.0.0.1:3002",
         "https://interviewready-frontend-266623940622.asia-southeast1.run.app",
         "https://interviewready-backend-266623940622.asia-southeast1.run.app",
         "https://interviewready-backend-bnlvcku7xq-as.a.run.app",
@@ -48,6 +52,9 @@ class Settings(BaseSettings):
     # Langfuse
     LANGFUSE_PUBLIC_KEY: Optional[str] = None
     LANGFUSE_SECRET_KEY: Optional[str] = None
+    
+    # Security
+    LLM_GUARD_ENABLED: bool = True
     LANGFUSE_HOST: Optional[str] = "https://cloud.langfuse.com"
 
     # Mock agent response

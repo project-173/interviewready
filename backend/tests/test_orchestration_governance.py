@@ -139,3 +139,36 @@ def test_orchestration_routes_alignment_intent() -> None:
     artifacts = (context.shared_memory or {}).get("artifacts")
     assert isinstance(artifacts, list)
     assert artifacts and artifacts[0].get("agent") == "JobAlignmentAgent"
+
+
+def test_orchestration_interview_coach_reads_from_other_agents() -> None:
+    governance = SharpGovernanceService()
+    resume_agent = StubAgent("ResumeCriticAgent")
+    content_agent = StubAgent("ContentStrengthAgent")
+    job_agent = StubAgent("JobAlignmentAgent")
+    interview_agent = StubAgent("InterviewCoachAgent")
+    orchestrator = OrchestrationAgent(
+        [resume_agent, content_agent, job_agent, interview_agent],
+        governance=governance,
+    )
+
+    context = SessionContext(session_id="s3", user_id="u3")
+    request = ChatRequest(
+        intent="INTERVIEW_COACH",
+        resumeData={"work": ["Engineering"]},
+        jobDescription="Urgent backend role",
+        messageHistory=[{"role": "user", "text": "Tell me interview tips"}],
+    )
+
+    result = orchestrator.orchestrate(request, context)
+
+    assert result.agent_name == "InterviewCoachAgent"
+    assert resume_agent.inputs
+    assert content_agent.inputs
+    assert job_agent.inputs
+    assert interview_agent.inputs
+
+    shared_memory = context.shared_memory or {}
+    assert shared_memory.get("resumecritic") == "ResumeCriticAgent processed: Resume data: {\n  \"work\": [\"Engineering\"]\n}"
+    assert shared_memory.get("contentstrength") == "ContentStrengthAgent processed: Resume data: {\n  \"work\": [\"Engineering\"]\n}"
+    assert shared_memory.get("jobalignment") == "JobAlignmentAgent processed: Resume data: {\n  \"work\": [\"Engineering\"]\n}\nJob Description: Urgent backend role"

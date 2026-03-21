@@ -53,7 +53,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         + ANTI_JAILBREAK_DIRECTIVE
     )
     CONFIDENCE_SCORE = 0.85
-    DEFAULT_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
+    DEFAULT_MODEL = "gemini-2.0-flash-exp"
 
     def __init__(self, gemini_service):
         """Initialize Interview Coach Agent.
@@ -374,7 +374,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             )
 
             live_start_time = time.time()
-            raw = self.gemini_live_service.send_textAndWaitResponse(input_text, 10000)
+            raw = self.gemini_live_service.send_textAndWaitResponse(input_text, self.system_prompt, 10000)
             live_execution_time = time.time() - live_start_time
 
             if not raw or raw.strip() == "":

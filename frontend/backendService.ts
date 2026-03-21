@@ -194,9 +194,25 @@ class BackendService {
       jobDescription: JSON.stringify(alignment),
       messageHistory: history
     };
-    
+
     const response = await this.callChatEndpoint(request);
-    return (response.payload && typeof response.payload === 'string' ? response.payload : response.content) || "I'm sorry, I couldn't generate a response.";
+
+    const payload = response.payload ?? response.content;
+
+    if (payload === undefined || payload === null) {
+      return "I'm sorry, I couldn't generate a response.";
+    }
+
+    if (typeof payload === 'string') {
+      return payload;
+    }
+
+    // If backend returns structured JSON, show it as string to avoid fallback error.
+    try {
+      return JSON.stringify(payload, null, 2);
+    } catch {
+      return String(payload);
+    }
   }
 }
 

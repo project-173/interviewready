@@ -105,9 +105,17 @@ class OrchestrationAgent:
                 # Extract audio data if present — routed only to INTERVIEW_COACH
                 audio_data: bytes | None = getattr(request, "audioData", None)
 
+                # Persist orchestrator input data for shared context across agent chain
+                context.shared_memory = dict(context.shared_memory or {})
+                context.shared_memory["orchestration"] = {
+                    "resume_data": resume_data,
+                    "job_description": job_description,
+                    "message_history": message_history,
+                }
+
                 # Build input text based on intent and available data
                 input_text = self._build_agent_input(
-                    intent, resume_data, job_description, audio_data
+                    intent, resume_data, job_description, audio_data, context
                 )
 
                 # Log orchestration start
@@ -115,7 +123,7 @@ class OrchestrationAgent:
 
                 try:
                     # Map intent to agent sequence directly
-                    agent_sequence = self._map_intent_to_agents(intent)
+                    agent_sequence = self._map_intent_to_agents(intent, audio_data)
 
                     langfuse.update_current_span(
                         output={"agent_sequence": agent_sequence}
@@ -250,6 +258,14 @@ class OrchestrationAgent:
                     logger.log_agent_error(agent_name, e, session_id)
                     raise
 
+        # Persist agent-level insights to shared memory so subsequent agents can see them.
+        shared_memory = dict(context.shared_memory or {})
+        parsed_payload = parse_json_payload(response.content or "", allow_array=True)
+
+        agent_key = agent_name.lower().replace("agent", "")
+        shared_memory[agent_key] = parsed_payload if parsed_payload is not None else response.content
+        context.shared_memory = shared_memory
+
         trace = list(context.decision_trace or [])
         trace.append(f"Orchestrator: Routed to {agent_name} based on intent analysis.")
         response.decision_trace = trace
@@ -268,6 +284,21 @@ class OrchestrationAgent:
         artifacts = list(state.get("artifacts", []))
         artifacts.append(self._build_artifact(audited_response, agent_name))
         self._store_artifacts_in_context(artifacts, context)
+
+        # If next step is InterviewCoachAgent, enrich the input with saved agent feedback.
+        next_agent = None
+        if current_index + 1 < len(agent_sequence):
+            next_agent = agent_sequence[current_index + 1]
+
+        if next_agent == "InterviewCoachAgent":
+            orchestration = context.shared_memory.get("orchestration", {})
+            current_input = self._build_agent_input(
+                "INTERVIEW_COACH",
+                orchestration.get("resume_data", {}),
+                orchestration.get("job_description", ""),
+                None,
+                context,
+            )
 
         return {
             "original_input": state["original_input"],
@@ -291,6 +322,7 @@ class OrchestrationAgent:
         resume_data: dict,
         job_description: str,
         audio_data: bytes | None = None,
+        context: SessionContext | None = None,
     ) -> str | bytes:
         """Build input for agents: audio bytes for INTERVIEW_COACH, text for all others."""
         if audio_data is not None and intent == "INTERVIEW_COACH":
@@ -305,6 +337,39 @@ class OrchestrationAgent:
 
         if intent == "ALIGNMENT":
             return f"Resume data: {json.dumps(resume_data, indent=2)}\nJob Description: {job_description}"
+
+        if intent == "INTERVIEW_COACH":
+            # Construct an enriched coaching prompt using earlier insights
+            shared = context.shared_memory if context is not None else {}
+            orchestration = shared.get("orchestration", {}) if isinstance(shared, dict) else {}
+
+            resume_context = json.dumps(orchestration.get("resume_data", resume_data), indent=2)
+            message_history = orchestration.get("message_history", [])
+            history_text = "\n".join(
+                f"{item.get('role','user')}: {item.get('text','')}" for item in message_history
+            )
+
+            resume_critic = shared.get("resumecriticagent") or shared.get("resume_critic")
+            content_strength = shared.get("contentstrengthagent") or shared.get("content_strength")
+            alignment = shared.get("jonalignmentagent") or shared.get("job_alignment")
+
+            prompt_parts = [
+                "Interview Coach context for candidate preparation:",
+                f"Resume data:\n{resume_context}",
+                f"Job description:\n{job_description}",
+            ]
+
+            if resume_critic:
+                prompt_parts.append(f"Resume Critic feedback:\n{json.dumps(resume_critic, indent=2) if not isinstance(resume_critic, str) else resume_critic}")
+            if content_strength:
+                prompt_parts.append(f"Content Strength feedback:\n{json.dumps(content_strength, indent=2) if not isinstance(content_strength, str) else content_strength}")
+            if alignment:
+                prompt_parts.append(f"Alignment feedback:\n{json.dumps(alignment, indent=2) if not isinstance(alignment, str) else alignment}")
+            if history_text:
+                prompt_parts.append(f"Conversation history:\n{history_text}")
+
+            prompt_parts.append("Please provide structured coaching advice in the required JSON format.")
+            return "\n\n".join(prompt_parts)
 
         return f"Request data: {json.dumps(resume_data, indent=2)}"
 
@@ -543,13 +608,26 @@ class OrchestrationAgent:
             return None
         return resume if OrchestrationAgent._has_resume_content(resume) else None
 
-    def _map_intent_to_agents(self, intent: str) -> list[str]:
-        """Map intent directly to agent sequence."""
+    def _map_intent_to_agents(self, intent: str, audio_data: bytes | None = None) -> list[str]:
+        """Map intent directly to agent sequence.
+
+        For INTERVIEW_COACH, collect upstream insights when audio is absent.
+        """
+        if intent == "INTERVIEW_COACH":
+            if audio_data is not None:
+                return ["InterviewCoachAgent"]
+            # Combine resume critic, content strength, and alignment before coaching.
+            return [
+                "ResumeCriticAgent",
+                "ContentStrengthAgent",
+                "JobAlignmentAgent",
+                "InterviewCoachAgent",
+            ]
+
         intent_mapping = {
             "RESUME_CRITIC": ["ResumeCriticAgent"],
             "CONTENT_STRENGTH": ["ContentStrengthAgent"],
             "ALIGNMENT": ["JobAlignmentAgent"],
-            "INTERVIEW_COACH": ["InterviewCoachAgent"],
         }
 
         if intent not in intent_mapping:
