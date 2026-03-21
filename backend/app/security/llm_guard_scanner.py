@@ -10,46 +10,43 @@ HAS_LLM_GUARD = False
 HAS_SPACY = False
 _vault = None
 
-
 def _ensure_spacy_models() -> bool:
     """Try to install missing spaCy models. Returns True if successful."""
-    models = ["en_core_web_sm"]  # Only English model needed for resume/interview app
-
-    for model in models:
-        try:
-            import spacy
-
-            spacy.load(model)
-            logger.info(f"SpaCy model already installed: {model}")
-            continue
-        except Exception:
-            pass
-
-        try:
-            logger.info(f"Installing spaCy model: {model}...")
-            result = subprocess.run(
-                [sys.executable, "-m", "spacy", "download", model],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            if result.returncode == 0:
-                logger.info(f"Successfully installed spaCy model: {model}")
-            else:
-                logger.warning(
-                    f"Failed to install {model}: {result.stderr[:200] if result.stderr else 'Unknown error'}"
-                )
-        except Exception as e:
-            logger.warning(f"Could not install {model}: {e}")
+    model = "en_core_web_sm"
 
     try:
         import spacy
+        spacy.load(model)
+        logger.info(f"SpaCy model already installed: {model}")
+        return True
+    except Exception:
+        pass
 
-        spacy.load("en_core_web_sm")
+    try:
+        logger.info(f"Installing spaCy model: {model}...")
+        result = subprocess.run(
+            [sys.executable, "-m", "spacy", "download", model],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode == 0:
+            logger.info(f"Successfully installed spaCy model: {model}")
+        else:
+            logger.warning(
+                f"Failed to install {model}: {result.stderr[:200] if result.stderr else 'Unknown error'}"
+            )
+            return False
+    except Exception as e:
+        logger.warning(f"Could not install {model}: {e}")
+        return False
+
+    try:
+        import spacy
+        spacy.load(model)
         return True
     except Exception:
         return False
-
 
 try:
     from llm_guard.input_scanners import PromptInjection, Anonymize
@@ -83,9 +80,8 @@ except ImportError:
     HAS_LLM_GUARD = False
     HAS_SPACY = False
 
-
 def get_vault() -> Optional["LLMGuardVault"]:
-    """Get or create the Vault instance for Anonymize scanner."""
+    """Get or create the Vault instance for Anonymize scanner (singleton)."""
     global _vault
     if _vault is None and HAS_LLM_GUARD:
         try:
@@ -95,175 +91,163 @@ def get_vault() -> Optional["LLMGuardVault"]:
             _vault = None
     return _vault
 
-
 class LLMGuardScanner:
-    """Scanner for detecting prompt injection and sensitive content."""
+    """Scanner for detecting prompt injection and sensitive content.
+
+    Scanners are instantiated ONCE in __init__ and reused across all calls.
+    Previously, scanners were created inside scan_input/scan_output on every
+    request, which re-loaded the underlying transformer models each time and
+    caused memory to balloon well past 2 GB.
+    """
 
     def __init__(self):
         self.enabled = getattr(settings, "LLM_GUARD_ENABLED", True) and HAS_LLM_GUARD
+
+        self._prompt_injection: Optional["PromptInjection"] = None
+        self._anonymizer: Optional["Anonymize"] = None
+        self._no_refusal: Optional["NoRefusal"] = None
+        self._sensitive: Optional["Sensitive"] = None
+
         if not HAS_LLM_GUARD:
             logger.warning("LLM Guard not installed. Security scanning disabled.")
-        elif not self.enabled:
+            return
+
+        if not self.enabled:
             logger.info("LLM Guard disabled via configuration.")
+            return
+
+        logger.info("LLM Guard initialising scanners (loaded once at startup)...")
+
+        try:
+            self._prompt_injection = PromptInjection()
+            logger.info("PromptInjection scanner loaded.")
+        except Exception as e:
+            logger.error(f"Failed to load PromptInjection scanner: {e}")
+
+        try:
+            self._no_refusal = NoRefusal()
+            logger.info("NoRefusal scanner loaded.")
+        except Exception as e:
+            logger.warning(f"Failed to load NoRefusal scanner: {e}")
+
+        if HAS_SPACY:
+            vault = get_vault()
+            if vault:
+                try:
+                    self._anonymizer = Anonymize(vault=vault, language="en")
+                    logger.info("Anonymize scanner loaded.")
+                except Exception as e:
+                    logger.warning(f"Failed to load Anonymize scanner: {e}")
+
+            try:
+                self._sensitive = Sensitive()
+                logger.info("Sensitive scanner loaded.")
+            except Exception as e:
+                logger.warning(f"Failed to load Sensitive scanner: {e}")
         else:
-            logger.info("LLM Guard initialized for input/output scanning.")
-            if HAS_SPACY:
-                logger.info("SpaCy loaded - Anonymize and Sensitive scanners ACTIVE.")
-            else:
-                logger.warning(
-                    "SpaCy not available - Anonymize and Sensitive scanners DISABLED."
-                )
+            logger.warning("SpaCy not available — Anonymize and Sensitive scanners disabled.")
+
+        logger.info("LLM Guard scanner initialisation complete.")
 
     def scan_input(self, prompt: str) -> Tuple[bool, str, List[Dict[str, Any]]]:
         """Scan user input for prompt injection and PII.
 
-        Args:
-            prompt: User input to scan
-
         Returns:
-            Tuple of (is_safe, sanitized_prompt, list of issues)
+            (is_safe, sanitized_prompt, list_of_issues)
         """
-        global HAS_SPACY
         if not self.enabled:
             return True, prompt, [{"note": "scanner_disabled"}]
 
-        issues = []
+        issues: List[Dict[str, Any]] = []
         sanitized = prompt
 
-        try:
-            scanner = PromptInjection()
-            sanitized, is_valid, risk_score = scanner.scan(sanitized)
+        if self._prompt_injection is not None:
+            try:
+                sanitized, is_valid, risk_score = self._prompt_injection.scan(sanitized)
+                if not is_valid:
+                    issue = {
+                        "scanner": "PromptInjection",
+                        "risk_score": risk_score,
+                        "reason": "Potential prompt injection detected",
+                    }
+                    logger.security_event(
+                        "prompt_injection_detected", risk_score=risk_score, issue=issue
+                    )
+                    return False, sanitized, [issue]
+            except Exception as e:
+                logger.error(f"PromptInjection scan error: {e}")
 
-            if not is_valid:
-                issue = {
-                    "scanner": "PromptInjection",
-                    "risk_score": risk_score,
-                    "reason": "Potential prompt injection detected",
-                }
-                logger.security_event(
-                    "prompt_injection_detected", risk_score=risk_score, issue=issue
-                )
-                return False, sanitized, [issue]
+        if self._anonymizer is not None:
+            try:
+                sanitized, is_valid, risk_score = self._anonymizer.scan(sanitized)
+                if not is_valid:
+                    issues.append({
+                        "scanner": "Anonymize",
+                        "risk_score": risk_score,
+                        "reason": "PII detected in input",
+                    })
+            except Exception as e:
+                logger.warning(f"Anonymize scan error (skipping): {e}")
 
-            if HAS_SPACY:
-                try:
-                    vault = get_vault()
-                    if vault:
-                        anonymizer = Anonymize(vault=vault, language="en")
-                        sanitized, is_valid, risk_score = anonymizer.scan(sanitized)
-                        if not is_valid:
-                            issue = {
-                                "scanner": "Anonymize",
-                                "risk_score": risk_score,
-                                "reason": "PII detected in input",
-                            }
-                            issues.append(issue)
-                except Exception as e:
-                    if (
-                        "spacy" in str(e).lower()
-                        or "zh_core" in str(e).lower()
-                        or "download" in str(e).lower()
-                    ):
-                        logger.warning(
-                            f"SpaCy Anonymize scanner failed, disabling spaCy scanners: {e}"
-                        )
-                        HAS_SPACY = False
-                    else:
-                        raise
-
-            return True, sanitized, issues
-
-        except Exception as e:
-            logger.error(f"LLM Guard input scan failed: {e}")
-            return True, prompt, []
+        return True, sanitized, issues
 
     def scan_output(self, output: str) -> Tuple[bool, str, List[Dict[str, Any]]]:
-        """Scan model output for sensitive information and refusals.
-
-        Args:
-            output: Model output to scan
+        """Scan model output for refusals and sensitive information.
 
         Returns:
-            Tuple of (is_safe, sanitized_output, list of issues)
+            (is_safe, sanitized_output, list_of_issues)
         """
-        global HAS_SPACY
         if not self.enabled:
             return True, output, [{"note": "scanner_disabled"}]
 
-        issues = []
+        issues: List[Dict[str, Any]] = []
         sanitized = output
 
-        try:
-            refusal_scanner = NoRefusal()
-            sanitized, is_valid, risk_score = refusal_scanner.scan("", sanitized)
-            if not is_valid:
-                issues.append(
-                    {
+        if self._no_refusal is not None:
+            try:
+                sanitized, is_valid, risk_score = self._no_refusal.scan("", sanitized)
+                if not is_valid:
+                    issues.append({
                         "scanner": "NoRefusal",
                         "risk_score": risk_score,
                         "reason": "Refusal detected",
-                    }
-                )
+                    })
+            except Exception as e:
+                logger.warning(f"NoRefusal scan error (skipping): {e}")
 
-            if HAS_SPACY:
-                try:
-                    sensitive_scanner = Sensitive()
-                    sanitized, is_valid, risk_score = sensitive_scanner.scan(
-                        "", sanitized
-                    )
-                    if not is_valid:
-                        issues.append(
-                            {
-                                "scanner": "Sensitive",
-                                "risk_score": risk_score,
-                                "reason": "Sensitive content detected",
-                            }
-                        )
-                except Exception as e:
-                    if (
-                        "spacy" in str(e).lower()
-                        or "zh_core" in str(e).lower()
-                        or "download" in str(e).lower()
-                    ):
-                        logger.warning(
-                            f"SpaCy Sensitive scanner failed, disabling spaCy scanners: {e}"
-                        )
-                        HAS_SPACY = False
-                    else:
-                        raise
+        if self._sensitive is not None:
+            try:
+                sanitized, is_valid, risk_score = self._sensitive.scan("", sanitized)
+                if not is_valid:
+                    issues.append({
+                        "scanner": "Sensitive",
+                        "risk_score": risk_score,
+                        "reason": "Sensitive content detected",
+                    })
+            except Exception as e:
+                logger.warning(f"Sensitive scan error (skipping): {e}")
 
-            if issues:
-                logger.security_event(
-                    "output_sensitive_detected", risk_count=len(issues), issues=issues
-                )
-                return False, sanitized, issues
+        if issues:
+            logger.security_event(
+                "output_sensitive_detected", risk_count=len(issues), issues=issues
+            )
+            return False, sanitized, issues
 
-            return True, sanitized, []
-
-        except Exception as e:
-            logger.error(f"LLM Guard output scan failed: {e}")
-            return True, output, []
+        return True, sanitized, []
 
     def scan_both(
         self, input_text: str, output_text: str
     ) -> Tuple[bool, bool, List[Dict[str, Any]]]:
         """Scan both input and output.
 
-        Args:
-            input_text: User input
-            output_text: Model output
-
         Returns:
-            Tuple of (input_safe, output_safe, all_issues)
+            (input_safe, output_safe, all_issues)
         """
         input_safe, _, input_issues = self.scan_input(input_text)
         output_safe, _, output_issues = self.scan_output(output_text)
-
         return input_safe, output_safe, input_issues + output_issues
 
-
 _llm_guard_scanner: Optional[LLMGuardScanner] = None
-
 
 def get_llm_guard_scanner() -> LLMGuardScanner:
     """Get or create the global LLM Guard scanner instance."""

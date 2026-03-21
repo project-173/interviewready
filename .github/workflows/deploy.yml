@@ -7,7 +7,7 @@ on:
       - langfuse
       - security
       - main
-      - python-convert
+      - 38-503-when-hitting-backend-api
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
