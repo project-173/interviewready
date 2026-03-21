@@ -153,7 +153,6 @@ jobs:
           env_vars: |
             APP_ENV=staging
             FIREBASE_ENABLED=False
-            AUTH_ENABLED=False
             FRONTEND_URL=${{ steps.frontend-url.outputs.url }}
             BACKEND_URL=https://interviewready-backend-266623940622.asia-southeast1.run.app
             GOOGLE_AI_API_KEY=${{ secrets.GOOGLE_AI_API_KEY }}

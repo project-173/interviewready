@@ -16,7 +16,7 @@ async def get_session_resume(
     session_id: Annotated[str, Path()],
 ) -> Resume:
     """Return parsed resume JSON currently persisted for a session."""
-    user_id = settings.AUTH_DISABLED_USER_ID
+    user_id = "dev-user"
 
     try:
         context = get_session_context(session_id=session_id, user_id=user_id)

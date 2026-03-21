@@ -14,7 +14,6 @@ This project is configured to deploy to **Google Cloud Run** via **GitHub Action
 4.  **GitHub Secrets**: The following secrets must be added to your GitHub repository:
     - `GCP_PROJECT_ID`: Your GCP Project ID.
     - `GCP_SA_KEY`: The JSON key of your service account.
-    - `FIREBASE_PROJECT_ID`: Your Firebase Project ID.
     - `GOOGLE_AI_API_KEY`: Your Gemini/Google AI API Key.
     - `LANGFUSE_PUBLIC_KEY`: (Optional) Langfuse Public Key.
     - `LANGFUSE_SECRET_KEY`: (Optional) Langfuse Secret Key.

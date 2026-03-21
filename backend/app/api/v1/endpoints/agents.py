@@ -1,30 +1,28 @@
 """Agents endpoint for listing available agent prompts."""
 
-from fastapi import APIRouter, HTTPException, Query, status
-from langfuse import get_client, observe, propagate_attributes
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from langfuse import Langfuse, observe, propagate_attributes
 
 from app.api.v1.services import get_orchestration_agent
-from app.core.auth import get_current_user
-from langfuse import Langfuse, observe, propagate_attributes
 
 langfuse = Langfuse()
 
 router = APIRouter()
 
-@router.get("", response_model=dict[str, str])
+SessionId = Annotated[str | None, Query(None, alias="sessionId")]
+OrchestrationAgent = Annotated[object, Depends(get_orchestration_agent)]
+
+@router.get("")
 @observe(name="list_agents")
 async def list_agents(
-    session_id: str | None = Query(None, alias="sessionId"),
+    session_id: SessionId,
+    orchestrator: OrchestrationAgent,
 ) -> dict[str, str]:
     """Return available agents mapped to their current system prompts."""
 
-    user_id = str(
-        current_user.get("uid")
-        or current_user.get("user_id")
-        or current_user.get("sub")
-        or ""
-    )
-
+    user_id = "user-id"
     effective_session_id = session_id or user_id
 
     with langfuse.start_as_current_observation(
@@ -36,16 +34,14 @@ async def list_agents(
         },
     ) as trace:
         with propagate_attributes(user_id=user_id, session_id=effective_session_id):
-            try:
-                orchestrator = get_orchestration_agent()
-            except Exception as exc:
+            if orchestrator is None:
                 trace.update(
-                    output={"error": "orchestrator_unavailable", "reason": str(exc)}
+                    output={"error": "orchestrator_unavailable"}
                 )
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=f"Orchestration service unavailable: {exc}",
-                ) from exc
+                    detail="Orchestration service unavailable",
+                )
 
         result = {
             name: agent.get_system_prompt()

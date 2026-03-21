@@ -119,7 +119,7 @@ async def app_info():
     return {
         "name": settings.APP_NAME,
         "version": settings.VERSION,
-        "debug": settings.DEBUG,
+        "log_level": settings.LOG_LEVEL,
         "environment": settings.APP_ENV,
     }
 
