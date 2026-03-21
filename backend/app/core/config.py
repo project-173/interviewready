@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     MOCK_CONTENT_STRENGTH_AGENT: bool = False
     MOCK_JOB_ALIGNMENT_AGENT: bool = False
     MOCK_INTERVIEW_COACH_AGENT: bool = False
+
+    # LLM Guard
+    LLM_GUARD_ENABLED: bool = False
+
     
     class Config:
         env_file = ".env"
