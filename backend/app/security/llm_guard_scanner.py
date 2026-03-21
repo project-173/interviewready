@@ -134,7 +134,7 @@ class LLMGuardScanner:
             vault = get_vault()
             if vault:
                 try:
-                    self._anonymizer = Anonymize(vault=vault, language="en")
+                    self._anonymizer = Anonymize(vault=vault, language="en", entity_types=["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"])
                     logger.info("Anonymize scanner loaded.")
                 except Exception as e:
                     logger.warning(f"Failed to load Anonymize scanner: {e}")
