@@ -6,6 +6,8 @@ on:
       - CICD
       - langfuse
       - security
+      - main
+      - python-convert
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
