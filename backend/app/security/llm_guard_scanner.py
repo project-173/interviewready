@@ -83,6 +83,9 @@ except ImportError:
     HAS_LLM_GUARD = False
     HAS_SPACY = False
 
+# Force disable spacy-dependent scanners for RAM optimization
+HAS_SPACY = False
+
 
 def get_vault() -> Optional["LLMGuardVault"]:
     """Get or create the Vault instance for Anonymize scanner."""

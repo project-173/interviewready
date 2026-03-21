@@ -147,7 +147,7 @@ jobs:
           service: ${{ env.BACKEND_SERVICE_NAME }}
           region: ${{ env.REGION }}
           image: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.BACKEND_SERVICE_NAME }}:${{ github.sha }}
-          flags: --memory=2048Mi
+          flags: --memory=4096Mi
           env_vars: |
             APP_ENV=staging
             FIREBASE_ENABLED=False
