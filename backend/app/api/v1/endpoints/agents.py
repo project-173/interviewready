@@ -11,14 +11,14 @@ langfuse = Langfuse()
 
 router = APIRouter()
 
-SessionId = Annotated[str | None, Query(None, alias="sessionId")]
+SessionId = Annotated[str | None, Query(alias="sessionId")]
 OrchestrationAgent = Annotated[object, Depends(get_orchestration_agent)]
 
 @router.get("")
 @observe(name="list_agents")
 async def list_agents(
-    session_id: SessionId,
     orchestrator: OrchestrationAgent,
+    session_id: SessionId = None,
 ) -> dict[str, str]:
     """Return available agents mapped to their current system prompts."""
 
