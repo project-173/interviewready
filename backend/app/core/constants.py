@@ -21,6 +21,8 @@ INPUT_DELIMITERS = """
 """
 
 RESUME_SCHEMA = """
+## RESUME SCHEMA
+- The resume data you receive is a JSON object that may include the following fields:
 {
   "work": [{
     "name": "Company",

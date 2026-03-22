@@ -3,16 +3,15 @@
 import json
 import time
 from typing import Dict, Any
+
 from langfuse import observe
+
 from .base import BaseAgent
-from langfuse import observe
 from ..core.logging import logger
 from ..core.config import settings
-from ..core.constants import ANTI_JAILBREAK_DIRECTIVE
-from ..models.agent import AgentResponse, StructuralAssessment
+from ..core.constants import ANTI_JAILBREAK_DIRECTIVE, RESUME_SCHEMA
+from ..models.agent import AgentResponse, StructuralAssessment, AgentInput
 from ..models.session import SessionContext
-from ..utils.json_parser import parse_json_object
-from ..models.agent import AgentInput
 
 class ResumeCriticAgent(BaseAgent):
     """Agent for analyzing resume structure, ATS compatibility, and impact."""
@@ -43,6 +42,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
     "suggestions": ["actionable suggestion 1", "actionable suggestion 2", "actionable suggestion 3"]
 }
 """
+    + RESUME_SCHEMA
     + ANTI_JAILBREAK_DIRECTIVE
 )
     CONFIDENCE_SCORE = 0.9
@@ -61,17 +61,20 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
     
     @observe(name="resume_critic_process", as_type="agent")
     def process(
-        self, input_data: AgentInput | str | bytes, context: SessionContext
+        self, input_data: AgentInput, context: SessionContext
     ) -> AgentResponse:
         """Process resume text and provide critique.
 
         Args:
-            input_data: Structured agent input or raw text to analyze
+            input_data: Structured agent input
             context: Session context
 
         Returns:
             Agent response with critique and analysis
         """
+        if not isinstance(input_data, AgentInput):
+            raise TypeError("ResumeCriticAgent expects AgentInput.")
+
         session_id = getattr(context, "session_id", "unknown")
         agent_name = self.get_name()
         processing_start_time = time.time()
@@ -183,17 +186,11 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         return {}
 
     @staticmethod
-    def _build_prompt(input_data: AgentInput | str | bytes) -> str:
-        if isinstance(input_data, AgentInput):
-            resume_data = (
-                input_data.resume.model_dump(exclude_none=True)
-                if input_data.resume is not None
-                else {}
-            )
-            return f"Resume data: {json.dumps(resume_data, indent=2)}"
-        if isinstance(input_data, bytes):
-            return input_data.decode("utf-8", errors="ignore")
-        return input_data
+    def _build_prompt(input_data: AgentInput) -> str:
+        resume_data: Dict[str, Any] = {}
+        if input_data.resume is not None:
+            resume_data = input_data.resume.model_dump(exclude_none=True)
+        return f"Resume data: {json.dumps(resume_data, indent=2)}"
 
     def _normalize_structural_assessment(
         self, parsed: Dict[str, Any]

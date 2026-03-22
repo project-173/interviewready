@@ -9,6 +9,7 @@ from app.agents import (
     InterviewCoachAgent,
     GeminiService
 )
+from app.models import AgentInput, Resume, Work
 from app.models.session import SessionContext
 
 # Load environment variables
@@ -74,6 +75,28 @@ def test_agents():
         resume_data=sample_resume,
         job_description=sample_job_description
     )
+
+    resume = Resume(
+        work=[
+            Work(
+                name="Tech Corp",
+                position="Senior Software Engineer",
+                summary=sample_resume.strip(),
+                highlights=[
+                    "Led team of 5 developers",
+                    "Improved system performance by 30%",
+                    "Implemented microservices architecture",
+                ],
+            )
+        ]
+    )
+
+    intent_map = {
+        "ResumeCriticAgent": "RESUME_CRITIC",
+        "ContentStrengthAgent": "CONTENT_STRENGTH",
+        "JobAlignmentAgent": "ALIGNMENT",
+        "InterviewCoachAgent": "INTERVIEW_COACH",
+    }
     
     # Test each agent
     print("Testing Agent Implementations")
@@ -84,13 +107,14 @@ def test_agents():
         print("-" * 30)
         
         try:
-            # Use appropriate input for each agent
-            if agent_name == "JobAlignmentAgent":
-                input_text = sample_resume
-            else:
-                input_text = sample_resume
-            
-            response = agent.process(input_text, context)
+            agent_input = AgentInput(
+                intent=intent_map[agent_name],
+                resume=resume,
+                job_description=sample_job_description,
+                message_history=[],
+            )
+
+            response = agent.process(agent_input, context)
             
             print(f"Agent Name: {response.agent_name}")
             print(f"Confidence Score: {response.confidence_score}")

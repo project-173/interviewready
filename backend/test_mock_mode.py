@@ -12,6 +12,7 @@ from app.agents.content_strength import ContentStrengthAgent
 from app.agents.interview_coach import InterviewCoachAgent
 from app.agents.job_alignment import JobAlignmentAgent
 from app.agents.resume_critic import ResumeCriticAgent
+from app.models import AgentInput, Resume, Work
 from app.models.session import SessionContext
 
 
@@ -72,9 +73,31 @@ def test_agents_with_inline_mock() -> bool:
         ]
 
         context = SessionContext(session_id="test-session", user_id="test-user")
+        resume = Resume(
+            work=[
+                Work(
+                    name="Sample Company",
+                    position="Sample Role",
+                    summary="Sample resume text for testing",
+                    highlights=["Improved performance", "Delivered features"],
+                )
+            ]
+        )
+        intent_map = {
+            "ResumeCriticAgent": "RESUME_CRITIC",
+            "ContentStrengthAgent": "CONTENT_STRENGTH",
+            "JobAlignmentAgent": "ALIGNMENT",
+            "InterviewCoachAgent": "INTERVIEW_COACH",
+        }
 
         for agent in agents:
-            response = agent.process("Sample resume text for testing", context)
+            agent_input = AgentInput(
+                intent=intent_map[agent.get_name()],
+                resume=resume,
+                job_description="Sample job description for testing",
+                message_history=[],
+            )
+            response = agent.process(agent_input, context)
             if not response.content:
                 raise AssertionError(f"{agent.get_name()} returned empty content")
             print(f"PASS {agent.get_name()} | confidence={response.confidence_score}")

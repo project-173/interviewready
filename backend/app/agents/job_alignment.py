@@ -3,18 +3,15 @@
 import json
 import time
 from typing import List, Dict, Any
+
 from langfuse import observe
 
 from .base import BaseAgent
-from langfuse import observe
 from ..core.logging import logger
 from ..core.config import settings
-from ..models.agent import AgentResponse, AlignmentReport
+from ..models.agent import AgentResponse, AlignmentReport, AgentInput
 from ..models.session import SessionContext
 from ..utils.json_parser import parse_json_object
-from ..models.agent import AgentInput
-
-
 from ..core.constants import ANTI_JAILBREAK_DIRECTIVE
 
 
@@ -94,17 +91,20 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 
     @observe(name="job_alignment_process", as_type="agent")
     def process(
-        self, input_data: AgentInput | str | bytes, context: SessionContext
+        self, input_data: AgentInput, context: SessionContext
     ) -> AgentResponse:
         """Process resume and job description to evaluate alignment.
 
         Args:
-            input_data: Structured agent input or raw text to analyze
+            input_data: Structured agent input
             context: Session context
 
         Returns:
             Agent response with alignment evaluation
         """
+        if not isinstance(input_data, AgentInput):
+            raise TypeError("JobAlignmentAgent expects AgentInput.")
+
         session_id = getattr(context, "session_id", "unknown")
         agent_name = self.get_name()
         processing_start_time = time.time()
@@ -207,18 +207,15 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             raise
 
     @staticmethod
-    def _build_prompt(input_data: AgentInput | str | bytes) -> str:
-        if isinstance(input_data, AgentInput):
-            resume_data = (
-                input_data.resume.model_dump(exclude_none=True)
-                if input_data.resume is not None
-                else {}
-            )
-            job_description = input_data.job_description or ""
-            return (
-                f"Resume data: {json.dumps(resume_data, indent=2)}\n"
-                f"Job Description: {job_description}"
-            )
-        if isinstance(input_data, bytes):
-            return input_data.decode("utf-8", errors="ignore")
-        return input_data
+    def _build_prompt(input_data: AgentInput) -> str:
+        resume_data: Dict[str, Any] = {}
+        if input_data.resume is not None:
+            resume_data = input_data.resume.model_dump(exclude_none=True)
+        elif input_data.resume_document is not None:
+            resume_data = input_data.resume_document.model_dump(exclude_none=True)
+
+        job_description = input_data.job_description or ""
+        return (
+            f"Resume data: {json.dumps(resume_data, indent=2)}\n"
+            f"Job Description: {job_description}"
+        )

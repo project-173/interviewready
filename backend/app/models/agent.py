@@ -159,7 +159,7 @@ class ContentSkill(BaseModel):
     """Skill evidence extracted from the resume."""
 
     name: str
-    category: Literal["Technical", "Soft", "Domain", "Tool"]
+    category: str
     confidenceScore: float
     evidenceStrength: Literal["HIGH", "MEDIUM", "LOW"]
     evidence: str
