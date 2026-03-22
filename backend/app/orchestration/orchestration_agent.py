@@ -38,9 +38,9 @@ class OrchestrationState:
     input: AgentInput
     context: SessionContext
     agent_sequence: list[str]
+    artifacts: list[AnalysisArtifact]
     index: int = 0
     response: Optional[AgentResponse] = None
-    artifacts: list[AnalysisArtifact] = None
 
 
 # ---------- Orchestrator ----------
