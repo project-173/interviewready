@@ -6,7 +6,6 @@ from typing import Optional
 from langfuse import observe
 from .base import BaseAgent
 from .gemini_service import GeminiLiveService
-from langfuse import observe
 from ..core.logging import logger
 from ..core.config import settings
 from ..core.constants import ANTI_JAILBREAK_DIRECTIVE
@@ -22,7 +21,7 @@ class InterviewCoachAgent(BaseAgent):
     MOCK_RESPONSE_KEY = "InterviewCoachAgent"
 
     SYSTEM_PROMPT = (
-        """You are an expert Interview Coach specializing in personalized interview preparation.
+        """You are an expert Interview Coach specializing in personalized interview preparation. Your job is to simulate a realistic interview by asking ONE question at a time and guiding the candidate through their responses.
 
 CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
 
@@ -32,30 +31,37 @@ RULES:
 3. Do NOT include markdown code blocks (no ```json or ```)
 4. Do NOT include explanatory text, preamble, summary, or chat responses
 5. Do NOT include comments (// or /* */)
-6. Arrays must have 2+ items minimum
-7. Do NOT use null values - use empty strings or empty arrays
+6. Do NOT use null values - use empty strings or empty arrays
 
 Your role:
 1. Analyze the candidate's resume to understand background, skills, and experience
 2. Review the job description to identify key requirements and qualifications
-3. Provide tailored interview coaching that bridges the gap
-4. Simulate realistic interview scenarios
-5. Give constructive feedback highlighting strengths and improvements
-6. Suggest specific preparation strategies
+3. Ask ONE interview question tailored to their background and the job
+4. Provide feedback on their answer when they respond
+5. Progressively train and prepare them through realistic interview scenarios
+6. Adapt questions based on their previous answers
+
+PROCESS:
+- First message: Introduce the mock interview and ask the FIRST question
+- Subsequent messages: Provide feedback on their answer and ask the NEXT question
+- Always ask questions that bridge their resume to the job requirements
+- Vary question types: behavioral, technical, situational, competency
 
 RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 {
+  "current_question_number": 1,
+  "total_questions": 5,
   "interview_type": "behavioral|technical|situational|competency",
-  "questions": [
-    {"question": "interview question", "keywords": ["keyword1", "keyword2"], "tip": "how to approach this question"}
-  ],
-  "preparation_tips": ["tip 1", "tip 2", "tip 3"],
-  "common_mistakes": ["mistake 1", "mistake 2", "mistake 3"]
+  "question": "Ask ONE question that combines interview simulation with personalized coaching",
+  "keywords": ["keyword1", "keyword2"],
+  "tip": "Brief guidance on how to approach this question",
+  "feedback": "If this is a follow-up response: provide constructive feedback on their answer",
+  "next_challenge": "A brief note on what to focus on for the next question"
 }"""
         + ANTI_JAILBREAK_DIRECTIVE
     )
     CONFIDENCE_SCORE = 0.85
-    DEFAULT_MODEL = "gemini-2.0-flash-exp"
+    DEFAULT_MODEL = "gemini-2.5-flash-live"
 
     def __init__(self, gemini_service):
         """Initialize Interview Coach Agent.
@@ -84,27 +90,178 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             else:
                 print("GEMINI_API_KEY not set; Gemini Live will not be used.")
 
+    def _init_interview_session(self, context: SessionContext) -> None:
+        """Initialize interview session state in shared memory.
+        
+        Args:
+            context: Session context
+        """
+        if context.shared_memory is None:
+            context.shared_memory = {}
+        
+        context.shared_memory["interview_active"] = True
+        context.shared_memory["current_question_index"] = 0
+        context.shared_memory["asked_questions"] = []
+        context.shared_memory["user_answers"] = []
+        context.shared_memory["total_questions"] = 5
+        
+        logger.debug(
+            "Interview session initialized",
+            session_id=getattr(context, "session_id", "unknown"),
+            total_questions=5,
+        )
+
+    def _get_interview_state(self, context: SessionContext) -> dict:
+        """Get current interview state from shared memory.
+        
+        Args:
+            context: Session context
+            
+        Returns:
+            Dictionary containing interview state
+        """
+        if context.shared_memory is None:
+            return {
+                "interview_active": False,
+                "current_question_index": 0,
+                "asked_questions": [],
+                "user_answers": [],
+                "total_questions": 5,
+            }
+        
+        return {
+            "interview_active": context.shared_memory.get("interview_active", False),
+            "current_question_index": context.shared_memory.get("current_question_index", 0),
+            "asked_questions": context.shared_memory.get("asked_questions", []),
+            "user_answers": context.shared_memory.get("user_answers", []),
+            "total_questions": context.shared_memory.get("total_questions", 5),
+        }
+
+    def _store_answer_and_advance(self, user_answer: str, context: SessionContext) -> None:
+        """Store user's answer and advance to next question.
+        
+        Args:
+            user_answer: User's response to the current question
+            context: Session context
+        """
+        if context.shared_memory is None:
+            context.shared_memory = {}
+        
+        user_answers = context.shared_memory.get("user_answers", [])
+        user_answers.append(user_answer)
+        context.shared_memory["user_answers"] = user_answers
+        
+        # Move to next question
+        current_index = context.shared_memory.get("current_question_index", 0)
+        context.shared_memory["current_question_index"] = current_index + 1
+        
+        logger.debug(
+            "User answer stored and advanced",
+            session_id=getattr(context, "session_id", "unknown"),
+            question_index=current_index,
+            next_index=current_index + 1,
+        )
+
+    def _build_interview_prompt(
+        self, input_data: AgentInput, context: SessionContext, user_answer: Optional[str] = None
+    ) -> str:
+        """Build prompt for the interview coach Gemini call.
+        
+        Args:
+            input_data: Agent input with resume and job description
+            context: Session context
+            user_answer: User's answer to current question (if follow-up)
+            
+        Returns:
+            Formatted prompt string
+        """
+        state = self._get_interview_state(context)
+        resume_data = (
+            input_data.resume.model_dump(exclude_none=True)
+            if input_data.resume is not None
+            else {}
+        )
+        
+        job_desc = (
+            getattr(input_data, "job_description", "") or
+            context.job_description or
+            ""
+        )
+        
+        prompt = f"""Resume:\n{json.dumps(resume_data, indent=2)}
+
+Job Description:\n{job_desc}
+
+Interview Progress:
+- Current Question: {state['current_question_index'] + 1} of {state['total_questions']}
+- Questions Asked So Far: {len(state['asked_questions'])}
+- Current Interview Session Active: {state['interview_active']}
+"""
+        
+        if user_answer:
+            prompt += f"\nCandidate's Answer to Previous Question:\n{user_answer}\n"
+            prompt += f"\nPreviously Asked Questions:\n{json.dumps(state['asked_questions'], indent=2)}\n"
+        else:
+            prompt += f"\nThis is the FIRST question of the interview simulation.\n"
+        
+        prompt += "\nGenerate the next interview question with feedback and guidance."
+        
+        return prompt
+
+
     @observe(name="interview_coach_process", as_type="agent")
     def process(
         self, input_data: AgentInput | str | bytes, context: SessionContext
     ) -> AgentResponse:
-        """Process interview coaching request.
+        """Process interview coaching request with one question at a time.
 
         Args:
             input_data: Structured agent input or raw text/audio request
             context: Session context
 
         Returns:
-            Agent response with interview coaching feedback
+            Agent response with single interview question or feedback
         """
         session_id = getattr(context, "session_id", "unknown")
         agent_name = self.get_name()
         processing_start_time = time.time()
+        
+        # Extract input
         if isinstance(input_data, AgentInput):
             if input_data.audio_data is not None:
                 input_text = input_data.audio_data
             else:
-                input_text = self._build_text_prompt(input_data)
+                # Check if this is a follow-up response
+                message_history = getattr(input_data, "message_history", []) or []
+                is_follow_up = len(message_history) > 0
+                
+                # Get user's answer if this is a follow-up
+                user_answer = ""
+                if is_follow_up and message_history:
+                    # The last message in history is the user's answer
+                    last_message = message_history[-1]
+                    user_answer = getattr(last_message, "text", "") if hasattr(last_message, "text") else last_message.get("text", "") if isinstance(last_message, dict) else ""
+                
+                # Initialize or get state
+                state = self._get_interview_state(context)
+                if not state["interview_active"]:
+                    self._init_interview_session(context)
+                    logger.debug(
+                        "First question of interview - initializing session",
+                        session_id=session_id,
+                    )
+                else:
+                    # Store the user's answer and advance
+                    if user_answer:
+                        self._store_answer_and_advance(user_answer, context)
+                        logger.debug(
+                            "Stored user answer and advanced to next question",
+                            session_id=session_id,
+                            answer_preview=user_answer[:50] + "..." if len(user_answer) > 50 else user_answer,
+                        )
+                
+                # Build interview-aware prompt
+                input_text = self._build_interview_prompt(input_data, context, user_answer if is_follow_up else None)
         else:
             input_text = input_data
 
@@ -116,19 +273,6 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             session_id=session_id,
             input_type=input_type,
             input_length=len(input_text),
-            input_preview=(
-                input_text[:100].decode("utf-8", errors="ignore") + "..."
-                if isinstance(input_text, bytes) and len(input_text) > 100
-                else (
-                    input_text.decode("utf-8", errors="ignore")
-                    if isinstance(input_text, bytes)
-                    else (
-                        input_text[:100] + "..."
-                        if len(input_text) > 100
-                        else input_text
-                    )
-                )
-            ),
         )
 
         try:
@@ -218,8 +362,10 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 
             # Build decision trace for auditability
             input_type = "audio" if isinstance(input_text, bytes) else "text"
+            state = self._get_interview_state(context)
             decision_trace = [
-                f"InterviewCoachAgent: Generated interview coaching feedback for {input_type} input",
+                f"InterviewCoachAgent: Processing interview question {state['current_question_index'] + 1} of {state['total_questions']}",
+                f"InterviewCoachAgent: Generated targeted interview question for {input_type} input",
                 f"InterviewCoachAgent: Used coaching model with confidence {self.CONFIDENCE_SCORE}",
                 f"InterviewCoachAgent: Method used: {method_used}",
             ]
@@ -260,12 +406,14 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 ),
                 "method_used": method_used,
                 "input_type": input_type,
+                "current_question_number": state["current_question_index"] + 1,
+                "total_questions": state["total_questions"],
             }
 
             response = AgentResponse(
                 agent_name=self.get_name(),
                 content=result,
-                reasoning="Generated interview coaching feedback.",
+                reasoning="Generated single targeted interview question with feedback.",
                 confidence_score=self.CONFIDENCE_SCORE,
                 decision_trace=decision_trace,
                 sharp_metadata=sharp_metadata,
@@ -279,6 +427,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 confidence_score=self.CONFIDENCE_SCORE,
                 analysis_type=analysis_type,
                 method_used=method_used,
+                question_number=state["current_question_index"] + 1,
             )
             return response
 
@@ -296,6 +445,10 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 
     @staticmethod
     def _build_text_prompt(input_data: AgentInput) -> str:
+        """Legacy method - kept for compatibility.
+        
+        Use _build_interview_prompt instead for new interview flow.
+        """
         resume_data = (
             input_data.resume.model_dump(exclude_none=True)
             if input_data.resume is not None

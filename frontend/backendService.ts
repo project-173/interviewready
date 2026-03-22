@@ -58,9 +58,20 @@ class BackendService {
   }
 
   async callChatEndpoint(request: ChatRequest): Promise<ChatResponse> {
+    // Safe base64 encoding for audio data to avoid stack overflow
+    let audioDataBase64: string | null = null;
+    if (request.audioData) {
+      const bytes = new Uint8Array(request.audioData);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      audioDataBase64 = btoa(binary);
+    }
+
     const requestBody = {
       ...request,
-      audioData: request.audioData ? btoa(String.fromCharCode(...request.audioData)) : null,
+      audioData: audioDataBase64,
     };
     const response = await fetch(`${API_BASE_URL}/api/v1/chat?sessionId=${this.sessionId}`, {
       method: 'POST',
