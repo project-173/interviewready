@@ -14,7 +14,7 @@ from ..models.session import SessionContext
 from ..utils.json_parser import parse_json_object
 
 
-from ..core.security_constants import ANTI_JAILBREAK_DIRECTIVE
+from ..core.constants import ANTI_JAILBREAK_DIRECTIVE
 
 
 class JobAlignmentAgent(BaseAgent):

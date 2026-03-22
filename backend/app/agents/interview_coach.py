@@ -8,7 +8,7 @@ from .gemini_service import GeminiLiveService
 from langfuse import observe
 from ..core.logging import logger
 from ..core.config import settings
-from ..core.security_constants import ANTI_JAILBREAK_DIRECTIVE
+from ..core.constants import ANTI_JAILBREAK_DIRECTIVE
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
 

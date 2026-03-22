@@ -11,7 +11,7 @@ from app.core.logging import logger
 from langfuse import observe
 from ..core.config import settings
 from app.models import AgentResponse, Resume, ResumeDocument
-from app.core.security_constants import ANTI_JAILBREAK_DIRECTIVE
+from app.core.constants import ANTI_JAILBREAK_DIRECTIVE
 from app.models.session import SessionContext
 from app.utils.pdf_parser import parse_pdf_base64
 from app.utils.json_parser import parse_json_object

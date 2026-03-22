@@ -8,7 +8,7 @@ from .base import BaseAgent
 from langfuse import observe
 from ..core.logging import logger
 from ..core.config import settings
-from ..core.security_constants import ANTI_JAILBREAK_DIRECTIVE
+from ..core.constants import ANTI_JAILBREAK_DIRECTIVE
 from ..models.agent import AgentResponse, StructuralAssessment
 from ..models.session import SessionContext
 from ..utils.json_parser import parse_json_object
