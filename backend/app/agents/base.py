@@ -14,6 +14,7 @@ from pydantic import BaseModel, ValidationError
 from ..core.logging import logger
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
+from ..models.agent import AgentInput
 from ..utils.output_sanitizer import get_output_sanitizer
 from ..security.llm_guard_scanner import get_llm_guard_scanner
 
@@ -25,7 +26,9 @@ class BaseAgentProtocol(Protocol):
         """Get the agent name."""
         ...
 
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
+    def process(
+        self, input_data: AgentInput | str | bytes, context: SessionContext
+    ) -> AgentResponse:
         """Process input and return agent response."""
         ...
 
@@ -70,7 +73,9 @@ class BaseAgent(ABC, BaseAgentProtocol):
         return self.system_prompt
 
     @abstractmethod
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
+    def process(
+        self, input_data: AgentInput | str | bytes, context: SessionContext
+    ) -> AgentResponse:
         """Process input and return agent response. Must be implemented by subclasses."""
         pass
 

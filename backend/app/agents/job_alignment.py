@@ -12,6 +12,7 @@ from ..core.config import settings
 from ..models.agent import AgentResponse, AlignmentReport
 from ..models.session import SessionContext
 from ..utils.json_parser import parse_json_object
+from ..models.agent import AgentInput
 
 
 from ..core.constants import ANTI_JAILBREAK_DIRECTIVE
@@ -42,18 +43,11 @@ RULES:
 
 RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 {
-  "alignment_score": 82,
-  "matching_skills": ["skill 1", "skill 2", "skill 3"],
-  "missing_skills": ["skill 1", "skill 2"],
-  "gap_severity": {
-    "critical": ["gap 1"],
-    "important": ["gap 1", "gap 2"],
-    "nice_to_have": ["gap 1", "gap 2"]
-  },
-  "strengths": ["strength 1", "strength 2", "strength 3"],
-  "gaps": ["gap 1", "gap 2", "gap 3"],
-  "recommendations": ["recommendation 1", "recommendation 2", "recommendation 3"],
-  "time_to_proficiency_months": 6
+  "skillsMatch": ["skill 1", "skill 2", "skill 3"],
+  "missingSkills": ["skill 1", "skill 2"],
+  "experienceMatch": "good",
+  "fitScore": 82,
+  "reasoning": "Brief explanation of the score."
 }
 """
         + ANTI_JAILBREAK_DIRECTIVE
@@ -99,11 +93,13 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         return max(0.3, min(0.95, base - penalty))
 
     @observe(name="job_alignment_process", as_type="agent")
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
+    def process(
+        self, input_data: AgentInput | str | bytes, context: SessionContext
+    ) -> AgentResponse:
         """Process resume and job description to evaluate alignment.
 
         Args:
-            input_text: Resume text (also used as job description placeholder here)
+            input_data: Structured agent input or raw text to analyze
             context: Session context
 
         Returns:
@@ -112,6 +108,8 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         session_id = getattr(context, "session_id", "unknown")
         agent_name = self.get_name()
         processing_start_time = time.time()
+
+        input_text = self._build_prompt(input_data)
 
         logger.debug(
             "JobAlignmentAgent processing started",
@@ -138,6 +136,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 
             raw_result = raw_result or self.call_gemini(input_text, context)
 
+            raw_payload = parse_json_object(raw_result) or {}
             structured_result = self.parse_and_validate(
                 raw_result, AlignmentReport
             ).model_dump()
@@ -155,7 +154,17 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 
             skills_match: List[str] = structured_result.get("skillsMatch", [])
             missing_skills: List[str] = structured_result.get("missingSkills", [])
-            fit_score: int = int(structured_result.get("fitScore", 50))
+            fit_score_raw = structured_result.get("fitScore")
+            if fit_score_raw is None:
+                fit_score_raw = raw_payload.get("fitScore")
+            if fit_score_raw is None:
+                fit_score_raw = raw_payload.get("alignment_score")
+            if fit_score_raw is None:
+                fit_score_raw = raw_payload.get("alignmentScore")
+            try:
+                fit_score = int(fit_score_raw) if fit_score_raw is not None else 50
+            except (TypeError, ValueError):
+                fit_score = 50
             reasoning: str = structured_result.get(
                 "reasoning", "No reasoning provided."
             )
@@ -196,3 +205,20 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 error_message=str(e),
             )
             raise
+
+    @staticmethod
+    def _build_prompt(input_data: AgentInput | str | bytes) -> str:
+        if isinstance(input_data, AgentInput):
+            resume_data = (
+                input_data.resume.model_dump(exclude_none=True)
+                if input_data.resume is not None
+                else {}
+            )
+            job_description = input_data.job_description or ""
+            return (
+                f"Resume data: {json.dumps(resume_data, indent=2)}\n"
+                f"Job Description: {job_description}"
+            )
+        if isinstance(input_data, bytes):
+            return input_data.decode("utf-8", errors="ignore")
+        return input_data

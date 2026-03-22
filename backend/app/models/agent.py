@@ -1,7 +1,9 @@
 """Agent-related models."""
 
+from enum import Enum
 from typing import Optional, List, Dict, Any, Literal
 from pydantic import BaseModel, Field, field_validator
+from dataclasses import field
 from .resume import Resume
 
 
@@ -212,3 +214,24 @@ class WorkflowStatus(BaseModel):
     error_message: Optional[str] = None
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
+
+class AgentInput(BaseModel):
+    """Structured input passed from the orchestrator to individual agents."""
+
+    intent: Literal[
+        "RESUME_CRITIC",
+        "CONTENT_STRENGTH",
+        "ALIGNMENT",
+        "INTERVIEW_COACH",
+    ]
+    resume: Optional[Resume] = None
+    resume_document: Optional[ResumeDocument] = None
+    job_description: str = ""
+    message_history: List[InterviewMessage] = field(default_factory=list)
+    audio_data: Optional[bytes] = None
+
+class Intent(str, Enum):
+    RESUME_CRITIC = "RESUME_CRITIC"
+    CONTENT_STRENGTH = "CONTENT_STRENGTH"
+    ALIGNMENT = "ALIGNMENT"
+    INTERVIEW_COACH = "INTERVIEW_COACH"

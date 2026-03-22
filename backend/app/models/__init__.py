@@ -28,6 +28,7 @@ __all__ = [
     "AgentResponse",
     "ChatApiResponse",
     "ChatRequest",
+    "AgentInput",
     "ResumeFile",
     "ResumeDocument",
     "AnalysisArtifact",

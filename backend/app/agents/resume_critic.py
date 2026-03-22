@@ -12,6 +12,7 @@ from ..core.constants import ANTI_JAILBREAK_DIRECTIVE
 from ..models.agent import AgentResponse, StructuralAssessment
 from ..models.session import SessionContext
 from ..utils.json_parser import parse_json_object
+from ..models.agent import AgentInput
 
 class ResumeCriticAgent(BaseAgent):
     """Agent for analyzing resume structure, ATS compatibility, and impact."""
@@ -59,11 +60,13 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         )
     
     @observe(name="resume_critic_process", as_type="agent")
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
+    def process(
+        self, input_data: AgentInput | str | bytes, context: SessionContext
+    ) -> AgentResponse:
         """Process resume text and provide critique.
 
         Args:
-            input_text: Resume text to analyze
+            input_data: Structured agent input or raw text to analyze
             context: Session context
 
         Returns:
@@ -72,6 +75,8 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         session_id = getattr(context, "session_id", "unknown")
         agent_name = self.get_name()
         processing_start_time = time.time()
+
+        input_text = self._build_prompt(input_data)
 
         logger.debug(
             "ResumeCriticAgent processing started",
@@ -176,6 +181,19 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             logger.error(f"Failed to parse JSON using regex extraction: {e}")
 
         return {}
+
+    @staticmethod
+    def _build_prompt(input_data: AgentInput | str | bytes) -> str:
+        if isinstance(input_data, AgentInput):
+            resume_data = (
+                input_data.resume.model_dump(exclude_none=True)
+                if input_data.resume is not None
+                else {}
+            )
+            return f"Resume data: {json.dumps(resume_data, indent=2)}"
+        if isinstance(input_data, bytes):
+            return input_data.decode("utf-8", errors="ignore")
+        return input_data
 
     def _normalize_structural_assessment(
         self, parsed: Dict[str, Any]

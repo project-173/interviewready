@@ -7,7 +7,15 @@ from unittest.mock import patch
 
 from app.agents.extractor import ExtractorAgent
 from app.governance import SharpGovernanceService
-from app.models import AgentResponse, ChatRequest, Resume, ResumeFile, SessionContext, Work
+from app.models import (
+    AgentInput,
+    AgentResponse,
+    ChatRequest,
+    Resume,
+    ResumeFile,
+    SessionContext,
+    Work,
+)
 from app.orchestration import OrchestrationAgent
 
 
@@ -15,7 +23,7 @@ class StubAgent:
     def __init__(self, name: str):
         self._name = name
         self.system_prompt = f"{name} prompt"
-        self.inputs: list[str] = []
+        self.inputs: list[AgentInput | str | bytes] = []
 
     def get_name(self) -> str:
         return self._name
@@ -26,8 +34,10 @@ class StubAgent:
     def get_system_prompt(self) -> str:
         return self.system_prompt
 
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
-        self.inputs.append(input_text)
+    def process(
+        self, input_data: AgentInput | str | bytes, context: SessionContext
+    ) -> AgentResponse:
+        self.inputs.append(input_data)
         return AgentResponse(
             agent_name=self._name,
             content=json.dumps({"ok": True}),
@@ -43,9 +53,11 @@ class StubExtractorAgent(StubAgent):
         super().__init__("ExtractorAgent")
         self.calls = 0
 
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
+    def process(
+        self, input_data: AgentInput | str | bytes, context: SessionContext
+    ) -> AgentResponse:
         self.calls += 1
-        self.inputs.append(input_text)
+        self.inputs.append(input_data)
         return AgentResponse(
             agent_name=self._name,
             content=json.dumps({"work": [{"name": "Extracted from PDF"}]}),
@@ -75,7 +87,10 @@ def test_orchestrator_prefers_resume_data_over_resume_file() -> None:
 
     assert extractor.calls == 0
     assert resume_agent.inputs
-    assert "Structured resume input" in resume_agent.inputs[0]
+    input_payload = resume_agent.inputs[0]
+    assert isinstance(input_payload, AgentInput)
+    assert input_payload.resume
+    assert input_payload.resume.work[0].name == "Structured resume input"
 
 
 def test_orchestrator_uses_extractor_when_resume_data_missing() -> None:
@@ -96,7 +111,10 @@ def test_orchestrator_uses_extractor_when_resume_data_missing() -> None:
 
     assert extractor.calls == 1
     assert resume_agent.inputs
-    assert "Extracted from PDF" in resume_agent.inputs[0]
+    input_payload = resume_agent.inputs[0]
+    assert isinstance(input_payload, AgentInput)
+    assert input_payload.resume
+    assert input_payload.resume.work[0].name == "Extracted from PDF"
 
 
 def test_orchestrator_uses_extractor_when_resume_data_is_empty() -> None:
@@ -118,7 +136,10 @@ def test_orchestrator_uses_extractor_when_resume_data_is_empty() -> None:
 
     assert extractor.calls == 1
     assert resume_agent.inputs
-    assert "Extracted from PDF" in resume_agent.inputs[0]
+    input_payload = resume_agent.inputs[0]
+    assert isinstance(input_payload, AgentInput)
+    assert input_payload.resume
+    assert input_payload.resume.work[0].name == "Extracted from PDF"
 
 
 def test_extractor_agent_extracts_pdf_payload() -> None:

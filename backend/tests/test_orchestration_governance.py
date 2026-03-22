@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.governance import SharpGovernanceService
 from app.models.agent import AgentResponse, ChatRequest
+from app.models import AgentInput
 from app.models.session import SessionContext
 from app.orchestration import OrchestrationAgent
 
@@ -15,7 +16,7 @@ class StubAgent:
         self._name = name
         self._confidence = confidence
         self.system_prompt = f"{name} prompt"
-        self.inputs: list[str] = []
+        self.inputs: list[AgentInput | str | bytes] = []
 
     def get_name(self) -> str:
         return self._name
@@ -26,11 +27,13 @@ class StubAgent:
     def get_system_prompt(self) -> str:
         return self.system_prompt
 
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
-        self.inputs.append(input_text)
+    def process(
+        self, input_data: AgentInput | str | bytes, context: SessionContext
+    ) -> AgentResponse:
+        self.inputs.append(input_data)
         return AgentResponse(
             agent_name=self._name,
-            content=f"{self._name} processed: {input_text}",
+            content=f"{self._name} processed",
             reasoning=f"{self._name} reasoning",
             confidence_score=self._confidence,
             decision_trace=[],

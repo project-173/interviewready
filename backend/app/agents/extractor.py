@@ -11,6 +11,7 @@ from app.core.logging import logger
 from langfuse import observe
 from ..core.config import settings
 from app.models import AgentResponse, Resume, ResumeDocument
+from app.models.agent import AgentInput
 from app.core.constants import ANTI_JAILBREAK_DIRECTIVE
 from app.models.session import SessionContext
 from app.utils.pdf_parser import parse_pdf_base64
@@ -135,9 +136,20 @@ Output format:
         )
 
     @observe(name="extractor_process", as_type="agent")
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
+    def process(
+        self, input_data: AgentInput | str | bytes, context: SessionContext
+    ) -> AgentResponse:
         session_id = getattr(context, "session_id", "unknown")
         start_time = time.time()
+
+        if isinstance(input_data, AgentInput):
+            raise ValueError(
+                "ExtractorAgent expects a resumeFile JSON payload, not AgentInput."
+            )
+        if isinstance(input_data, bytes):
+            input_text = input_data.decode("utf-8", errors="ignore")
+        else:
+            input_text = input_data
 
         logger.debug(
             "ExtractorAgent processing started",

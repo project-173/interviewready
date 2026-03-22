@@ -1,5 +1,6 @@
 """Interview Coach Agent implementation."""
 
+import json
 import time
 from typing import Optional
 from langfuse import observe
@@ -11,6 +12,7 @@ from ..core.config import settings
 from ..core.constants import ANTI_JAILBREAK_DIRECTIVE
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
+from ..models.agent import AgentInput
 
 
 class InterviewCoachAgent(BaseAgent):
@@ -83,11 +85,13 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 print("GEMINI_API_KEY not set; Gemini Live will not be used.")
 
     @observe(name="interview_coach_process", as_type="agent")
-    def process(self, input_text: str, context: SessionContext) -> AgentResponse:
+    def process(
+        self, input_data: AgentInput | str | bytes, context: SessionContext
+    ) -> AgentResponse:
         """Process interview coaching request.
 
         Args:
-            input_text: Interview question or coaching request
+            input_data: Structured agent input or raw text/audio request
             context: Session context
 
         Returns:
@@ -96,6 +100,14 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         session_id = getattr(context, "session_id", "unknown")
         agent_name = self.get_name()
         processing_start_time = time.time()
+        if isinstance(input_data, AgentInput):
+            if input_data.audio_data is not None:
+                input_text = input_data.audio_data
+            else:
+                input_text = self._build_text_prompt(input_data)
+        else:
+            input_text = input_data
+
         input_type = "audio" if isinstance(input_text, bytes) else "text"
 
         # Log processing start
@@ -281,6 +293,15 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 error_message=str(e),
             )
             raise
+
+    @staticmethod
+    def _build_text_prompt(input_data: AgentInput) -> str:
+        resume_data = (
+            input_data.resume.model_dump(exclude_none=True)
+            if input_data.resume is not None
+            else {}
+        )
+        return f"Request data: {json.dumps(resume_data, indent=2)}"
 
     @observe(name="_call_gemini_live_audio", as_type="tool")
     def _call_gemini_live_audio(
