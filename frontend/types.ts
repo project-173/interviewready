@@ -63,7 +63,7 @@ export interface ResumeSchema {
 // Backward compatibility alias
 export type Resume = ResumeSchema;
 
-export interface StructuralAssessment {
+export interface ResumeCriticReport {
   score: number;
   readability: string;
   formattingRecommendations: string[];
@@ -98,7 +98,7 @@ export interface ContentSuggestion {
   confidenceScore: number;
 }
 
-export interface ContentAnalysisReport {
+export interface ContentStrengthReport {
   skills: ContentSkill[];
   achievements: ContentAchievement[];
   suggestions: ContentSuggestion[];
@@ -295,8 +295,8 @@ export interface SharedState {
   history: ResumeSchema[];
   jobDescription: string;
   status: WorkflowStatus;
-  criticReport: StructuralAssessment | null;
-  contentReport: ContentAnalysisReport | null;
+  criticReport: ResumeCriticReport | null;
+  contentReport: ContentStrengthReport | null;
   alignmentReport: AlignmentReport | null;
   interviewHistory: InterviewMessage[];
 }

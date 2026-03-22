@@ -35,9 +35,9 @@ __all__ = [
     "ActionPlan",
     "NormalizationFailure",
     "AlignmentReport",
-    "ContentAnalysisReport",
+    "ContentStrengthReport",
     "InterviewMessage",
-    "StructuralAssessment",
+    "ResumeCriticReport",
     "WorkflowStatus",
     
     # Session models

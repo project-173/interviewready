@@ -10,7 +10,7 @@ from .base import BaseAgent
 from ..core.logging import logger
 from ..core.config import settings
 from ..core.constants import ANTI_JAILBREAK_DIRECTIVE, RESUME_SCHEMA
-from ..models.agent import AgentResponse, StructuralAssessment, AgentInput
+from ..models.agent import AgentResponse, ResumeCriticReport, AgentInput
 from ..models.session import SessionContext
 
 class ResumeCriticAgent(BaseAgent):
@@ -105,7 +105,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 
             raw_result = raw_result or self.call_gemini(input_text, context)
 
-            structured_result = self.parse_and_validate(raw_result, StructuralAssessment).model_dump()
+            structured_result = self.parse_and_validate(raw_result, ResumeCriticReport).model_dump()
 
             processing_time = time.time() - processing_start_time
             
@@ -221,7 +221,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         if not critique["suggestions"]:
             critique["suggestions"] = fallback_suggestions
 
-        validated_critique = StructuralAssessment.model_validate(critique)
+        validated_critique = ResumeCriticReport.model_validate(critique)
 
         # We need to return the combined structure expected by the frontend
         return {

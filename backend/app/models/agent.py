@@ -185,7 +185,7 @@ class ContentSuggestion(BaseModel):
     confidenceScore: float
 
 
-class ContentAnalysisReport(BaseModel):
+class ContentStrengthReport(BaseModel):
     """Content strength analysis report."""
 
     skills: Optional[List[ContentSkill]] = Field(default_factory=list)
@@ -195,8 +195,8 @@ class ContentAnalysisReport(BaseModel):
     summary: Optional[str] = None
 
 
-class StructuralAssessment(BaseModel):
-    """Resume structural assessment."""
+class ResumeCriticReport(BaseModel):
+    """Resume critic analysis report."""
 
     score: Optional[float] = None
     readability: Optional[str] = None

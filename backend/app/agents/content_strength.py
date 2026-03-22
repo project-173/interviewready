@@ -10,7 +10,7 @@ from .base import BaseAgent
 from ..core.logging import logger
 from ..core.config import settings
 from ..core.constants import ANTI_JAILBREAK_DIRECTIVE, RESUME_SCHEMA
-from ..models.agent import AgentResponse, ContentAnalysisReport, AgentInput
+from ..models.agent import AgentResponse, ContentStrengthReport, AgentInput
 from ..models.session import SessionContext
 
 class ContentStrengthAgent(BaseAgent):
@@ -124,7 +124,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 
             raw_result = raw_result or self.call_gemini(input_text, context)
 
-            structured_result = self.parse_and_validate(raw_result, ContentAnalysisReport).model_dump()
+            structured_result = self.parse_and_validate(raw_result, ContentStrengthReport).model_dump()
 
             processing_time = time.time() - processing_start_time
             

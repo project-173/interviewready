@@ -3,7 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 import { 
   Resume, 
   StructuralAssessment, 
-  ContentAnalysisReport, 
+  ContentStrengthReport, 
   AlignmentReport,
   resumeJsonSchema,
   structuralAssessmentJsonSchema,
@@ -65,7 +65,7 @@ export const resumeCriticAgent = async (resume: Resume): Promise<StructuralAsses
   return JSON.parse(response.text || '{}');
 };
 
-export const contentStrengthAgent = async (resume: Resume): Promise<ContentAnalysisReport> => {
+export const contentStrengthAgent = async (resume: Resume): Promise<ContentStrengthReport> => {
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: `Analyze the content strength and skills of this resume using STAR/XYZ methodology: ${JSON.stringify(resume)}`,

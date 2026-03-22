@@ -1,7 +1,7 @@
 import { 
   Resume, 
   StructuralAssessment, 
-  ContentAnalysisReport, 
+  ContentStrengthReport, 
   AlignmentReport,
   ChatRequest,
   resumeJsonSchema,
@@ -128,7 +128,7 @@ class BackendService {
     throw new Error('Invalid response from resume critic agent');
   }
 
-  async contentStrengthAgent(resume?: Resume | null): Promise<ContentAnalysisReport> {
+  async contentStrengthAgent(resume?: Resume | null): Promise<ContentStrengthReport> {
     const request: ChatRequest = {
       intent: 'CONTENT_STRENGTH',
       jobDescription: '',

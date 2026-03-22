@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { StructuralAssessment, ContentAnalysisReport, AlignmentReport } from '../types';
+import { ResumeCriticReport, ContentStrengthReport, AlignmentReport } from '../types';
 
 export const UploadStep: React.FC<{ onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void }> = ({ onUpload }) => (
   <div className="animate-in fade-in slide-in-from-bottom-2 duration-400">
@@ -21,7 +21,7 @@ export const UploadStep: React.FC<{ onUpload: (e: React.ChangeEvent<HTMLInputEle
   </div>
 );
 
-export const CriticStep: React.FC<{ report: StructuralAssessment; onApprove: () => void }> = ({ report, onApprove }) => (
+export const CriticStep: React.FC<{ report: ResumeCriticReport; onApprove: () => void }> = ({ report, onApprove }) => (
   <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 space-y-6">
     <div className="flex items-center justify-between border-b border-slate-100 pb-4">
       <h3 className="text-lg font-semibold">Structural Audit</h3>
@@ -68,7 +68,7 @@ export const CriticStep: React.FC<{ report: StructuralAssessment; onApprove: () 
   </div>
 );
 
-export const ContentStep: React.FC<{ report: ContentAnalysisReport; onApprove: () => void }> = ({ report, onApprove }) => (
+export const ContentStep: React.FC<{ report: ContentStrengthReport; onApprove: () => void }> = ({ report, onApprove }) => (
   <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 space-y-8">
     <div>
       <h3 className="text-lg font-semibold text-slate-900 mb-1">Content Analysis</h3>
