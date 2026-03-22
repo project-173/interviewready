@@ -63,47 +63,36 @@ export interface ResumeSchema {
 // Backward compatibility alias
 export type Resume = ResumeSchema;
 
-export interface ResumeCriticReport {
-  score: number;
-  readability: string;
-  formattingRecommendations: string[];
-  suggestions: string[];
-}
-
-export type SkillCategory = "Technical" | "Soft" | "Domain" | "Tool";
 export type EvidenceStrength = "HIGH" | "MEDIUM" | "LOW";
-export type ImpactLevel = "HIGH" | "MEDIUM" | "LOW";
+export type ResumeCriticIssueType = "ats" | "structure" | "impact" | "readability";
+export type ResumeCriticSeverity = "HIGH" | "MEDIUM" | "LOW";
+export type ContentSuggestionType = "action_verb" | "specificity" | "structure" | "redundancy";
 
-export interface ContentSkill {
-  name: string;
-  category: SkillCategory;
-  confidenceScore: number;
-  evidenceStrength: EvidenceStrength;
-  evidence: string;
+export interface ResumeCriticIssue {
+  location: string;
+  type: ResumeCriticIssueType;
+  severity: ResumeCriticSeverity;
+  description: string;
 }
 
-export interface ContentAchievement {
-  description: string;
-  impact: ImpactLevel;
-  quantifiable: boolean;
-  confidenceScore: number;
-  originalText: string;
+export interface ResumeCriticReport {
+  issueList: ResumeCriticIssue[];
+  summary: string;
+  score?: number;
 }
 
 export interface ContentSuggestion {
+  location: string;
   original: string;
   suggested: string;
-  rationale: string;
-  faithful: boolean;
-  confidenceScore: number;
+  evidenceStrength: EvidenceStrength;
+  type: ContentSuggestionType;
 }
 
 export interface ContentStrengthReport {
-  skills: ContentSkill[];
-  achievements: ContentAchievement[];
   suggestions: ContentSuggestion[];
-  hallucinationRisk: number;
   summary: string;
+  score?: number;
 }
 
 export interface AlignmentReport {
@@ -213,36 +202,26 @@ export const resumeJsonSchema = zodToJsonSchema(z.object({
 }), 'resumeSchema');
 
 export const structuralAssessmentJsonSchema = zodToJsonSchema(z.object({
-  score: z.number(),
-  readability: z.string(),
-  formattingRecommendations: z.array(z.string()),
-  suggestions: z.array(z.string()),
+  issueList: z.array(z.object({
+    location: z.string(),
+    type: z.enum(["ats", "structure", "impact", "readability"]),
+    severity: z.enum(["HIGH", "MEDIUM", "LOW"]),
+    description: z.string(),
+  })),
+  summary: z.string(),
+  score: z.number().optional(),
 }), 'structuralAssessmentSchema');
 
 export const contentAnalysisReportJsonSchema = zodToJsonSchema(z.object({
-  skills: z.array(z.object({
-    name: z.string(),
-    category: z.enum(["Technical", "Soft", "Domain", "Tool"]),
-    confidenceScore: z.number(),
-    evidenceStrength: z.enum(["HIGH", "MEDIUM", "LOW"]),
-    evidence: z.string(),
-  })),
-  achievements: z.array(z.object({
-    description: z.string(),
-    impact: z.enum(["HIGH", "MEDIUM", "LOW"]),
-    quantifiable: z.boolean(),
-    confidenceScore: z.number(),
-    originalText: z.string(),
-  })),
   suggestions: z.array(z.object({
+    location: z.string(),
     original: z.string(),
     suggested: z.string(),
-    rationale: z.string(),
-    faithful: z.boolean(),
-    confidenceScore: z.number(),
+    evidenceStrength: z.enum(["HIGH", "MEDIUM", "LOW"]),
+    type: z.enum(["action_verb", "specificity", "structure", "redundancy"]),
   })),
-  hallucinationRisk: z.number(),
   summary: z.string(),
+  score: z.number().optional(),
 }), 'contentAnalysisReportSchema');
 
 export const alignmentReportJsonSchema = zodToJsonSchema(z.object({
@@ -300,3 +279,10 @@ export interface SharedState {
   alignmentReport: AlignmentReport | null;
   interviewHistory: InterviewMessage[];
 }
+
+export type ResumeLookupResult = {
+  isValid: boolean;
+  display?: string;
+  topLevel?: string;
+  usedSectionAsEvidence?: boolean;
+};

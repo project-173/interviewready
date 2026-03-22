@@ -2,7 +2,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { 
   Resume, 
-  StructuralAssessment, 
+  ResumeCriticReport, 
   ContentStrengthReport, 
   AlignmentReport,
   resumeJsonSchema,
@@ -53,7 +53,7 @@ export const extractorAgent = async (input: string | ExtractorFileData): Promise
   };
 };
 
-export const resumeCriticAgent = async (resume: Resume): Promise<StructuralAssessment> => {
+export const resumeCriticAgent = async (resume: Resume): Promise<ResumeCriticReport> => {
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: `Critique the structure and formatting of this resume: ${JSON.stringify(resume)}`,

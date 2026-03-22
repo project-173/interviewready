@@ -1,74 +1,63 @@
 {
     "ResumeCriticAgent": {
-        "score": 75,
-        "readability": "good",
-        "formattingRecommendations": [
-            "Use consistent bullet point formatting",
-            "Add clear section headers"
+        "issues": [
+            {
+                "location": "work[0].summary",
+                "type": "impact",
+                "severity": "MEDIUM",
+                "description": "The summary is long and dense. Consider breaking it into a brief intro sentence plus bullet points for achievements."
+            },
+            {
+                "location": "education[0].score",
+                "type": "readability",
+                "severity": "LOW",
+                "description": "The score '3.72/4' could be clearer if presented as GPA out of 4.0."
+            },
+            {
+                "location": "certificates[0].date",
+                "type": "impact",
+                "severity": "HIGH",
+                "description": "The certificate date is in the future. Ensure dates reflect actual completion."
+            },
+            {
+                "location": "skills[0].keywords",
+                "type": "readability",
+                "severity": "LOW",
+                "description": "Keywords are specific. Consider a brief explanation or grouping by domain."
+            },
+            {
+                "location": "projects[0].description",
+                "type": "impact",
+                "severity": "MEDIUM",
+                "description": "Add quantifiable outcomes or impact metrics to strengthen this project."
+            },
+            {
+                "location": "projects",
+                "type": "impact",
+                "severity": "MEDIUM",
+                "description": "Project start dates are in the future. Adjust dates or clarify planned work."
+            }
         ],
-        "suggestions": [
-            "Quantify achievements with specific metrics",
-            "Remove redundant information"
-        ]
+        "summary": "Solid structure with a few clarity gaps. Strengthen action verbs in role summaries and tighten long bullets to improve scan-ability."
     },
     "ContentStrengthAgent": {
-        "skills": [
-            {
-                "name": "Python",
-                "category": "Technical",
-                "confidenceScore": 0.9,
-                "evidenceStrength": "HIGH",
-                "evidence": "Extensive experience with Python development"
-            },
-            {
-                "name": "Machine Learning",
-                "category": "Technical",
-                "confidenceScore": 0.85,
-                "evidenceStrength": "HIGH",
-                "evidence": "Built ML models for production systems"
-            },
-            {
-                "name": "Data Analysis",
-                "category": "Technical",
-                "confidenceScore": 0.8,
-                "evidenceStrength": "MEDIUM",
-                "evidence": "Performed data analysis for business insights"
-            }
-        ],
-        "achievements": [
-            {
-                "description": "Led team of 5 engineers",
-                "impact": "HIGH",
-                "quantifiable": true,
-                "confidenceScore": 0.95,
-                "originalText": "Led team of 5 engineers"
-            },
-            {
-                "description": "Improved system performance by 40%",
-                "impact": "HIGH",
-                "quantifiable": true,
-                "confidenceScore": 0.9,
-                "originalText": "Improved system performance by 40%"
-            }
-        ],
         "suggestions": [
             {
-                "original": "experienced developer",
-                "suggested": "5+ years of professional software development experience",
-                "rationale": "Quantify experience with specific timeframe",
-                "faithful": true,
-                "confidenceScore": 0.85
+                "location": "work[0].summary",
+                "original": "Developed scalable backend services",
+                "suggested": "Built scalable backend services for core product features",
+                "evidenceStrength": "MEDIUM",
+                "type": "specificity"
             },
             {
-                "original": "good communication",
-                "suggested": "Collaborated with cross-functional teams of 10+ members",
-                "rationale": "Provide specific evidence of communication skills",
-                "faithful": true,
-                "confidenceScore": 0.8
+                "location": "work[0].highlights[0]",
+                "original": "Led team of 5 engineers",
+                "suggested": "Led a 5-engineer team to deliver backend services",
+                "evidenceStrength": "HIGH",
+                "type": "action_verb"
             }
         ],
-        "hallucinationRisk": 0.1,
-        "summary": "Strong technical background with measurable accomplishments"
+        "summary": "Clear experience with room to sharpen phrasing. Focus on action verbs and add specific context where possible."
     },
     "JobAlignmentAgent": {
         "skillsMatch": [
@@ -121,11 +110,23 @@
                 "institution": "State University",
                 "area": "Computer Science",
                 "studyType": "Bachelor of Science",
-                "endDate": "2020-01"
+                "endDate": "2020-01",
+                "score": "3.72/4"
             }
         ],
         "awards": [],
-        "certificates": [],
+        "certificates": [
+            {
+                "name": "Graduate Certificate in Designing and Managing Products and Platforms",
+                "date": "2025-09-01",
+                "issuer": "State University"
+            },
+            {
+                "name": "Microsoft Certified Azure Developer Associate",
+                "date": "2025-06-01",
+                "issuer": "Microsoft"
+            }
+        ],
         "skills": [
             {
                 "name": "Python",
@@ -143,6 +144,25 @@
                 "keywords": ["PostgreSQL", "MySQL"]
             }
         ],
-        "projects": []
+        "projects": [
+            {
+                "name": "Multi-agent LLM Assistant",
+                "startDate": "2026-01",
+                "endDate": "",
+                "description": "Built a multi-agent LLM assistant to orchestrate resume critiques and interview prep.",
+                "highlights": [
+                    "Implemented agent routing and governance rules"
+                ]
+            },
+            {
+                "name": "RAG Knowledge Base",
+                "startDate": "2026-02",
+                "endDate": "",
+                "description": "Developed a RAG application to retrieve domain-specific knowledge for support teams.",
+                "highlights": [
+                    "Improved answer relevance through prompt tuning"
+                ]
+            }
+        ]
     }
 }

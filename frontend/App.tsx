@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   SharedState, 
   WorkflowStatus,
-  ChatRequest
+  ChatRequest,
+  Resume
 } from './types';
 import {
   contentStrengthAgent, 
@@ -106,6 +107,20 @@ const App: React.FC = () => {
     });
   };
 
+  const normalizeCriticReport = (data: any) => {
+    const candidate = data && typeof data === 'object' ? (data.critique ?? data) : {};
+    const issues = Array.isArray(candidate.issues)
+        ? candidate.issues
+        : [];
+    return {
+      issueList: issues,
+      summary: typeof candidate.summary === 'string' && candidate.summary.trim()
+        ? candidate.summary
+        : 'Resume processed successfully.',
+      score: typeof candidate.score === 'number' ? candidate.score : undefined
+    };
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     console.log('handleFileupload')
     const file = e.target.files?.[0];
@@ -127,11 +142,6 @@ const App: React.FC = () => {
         
         const response = await backendService.callChatEndpoint(request);
         const parsedResume = await backendService.fetchCurrentResume();
-        const critiqueData =
-          response.payload && typeof response.payload === 'object' && !Array.isArray(response.payload)
-            ? response.payload
-            : {};
-
         // Parse the structured JSON response from backend
         let responseData;
         try {
@@ -142,129 +152,21 @@ const App: React.FC = () => {
         }
 
         const resumeData = responseData.resume_data || {};
-
-        const resume: Resume = {
-          title: resumeData.title || 'Untitled Resume',
-          summary: resumeData.summary || '',
-          isMaster: false,
-          contact: resumeData.contact || {
-            fullName: '',
-            email: '',
-            phone: '',
-            city: '',
-            country: '',
-            linkedin: '',
-            github: '',
-            portfolio: ''
-          },
-          skills: resumeData.skills || [],
-          experience: resumeData.experiences || resumeData.experience || [],
-          education: resumeData.educations || resumeData.education || [],
-          experiences: resumeData.experiences || resumeData.experience || [],
-          educations: resumeData.educations || resumeData.education || [],
-          projects: resumeData.projects || [],
-          certifications: resumeData.certifications || [],
-          awards: resumeData.awards || []
-        };
+        const criticReport = normalizeCriticReport(
+          response.payload && typeof response.payload === 'object' && !Array.isArray(response.payload)
+            ? response.payload
+            : responseData
+        );
 
         setState(prev => ({
           ...prev,
           currentResume: parsedResume || prev.currentResume,
           history: parsedResume ? [...prev.history, parsedResume] : prev.history,
-          criticReport: {
-            score: Number((critiqueData as any).score) || 85,
-            readability: String((critiqueData as any).readability || 'Resume processed successfully'),
-            formattingRecommendations: Array.isArray((critiqueData as any).formattingRecommendations) ? (critiqueData as any).formattingRecommendations : [],
-            suggestions: Array.isArray((critiqueData as any).suggestions) ? (critiqueData as any).suggestions : []
-          },
+          criticReport,
           status: WorkflowStatus.AWAITING_CRITIC_APPROVAL
         }));
       } else {
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-          const textContent = event.target?.result as string;
-          // Create a minimal resume object for file upload
-          const uploadResume: Resume = {
-            title: 'Uploaded Resume',
-            summary: '',
-            isMaster: false,
-            contact: {
-              fullName: '',
-              email: '',
-              phone: '',
-              city: '',
-              country: '',
-              linkedin: '',
-              github: '',
-              portfolio: ''
-            },
-            skills: [],
-            experiences: [],
-            educations: [],
-            projects: [],
-            certifications: [],
-            awards: []
-          };
-
-          const request: ChatRequest = {
-            intent: 'RESUME_CRITIC',
-            resumeData: uploadResume,
-            jobDescription: `Parse and analyze this resume text: ${textContent}`,
-            messageHistory: []
-          };
-
-          const response = await backendService.callChatEndpoint(request);
-
-          // Parse the structured JSON response from backend
-          let responseData;
-          try {
-            responseData = response.payload || JSON.parse(response.content || '{}');
-          } catch (error) {
-            console.error('Failed to parse backend response:', error);
-            throw new Error('Invalid response from backend');
-          }
-
-          const resumeData = responseData.resume_data || {};
-          const critiqueData = responseData.critique_data || {};
-          
-          const resume: Resume = {
-            title: resumeData.title || 'Untitled Resume',
-            summary: resumeData.summary || '',
-            isMaster: false,
-            contact: resumeData.contact || {
-              fullName: '',
-              email: '',
-              phone: '',
-              city: '',
-              country: '',
-              linkedin: '',
-              github: '',
-              portfolio: ''
-            },
-            skills: resumeData.skills || [],
-            experience: resumeData.experiences || resumeData.experience || [],
-            education: resumeData.educations || resumeData.education || [],
-            experiences: resumeData.experiences || resumeData.experience || [],
-            educations: resumeData.educations || resumeData.education || [],
-            projects: resumeData.projects || [],
-            certifications: resumeData.certifications || [],
-            awards: resumeData.awards || []
-          };
-          
-          setState(prev => ({ 
-            ...prev, 
-            currentResume: resume, 
-            history: [...prev.history, resume],
-            criticReport: {
-              score: Number(critiqueData.score) || 85,
-              readability: critiqueData.readability || 'Resume processed successfully',
-              formattingRecommendations: critiqueData.formattingRecommendations || [],
-              suggestions: critiqueData.suggestions || []
-            },
-            status: WorkflowStatus.AWAITING_CRITIC_APPROVAL 
-          }));
-        };
-        reader.readAsText(file);
+        setError("Only PDF files are supported.")
       }
     } catch (err: any) {
       setError(err.message || "Failed to process resume");
@@ -401,8 +303,8 @@ const App: React.FC = () => {
 
             <div className="relative">
               {(state.status === WorkflowStatus.IDLE || state.status === WorkflowStatus.EXTRACTING) && <UploadStep onUpload={handleFileUpload} />}
-              {(state.status === WorkflowStatus.CRITIQUING || state.status === WorkflowStatus.AWAITING_CRITIC_APPROVAL) && state.criticReport && <CriticStep report={state.criticReport} onApprove={approveCritic} />}
-              {(state.status === WorkflowStatus.ANALYZING_CONTENT || state.status === WorkflowStatus.AWAITING_CONTENT_APPROVAL) && state.contentReport && <ContentStep report={state.contentReport} onApprove={approveContent} />}
+              {(state.status === WorkflowStatus.CRITIQUING || state.status === WorkflowStatus.AWAITING_CRITIC_APPROVAL) && state.criticReport && <CriticStep report={state.criticReport} resume={state.currentResume} onApprove={approveCritic} />}
+              {(state.status === WorkflowStatus.ANALYZING_CONTENT || state.status === WorkflowStatus.AWAITING_CONTENT_APPROVAL) && state.contentReport && <ContentStep report={state.contentReport} resume={state.currentResume} onApprove={approveContent} />}
               {(state.status === WorkflowStatus.ALIGNING_JD) && <AlignmentStep jd={state.jobDescription} onChangeJD={(val) => setState(prev => ({ ...prev, jobDescription: val }))} onAnalyze={runAlignment} isLoading={isLoading} />}
               {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterview} />}
               {state.status === WorkflowStatus.INTERVIEWING && <InterviewStep history={state.interviewHistory} onSend={handleInterviewMessage} onSendAudio={handleInterviewAudioMessage} isLoading={isLoading} chatEndRef={chatEndRef} />}

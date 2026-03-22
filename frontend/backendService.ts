@@ -1,6 +1,6 @@
 import { 
   Resume, 
-  StructuralAssessment, 
+  ResumeCriticReport, 
   ContentStrengthReport, 
   AlignmentReport,
   ChatRequest,
@@ -106,7 +106,7 @@ class BackendService {
     return localStorage.getItem('authToken') || '';
   }
 
-  async resumeCriticAgent(resume: Resume): Promise<StructuralAssessment> {
+  async resumeCriticAgent(resume: Resume): Promise<ResumeCriticReport> {
     const request: ChatRequest = {
       intent: 'RESUME_CRITIC',
       resumeData: resume,
