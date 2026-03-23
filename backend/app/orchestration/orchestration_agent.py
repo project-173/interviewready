@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from langgraph.graph import END, StateGraph
-from langfuse import Langfuse, observe, propagate_attributes
 
 from app.agents.base import BaseAgentProtocol
+from app.core.langfuse_client import langfuse, propagate_attributes, get_propagated_attrs
 from app.core.logging import logger
 from app.governance.sharp_governance_service import SharpGovernanceService
 from app.models.agent import (
@@ -23,7 +23,6 @@ from app.models.resume import Resume
 from app.models.session import SessionContext
 from app.utils.json_parser import parse_json_payload
 
-langfuse = Langfuse()
 
 INTENT_TO_AGENTS = {
     Intent.RESUME_CRITIC: ["ResumeCriticAgent"],
@@ -43,8 +42,6 @@ class OrchestrationState:
     response: Optional[AgentResponse] = None
 
 
-# ---------- Orchestrator ----------
-
 class OrchestrationAgent:
     def __init__(
         self,
@@ -57,50 +54,103 @@ class OrchestrationAgent:
 
     # ---------- Public API ----------
 
-    @observe(name="orchestration_execution")
     def orchestrate(self, request: ChatRequest, context: SessionContext) -> AgentResponse:
         start = time.time()
         session_id = getattr(context, "session_id", "unknown")
         user_id = getattr(context, "user_id", None)
 
-        with langfuse.start_as_current_observation(name="orchestration_execution"):
-            with propagate_attributes(user_id=user_id, session_id=session_id):
+        # Top-level trace — groups everything under one orchestration run
+        with langfuse.trace(
+            name="orchestration_execution",
+            session_id=session_id,
+            metadata={
+                "user_id": user_id,
+                "intent": request.intent,
+                "has_resume_data": bool(request.resumeData),
+                "has_resume_file": bool(request.resumeFile),
+                "has_job_description": bool(request.jobDescription),
+            },
+        ) as trace:
 
-                intent = self._parse_intent(request.intent)
-                normalized = self._normalize_or_fail(request, context)
-                if isinstance(normalized, AgentResponse):
-                    return normalized
+            # Propagate session/user context so nested spans inherit it automatically
+            with propagate_attributes(session_id=session_id, user_id=user_id):
+                try:
+                    intent = self._parse_intent(request.intent)
 
-                resume, resume_doc = normalized
+                    # Span: intent parsing decision
+                    with trace.span(name="intent_resolution") as span:
+                        span.update(output={
+                            "resolved_intent": intent.value,
+                            "mapped_agents": INTENT_TO_AGENTS.get(intent, []),
+                        })
 
-                agent_input = AgentInput(
-                    intent=intent,
-                    resume=resume,
-                    resume_document=resume_doc,
-                    job_description=request.jobDescription or "",
-                    message_history=request.messageHistory or [],
-                    audio_data=getattr(request, "audioData", None),
-                )
+                    # Span: resume normalization
+                    with trace.span(name="resume_normalization") as span:
+                        normalized = self._normalize_or_fail(request, context)
+                        if isinstance(normalized, AgentResponse):
+                            span.update(output={
+                                "status": "failed",
+                                "reason": normalized.reasoning,
+                            })
+                            trace.update(output={"status": "failed", "reason": normalized.reasoning})
+                            return normalized
+                        resume, resume_doc = normalized
+                        span.update(output={
+                            "status": "success",
+                            "source": resume_doc.source,
+                        })
 
-                sequence = INTENT_TO_AGENTS[intent]
+                    agent_input = AgentInput(
+                        intent=intent,
+                        resume=resume,
+                        resume_document=resume_doc,
+                        job_description=request.jobDescription or "",
+                        message_history=request.messageHistory or [],
+                        audio_data=getattr(request, "audioData", None),
+                    )
 
-                state = OrchestrationState(
-                    input=agent_input,
-                    context=context,
-                    agent_sequence=sequence,
-                    artifacts=[],
-                )
+                    sequence = INTENT_TO_AGENTS[intent]
 
-                result = self.workflow.invoke(state)
-                response = result.get("response")
+                    state = OrchestrationState(
+                        input=agent_input,
+                        context=context,
+                        agent_sequence=sequence,
+                        artifacts=[],
+                    )
 
-                if not response:
-                    raise RuntimeError("No response produced")
+                    # Span: full workflow execution
+                    with trace.span(name="workflow_execution") as span:
+                        result = self.workflow.invoke(state)
+                        response = result.get("response")
 
-                logger.log_orchestration_complete(
-                    session_id, time.time() - start, sequence
-                )
-                return response
+                        if not response:
+                            raise RuntimeError("No response produced")
+
+                        span.update(output={
+                            "agents_executed": sequence,
+                            "artifact_count": len(result.get("artifacts", [])),
+                            "confidence_score": response.confidence_score,
+                        })
+
+                    elapsed = time.time() - start
+                    trace.update(output={
+                        "status": "success",
+                        "duration_seconds": round(elapsed, 3),
+                        "agents_executed": sequence,
+                        "final_agent": response.agent_name,
+                        "confidence_score": response.confidence_score,
+                    })
+
+                    logger.log_orchestration_complete(session_id, elapsed, sequence)
+                    return response
+
+                except Exception as e:
+                    trace.update(output={
+                        "status": "error",
+                        "error": str(e),
+                        "duration_seconds": round(time.time() - start, 3),
+                    })
+                    raise
 
     # ---------- Workflow ----------
 
@@ -121,26 +171,53 @@ class OrchestrationAgent:
 
         agent_name = state.agent_sequence[state.index]
         agent = self._get_agent(agent_name)
-
         context = state.context
         session_id = getattr(context, "session_id", "unknown")
-
         input_text = self._render_input(state.input)
 
-        logger.log_agent_execution_start(
-            agent_name, input_text, session_id, state.index
-        )
-
+        logger.log_agent_execution_start(agent_name, input_text, session_id, state.index)
         start = time.time()
-        response = agent.process(state.input, context)
 
-        logger.log_agent_execution_complete(
-            agent_name, response, session_id, time.time() - start
-        )
+        # Per-agent span — gives individual traceability for each agent decision
+        with langfuse.trace(
+            name=f"{agent_name}_execution",
+            session_id=session_id,
+            metadata={
+                **get_propagated_attrs(),           # inherits user_id etc. from propagate_attributes
+                "agent_name": agent_name,
+                "agent_index": state.index,
+                "intent": str(state.input.intent) if state.input.intent else None,
+                "input_length": len(input_text),
+            },
+        ) as trace:
+            try:
+                response = agent.process(state.input, context)
+                elapsed = time.time() - start
 
-        audited = self.governance.audit(response, input_text)
+                audited = self.governance.audit(response, input_text)
+
+                # Log the agent's decision and governance outcome
+                trace.update(output={
+                    "status": "success",
+                    "duration_seconds": round(elapsed, 3),
+                    "confidence_score": audited.confidence_score,
+                    "response_length": len(str(audited.content or "")),
+                    "decision_trace": audited.decision_trace,
+                    "governance_applied": audited != response,  # True if governance modified it
+                })
+
+                logger.log_agent_execution_complete(agent_name, response, session_id, elapsed)
+
+            except Exception as e:
+                trace.update(output={
+                    "status": "error",
+                    "error": str(e),
+                    "agent_name": agent_name,
+                    "duration_seconds": round(time.time() - start, 3),
+                })
+                raise
+
         self._update_context(context, audited, agent_name)
-
         state.response = audited
         state.artifacts.append(self._build_artifact(audited, agent_name))
         state.index += 1

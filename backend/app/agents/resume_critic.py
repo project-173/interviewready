@@ -4,9 +4,8 @@ import json
 import time
 from typing import Dict, Any
 
-from langfuse import observe
-
 from .base import BaseAgent
+from app.core.langfuse_client import trace_agent_process
 from ..core.logging import logger
 from ..core.config import settings
 from ..core.constants import ANTI_JAILBREAK_DIRECTIVE, RESUME_SCHEMA
@@ -59,7 +58,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             name="ResumeCriticAgent",
         )
     
-    @observe(name="resume_critic_process", as_type="agent")
+    @trace_agent_process
     def process(
         self, input_data: AgentInput, context: SessionContext
     ) -> AgentResponse:

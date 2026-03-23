@@ -7,8 +7,8 @@ import time
 from typing import Any
 
 from app.agents.base import BaseAgent
+from app.core.langfuse_client import trace_agent_process
 from app.core.logging import logger
-from langfuse import observe
 from ..core.config import settings
 from app.models import AgentResponse, Resume, ResumeDocument
 from app.models.agent import AgentInput
@@ -135,7 +135,7 @@ Output format:
             name="ExtractorAgent",
         )
 
-    @observe(name="extractor_process", as_type="agent")
+    @trace_agent_process
     def process(
         self, input_data: AgentInput | str | bytes, context: SessionContext
     ) -> AgentResponse:

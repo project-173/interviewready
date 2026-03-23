@@ -3,11 +3,9 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from langfuse import Langfuse, observe, propagate_attributes
 
 from app.api.v1.services import get_orchestration_agent
-
-langfuse = Langfuse()
+from app.core.langfuse_client import langfuse, propagate_attributes
 
 router = APIRouter()
 
@@ -15,7 +13,6 @@ SessionId = Annotated[str | None, Query(alias="sessionId")]
 OrchestrationAgent = Annotated[object, Depends(get_orchestration_agent)]
 
 @router.get("")
-@observe(name="list_agents")
 async def list_agents(
     orchestrator: OrchestrationAgent,
     session_id: SessionId = None,
@@ -25,30 +22,36 @@ async def list_agents(
     user_id = "user-id"
     effective_session_id = session_id or user_id
 
-    with langfuse.start_as_current_observation(
-        as_type="span",
+    with langfuse.trace(
         name="list_agents",
+        session_id=effective_session_id,
         metadata={
             "endpoint": "/api/v1/agents",
             "method": "GET",
         },
     ) as trace:
         with propagate_attributes(user_id=user_id, session_id=effective_session_id):
-            if orchestrator is None:
-                trace.update(
-                    output={"error": "orchestrator_unavailable"}
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Orchestration service unavailable",
-                )
+            with trace.span(name="fetch_agent_prompts") as span:
+                if orchestrator is None:
+                    span.update(output={"status": "error", "error": "orchestrator_unavailable"})
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Orchestration service unavailable",
+                    )
 
-        result = {
-            name: agent.get_system_prompt()
-            for name, agent in orchestrator.get_agents().items()
-        }
+                agent_map = getattr(orchestrator, "agent_list", None)
+                if not isinstance(agent_map, dict):
+                    span.update(output={"status": "error", "error": "agent_map_unavailable"})
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Agent registry unavailable",
+                    )
 
-        langfuse.update_current_span(
-            output={"success": True, "agent_count": len(result)}
-        )
-        return result
+                result = {
+                    name: agent.get_system_prompt()
+                    for name, agent in agent_map.items()
+                }
+                span.update(output={"status": "success", "agent_count": len(result)})
+
+            trace.update(output={"status": "success", "agent_count": len(result)})
+            return result

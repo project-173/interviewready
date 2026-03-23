@@ -6,10 +6,8 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Protocol, Optional, Dict, Any, Union, List, TypeVar, Type
 
+from app.core.langfuse_client import langfuse, propagate_attributes
 from app.utils.json_parser import parse_json_object
-from langfuse import Langfuse, propagate_attributes
-
-langfuse = Langfuse()
 from pydantic import BaseModel, ValidationError
 from ..core.logging import logger
 from ..models.agent import AgentResponse
@@ -123,18 +121,14 @@ class BaseAgent(ABC, BaseAgentProtocol):
 
         user_id = getattr(context, "user_id", None)
 
-        with langfuse.start_as_current_observation(
-            as_type="span",
-            name=f"{agent_name}_llm_call",
-            metadata={"agent": agent_name, "prompt_length": len(input_text)},
-        ) as trace:
-            with propagate_attributes(user_id=user_id, session_id=session_id):
-                with trace.start_as_current_observation(
-                    as_type="span",
-                    name="call_gemini",
-                    input={"prompt": input_text[:1000]},
-                    metadata={"model": self.gemini_service.model_name},
-                ) as span:
+        with propagate_attributes(user_id=user_id, session_id=session_id):
+            with langfuse.trace(
+                name=f"{agent_name}_llm_call",
+                session_id=session_id,
+                metadata={"agent": agent_name, "prompt_length": len(input_text)},
+                input={"prompt": input_text[:1000]},
+            ) as trace:
+                with trace.span(name="call_gemini", metadata={"model": self.gemini_service.model_name}) as span:
                     # Log API call start
                     logger.log_api_call(
                         "gemini",
@@ -149,9 +143,16 @@ class BaseAgent(ABC, BaseAgentProtocol):
 
                     # Scan input for prompt injection (LLM Guard)
                     llm_guard = get_llm_guard_scanner()
-                    input_safe, sanitized_input, input_issues = llm_guard.scan_input(
-                        input_text
-                    )
+                    with span.span(name="input_guardrail_scan") as guardrail_span:
+                        input_safe, sanitized_input, input_issues = llm_guard.scan_input(
+                            input_text
+                        )
+                        guardrail_span.update(
+                            output={
+                                "input_safe": input_safe,
+                                "issues_count": len(input_issues or []),
+                            }
+                        )
 
                     if not input_safe:
                         logger.security_event(
@@ -165,32 +166,35 @@ class BaseAgent(ABC, BaseAgentProtocol):
                         )
 
                     try:
-                        # Use mock service if enabled
-                        if self.mock_service:
-                            logger.debug(
-                                "Using mock Gemini service",
-                                session_id=session_id,
-                                agent_name=agent_name,
-                            )
-                            response = self.mock_service.generate_response(
-                                system_prompt=self.system_prompt,
-                                user_input=input_text,
-                                context=context,
-                            )
-                        else:
-                            # Use real Gemini service
-                            logger.debug(
-                                "Using real Gemini service",
-                                session_id=session_id,
-                                agent_name=agent_name,
-                            )
-                            response = self.gemini_service.generate_response(
-                                system_prompt=self.system_prompt,
-                                user_input=input_text,
-                                context=context,
-                            )
+                        with span.span(name="model_inference") as inference_span:
+                            # Use mock service if enabled
+                            if self.mock_service:
+                                logger.debug(
+                                    "Using mock Gemini service",
+                                    session_id=session_id,
+                                    agent_name=agent_name,
+                                )
+                                response = self.mock_service.generate_response(
+                                    system_prompt=self.system_prompt,
+                                    user_input=input_text,
+                                    context=context,
+                                )
+                                inference_span.update(output={"service": "mock"})
+                            else:
+                                # Use real Gemini service
+                                logger.debug(
+                                    "Using real Gemini service",
+                                    session_id=session_id,
+                                    agent_name=agent_name,
+                                )
+                                response = self.gemini_service.generate_response(
+                                    system_prompt=self.system_prompt,
+                                    user_input=input_text,
+                                    context=context,
+                                )
+                                inference_span.update(output={"service": "gemini"})
 
-                        span.update(output=response)
+                        span.update(output={"raw_response_length": len(response)})
                         api_execution_time = time.time() - api_start_time
 
                         # Log successful API call
@@ -205,37 +209,60 @@ class BaseAgent(ABC, BaseAgentProtocol):
                             else response,
                         )
 
-                        # Scan output with LLM Guard
-                        output_safe, llm_guard_output, output_issues = (
-                            llm_guard.scan_output(response)
-                        )
-                        if not output_safe:
-                            logger.security_event(
-                                "output_sensitive_detected",
-                                agent_name=agent_name,
-                                session_id=session_id,
-                                issues=output_issues,
+                        # Scan output with LLM Guard + sanitize output (defense in depth)
+                        with span.span(name="output_guardrails") as output_span:
+                            output_safe, llm_guard_output, output_issues = (
+                                llm_guard.scan_output(response)
+                            )
+                            if not output_safe:
+                                logger.security_event(
+                                    "output_sensitive_detected",
+                                    agent_name=agent_name,
+                                    session_id=session_id,
+                                    issues=output_issues,
+                                )
+
+                            sanitizer = get_output_sanitizer()
+                            is_safe, sanitized_response, issues = sanitizer.sanitize(
+                                response
                             )
 
-                        # Sanitize output with OutputSanitizer (defense in depth)
-                        sanitizer = get_output_sanitizer()
-                        is_safe, sanitized_response, issues = sanitizer.sanitize(
-                            response
-                        )
+                            if not is_safe:
+                                logger.security_event(
+                                    "output_sanitization_blocked",
+                                    agent_name=agent_name,
+                                    session_id=session_id,
+                                    issues=issues,
+                                )
 
-                        if not is_safe:
-                            logger.security_event(
-                                "output_sanitization_blocked",
-                                agent_name=agent_name,
-                                session_id=session_id,
-                                issues=issues,
+                            output_span.update(
+                                output={
+                                    "output_safe": output_safe,
+                                    "sanitized_safe": is_safe,
+                                    "output_issue_count": len(output_issues or []),
+                                    "sanitize_issue_count": len(issues or []),
+                                }
                             )
+
+                        trace.update(
+                            output={
+                                "status": "success",
+                                "duration_seconds": round(api_execution_time, 3),
+                                "response_length": len(sanitized_response),
+                            }
+                        )
 
                         return sanitized_response
 
                     except Exception as e:
                         api_execution_time = time.time() - api_start_time
-                        trace.update(output={"error": "exception", "message": str(e)})
+                        trace.update(
+                            output={
+                                "status": "error",
+                                "message": str(e),
+                                "duration_seconds": round(api_execution_time, 3),
+                            }
+                        )
                         logger.log_agent_error(agent_name, e, session_id)
                         logger.error(
                             "Gemini API call failed",

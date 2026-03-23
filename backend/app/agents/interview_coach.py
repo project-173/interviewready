@@ -3,10 +3,10 @@
 import json
 import time
 from typing import Optional
-from langfuse import observe
+
+from app.core.langfuse_client import trace_agent_process
 from .base import BaseAgent
 from .gemini_service import GeminiLiveService
-from langfuse import observe
 from ..core.logging import logger
 from ..core.config import settings
 from ..core.constants import ANTI_JAILBREAK_DIRECTIVE
@@ -84,7 +84,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             else:
                 print("GEMINI_API_KEY not set; Gemini Live will not be used.")
 
-    @observe(name="interview_coach_process", as_type="agent")
+    @trace_agent_process
     def process(
         self, input_data: AgentInput | str | bytes, context: SessionContext
     ) -> AgentResponse:
@@ -303,7 +303,6 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         )
         return f"Request data: {json.dumps(resume_data, indent=2)}"
 
-    @observe(name="_call_gemini_live_audio", as_type="tool")
     def _call_gemini_live_audio(
         self, audio_data: bytes, system_prompt: str
     ) -> Optional[str]:
@@ -366,7 +365,6 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             )
             return f"Error contacting Gemini Live for audio: {str(e)}"
 
-    @observe(name="_call_gemini_live", as_type="tool")
     def _call_gemini_live(self, input_text: str) -> Optional[str]:
         """Call Gemini Live service with timeout.
 
