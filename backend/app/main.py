@@ -5,6 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from app.core.limiter import limiter
+
 from app.core.config import settings
 from app.api.v1 import api_router
 
@@ -33,6 +37,9 @@ app = FastAPI(
     lifespan=lifespan,
     redirect_slashes=False,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Configure CORS
 # When allow_credentials=True, origins must be explicit (no wildcard)
