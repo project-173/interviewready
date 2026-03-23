@@ -4,21 +4,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+from langfuse.langchain import CallbackHandler
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from app.core.config import settings
 from app.api.v1 import api_router
 
 MAX_REQUEST_SIZE = 20 * 1024 * 1024
-
-# Safe import for Langfuse
-try:
-    from langfuse.callback import CallbackHandler
-
-    HAS_LANGFUSE = True
-except ImportError:
-    HAS_LANGFUSE = False
-    print("WARNING: Langfuse package not found. Monitoring is disabled.")
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -95,13 +89,9 @@ app.include_router(api_router, prefix="/api/v1")
 
 # Initialize Langfuse Callback Handler safely
 langfuse_handler = None
-if HAS_LANGFUSE and settings.LANGFUSE_PUBLIC_KEY:
+if settings.LANGFUSE_PUBLIC_KEY:
     try:
-        langfuse_handler = CallbackHandler(
-            public_key=settings.LANGFUSE_PUBLIC_KEY,
-            secret_key=settings.LANGFUSE_SECRET_KEY,
-            host=settings.LANGFUSE_HOST,
-        )
+        langfuse_handler = CallbackHandler()
         print("Langfuse callback handler initialized.")
     except Exception as e:
         print(f"Failed to initialize Langfuse handler: {e}")
