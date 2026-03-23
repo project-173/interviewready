@@ -4,6 +4,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+from langfuse.langchain import CallbackHandler
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from app.core.config import settings
 from app.api.v1 import api_router
@@ -83,6 +87,14 @@ async def log_requests(request, call_next):
 # Include API routes
 app.include_router(api_router, prefix="/api/v1")
 
+# Initialize Langfuse Callback Handler safely
+langfuse_handler = None
+if settings.LANGFUSE_PUBLIC_KEY:
+    try:
+        langfuse_handler = CallbackHandler()
+        print("Langfuse callback handler initialized.")
+    except Exception as e:
+        print(f"Failed to initialize Langfuse handler: {e}")
 
 @app.get("/health")
 async def health_check():
