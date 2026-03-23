@@ -25,22 +25,50 @@ def _ensure_spacy_models() -> bool:
         except Exception:
             pass
 
-        try:
-            logger.info(f"Installing spaCy model: {model}...")
-            result = subprocess.run(
+        # Try multiple installation methods
+        installation_methods = [
+            # Method 1: Use pip to install from the direct URL (from pyproject.toml)
+            lambda: subprocess.run(
+                [sys.executable, "-m", "pip", "install", 
+                 "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            ),
+            # Method 2: Use spaCy download command
+            lambda: subprocess.run(
                 [sys.executable, "-m", "spacy", "download", model],
                 capture_output=True,
                 text=True,
                 timeout=120,
-            )
-            if result.returncode == 0:
-                logger.info(f"Successfully installed spaCy model: {model}")
-            else:
-                logger.warning(
-                    f"Failed to install {model}: {result.stderr[:200] if result.stderr else 'Unknown error'}"
-                )
-        except Exception as e:
-            logger.warning(f"Could not install {model}: {e}")
+            ),
+            # Method 3: Use pip install with model name
+            lambda: subprocess.run(
+                [sys.executable, "-m", "pip", "install", f"{model}==3.8.0"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            ),
+        ]
+
+        installed = False
+        for i, install_method in enumerate(installation_methods, 1):
+            try:
+                logger.info(f"Trying installation method {i} for spaCy model: {model}...")
+                result = install_method()
+                if result.returncode == 0:
+                    logger.info(f"Successfully installed spaCy model: {model} using method {i}")
+                    installed = True
+                    break
+                else:
+                    logger.warning(
+                        f"Method {i} failed for {model}: {result.stderr[:200] if result.stderr else 'Unknown error'}"
+                    )
+            except Exception as e:
+                logger.warning(f"Method {i} exception for {model}: {e}")
+
+        if not installed:
+            logger.error(f"All installation methods failed for spaCy model: {model}")
 
     try:
         import spacy
@@ -48,6 +76,7 @@ def _ensure_spacy_models() -> bool:
         spacy.load("en_core_web_sm")
         return True
     except Exception:
+        logger.error(f"Failed to load spaCy model after installation attempts")
         return False
 
 
@@ -152,20 +181,36 @@ class LLMGuardScanner:
                 try:
                     vault = get_vault()
                     if vault:
-                        anonymizer = Anonymize(vault=vault, language="en")
-                        sanitized, is_valid, risk_score = anonymizer.scan(sanitized)
-                        if not is_valid:
-                            issue = {
-                                "scanner": "Anonymize",
-                                "risk_score": risk_score,
-                                "reason": "PII detected in input",
-                            }
-                            issues.append(issue)
+                        try:
+                            anonymizer = Anonymize(vault=vault, language="en")
+                        except SystemExit:
+                            logger.warning(
+                                "SpaCy Anonymize scanner initialization failed with SystemExit, disabling spaCy scanners"
+                            )
+                            HAS_SPACY = False
+                            anonymizer = None
+                        
+                        if anonymizer is not None:
+                            sanitized, is_valid, risk_score = anonymizer.scan(sanitized)
+                            if not is_valid:
+                                issue = {
+                                    "scanner": "Anonymize",
+                                    "risk_score": risk_score,
+                                    "reason": "PII detected in input",
+                                }
+                                issues.append(issue)
+                except SystemExit:
+                    # Handle spaCy download failures that cause SystemExit
+                    logger.warning(
+                        "SpaCy Anonymize scanner failed with SystemExit, disabling spaCy scanners"
+                    )
+                    HAS_SPACY = False
                 except Exception as e:
                     if (
                         "spacy" in str(e).lower()
                         or "zh_core" in str(e).lower()
                         or "download" in str(e).lower()
+                        or "model" in str(e).lower()
                     ):
                         logger.warning(
                             f"SpaCy Anonymize scanner failed, disabling spaCy scanners: {e}"
@@ -210,23 +255,39 @@ class LLMGuardScanner:
 
             if HAS_SPACY:
                 try:
-                    sensitive_scanner = Sensitive()
-                    sanitized, is_valid, risk_score = sensitive_scanner.scan(
-                        "", sanitized
-                    )
-                    if not is_valid:
-                        issues.append(
-                            {
-                                "scanner": "Sensitive",
-                                "risk_score": risk_score,
-                                "reason": "Sensitive content detected",
-                            }
+                    try:
+                        sensitive_scanner = Sensitive()
+                    except SystemExit:
+                        logger.warning(
+                            "SpaCy Sensitive scanner initialization failed with SystemExit, disabling spaCy scanners"
                         )
+                        HAS_SPACY = False
+                        sensitive_scanner = None
+                    
+                    if sensitive_scanner is not None:
+                        sanitized, is_valid, risk_score = sensitive_scanner.scan(
+                            "", sanitized
+                        )
+                        if not is_valid:
+                            issues.append(
+                                {
+                                    "scanner": "Sensitive",
+                                    "risk_score": risk_score,
+                                    "reason": "Sensitive content detected",
+                                }
+                            )
+                except SystemExit:
+                    # Handle spaCy download failures that cause SystemExit
+                    logger.warning(
+                        "SpaCy Sensitive scanner failed with SystemExit, disabling spaCy scanners"
+                    )
+                    HAS_SPACY = False
                 except Exception as e:
                     if (
                         "spacy" in str(e).lower()
                         or "zh_core" in str(e).lower()
                         or "download" in str(e).lower()
+                        or "model" in str(e).lower()
                     ):
                         logger.warning(
                             f"SpaCy Sensitive scanner failed, disabling spaCy scanners: {e}"

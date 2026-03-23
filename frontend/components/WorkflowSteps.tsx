@@ -283,32 +283,32 @@ export const InterviewStep: React.FC<{
   chatEndRef: React.RefObject<HTMLDivElement>;
 }> = ({ history, onSend, onSendAudio, isLoading, chatEndRef }) => {
   const [isRecording, setIsRecording] = React.useState(false);
-  const [mediaRecorder, setMediaRecorder] = React.useState<MediaRecorder | null>(null);
-  const [audioChunks, setAudioChunks] = React.useState<Blob[]>([]);
+  const [audioContext, setAudioContext] = React.useState<AudioContext | null>(null);
+  const [mediaStream, setMediaStream] = React.useState<MediaStream | null>(null);
+  const [processor, setProcessor] = React.useState<ScriptProcessorNode | null>(null);
+  const audioChunksRef = React.useRef<Float32Array[]>([]);
 
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      const chunks: Blob[] = [];
+      const context = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = context.createMediaStreamSource(stream);
+      const scriptProcessor = context.createScriptProcessor(4096, 1, 1);
 
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunks.push(event.data);
-        }
+      audioChunksRef.current = [];
+
+      scriptProcessor.onaudioprocess = (event) => {
+        const inputBuffer = event.inputBuffer;
+        const inputData = inputBuffer.getChannelData(0);
+        audioChunksRef.current.push(new Float32Array(inputData));
       };
 
-      recorder.onstop = () => {
-        const audioBlob = new Blob(chunks, { type: 'audio/wav' });
-        audioBlob.arrayBuffer().then(buffer => {
-          onSendAudio(new Uint8Array(buffer));
-        });
-        stream.getTracks().forEach(track => track.stop());
-      };
+      source.connect(scriptProcessor);
+      scriptProcessor.connect(context.destination);
 
-      setMediaRecorder(recorder);
-      setAudioChunks(chunks);
-      recorder.start();
+      setAudioContext(context);
+      setMediaStream(stream);
+      setProcessor(scriptProcessor);
       setIsRecording(true);
     } catch (error) {
       console.error('Error starting recording:', error);
@@ -316,8 +316,29 @@ export const InterviewStep: React.FC<{
   };
 
   const stopRecording = () => {
-    if (mediaRecorder && isRecording) {
-      mediaRecorder.stop();
+    if (audioContext && mediaStream && processor) {
+      processor.disconnect();
+      audioContext.close();
+      mediaStream.getTracks().forEach(track => track.stop());
+
+      // Convert Float32Array chunks to Int16Array PCM
+      const sampleRate = 16000; // Resample to 16kHz
+      const allSamples: number[] = [];
+      
+      audioChunksRef.current.forEach(chunk => {
+        // Simple downsampling from 44.1kHz or 48kHz to 16kHz
+        const ratio = audioContext.sampleRate / sampleRate;
+        for (let i = 0; i < chunk.length; i += ratio) {
+          allSamples.push(chunk[Math.floor(i)] * 32767); // Convert to 16-bit
+        }
+      });
+
+      const pcmData = new Int16Array(allSamples);
+      onSendAudio(new Uint8Array(pcmData.buffer));
+
+      setAudioContext(null);
+      setMediaStream(null);
+      setProcessor(null);
       setIsRecording(false);
     }
   };

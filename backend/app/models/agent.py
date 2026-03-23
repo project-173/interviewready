@@ -61,8 +61,20 @@ class ChatRequest(BaseModel):
     def decode_audio_data(cls, v):
         if isinstance(v, str):
             import base64
-            return base64.b64decode(v)
-        return v  # Audio data for interview coaching
+            decoded = base64.b64decode(v)
+        else:
+            decoded = v
+
+        if decoded is None:
+            return None
+
+        # Convert PCM to WAV if not already WAV
+        from ..utils.audio_utils import pcm_to_wav, validate_audio_format
+        if not validate_audio_format(decoded):
+            # Assume it's PCM and convert to WAV
+            decoded = pcm_to_wav(decoded)
+
+        return decoded
 
 
 class ResumeDocument(BaseModel):
@@ -153,6 +165,26 @@ class AlignmentReport(BaseModel):
     experienceMatch: Optional[str] = None
     fitScore: Optional[int] = None
     reasoning: Optional[str] = None
+
+
+class ContentSkill(BaseModel):
+    """Skill evidence extracted from the resume."""
+
+    name: str
+    category: str
+    confidenceScore: float
+    evidenceStrength: Literal["HIGH", "MEDIUM", "LOW"]
+    evidence: str
+
+
+class ContentAchievement(BaseModel):
+    """Achievement evidence extracted from the resume."""
+
+    description: str
+    impact: Literal["HIGH", "MEDIUM", "LOW"]
+    quantifiable: bool
+    confidenceScore: float
+    originalText: str
 
 
 class ContentSuggestion(BaseModel):

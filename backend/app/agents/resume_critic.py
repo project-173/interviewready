@@ -11,6 +11,8 @@ from ..core.logging import logger
 from ..core.config import settings
 from ..core.constants import ANTI_JAILBREAK_DIRECTIVE, RESUME_SCHEMA
 from ..models.agent import AgentResponse, ResumeCriticReport, AgentInput
+from ..core.constants import ANTI_JAILBREAK_DIRECTIVE, RESUME_SCHEMA
+from ..models.agent import AgentResponse, ResumeCriticReport, AgentInput
 from ..models.session import SessionContext
 
 class ResumeCriticAgent(BaseAgent):

@@ -258,7 +258,8 @@ class GeminiLiveService:
         text_prompt: str = "",
         timeout_ms: int = 10000,
     ) -> Optional[str]:
-        """Send audio data and wait for response.
+        """Send audio data and wait for response using Gemini API.
+
         Args:
             audio_data: Audio data as bytes
             system_prompt: System prompt for the model
@@ -285,19 +286,21 @@ class GeminiLiveService:
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
+                    max_output_tokens=MAX_OUTPUT_TOKENS,
                 ),
             )
             return response.text
         except Exception as e:
-            return f"Error in Gemini Live Audio: {str(e)}"
+            return f"Error in Gemini Audio: {str(e)}"
 
     def send_textAndWaitResponse(
-        self, text: str, timeout_ms: int = 10000
+        self, text: str, system_prompt: str = "", timeout_ms: int = 10000
     ) -> Optional[str]:
-        """Send text and wait for response.
+        """Send text and wait for response using Gemini API.
 
         Args:
             text: Text to send
+            system_prompt: System prompt
             timeout_ms: Timeout in milliseconds
 
         Returns:
@@ -307,10 +310,16 @@ class GeminiLiveService:
             return None
 
         try:
+            from google.genai import types
+
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=text,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    max_output_tokens=MAX_OUTPUT_TOKENS,
+                ),
             )
             return response.text
         except Exception as e:
-            return f"Error in Gemini Live: {str(e)}"
+            return f"Error in Gemini: {str(e)}"
