@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: Optional[str] = None
     LANGFUSE_SECRET_KEY: Optional[str] = None
     LANGFUSE_HOST: Optional[str] = "https://cloud.langfuse.com"
+    LANGFUSE_LLM_AS_A_JUDGE_ENABLED: bool = True
+
+    # Evals
+    SKIP_EVAL_TESTS: bool = True
 
     # Mock agent response
     MOCK_RESUME_CRITIC_AGENT: bool = False
