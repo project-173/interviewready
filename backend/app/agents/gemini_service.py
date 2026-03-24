@@ -29,7 +29,7 @@ class GeminiService:
     """Service for interacting with Google Gemini API."""
 
     def __init__(
-        self, api_key: Optional[str] = None, model_name: str = "gemini-1.5-flash"
+        self, api_key: Optional[str] = None, model_name: str = "gemini-2.5-flash"
     ):
         """Initialize Gemini service.
 
@@ -233,7 +233,7 @@ class GeminiLiveService:
     def connect(
         self,
         api_key: str,
-        model_name: str = "gemini-1.5-flash",
+        model_name: str = "gemini-2.5-flash",
     ) -> None:
         """Connect to Gemini Live API.
 

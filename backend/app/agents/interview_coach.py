@@ -62,7 +62,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         + "\n\n" + ANTI_JAILBREAK_DIRECTIVE
     )
     CONFIDENCE_SCORE = 0.85
-    DEFAULT_MODEL = "gemini-1.5-flash"
+    DEFAULT_MODEL = "gemini-2.5-flash"
 
     def __init__(self, gemini_service):
         """Initialize Interview Coach Agent.
