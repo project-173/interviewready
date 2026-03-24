@@ -406,46 +406,6 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             + "\n\n" + ANTI_JAILBREAK_DIRECTIVE
         )
 
-    def _build_reask_system_prompt(self) -> str:
-        """Build system prompt for re-asking the current question due to invalid answer.
-        
-        Returns:
-            System prompt for re-asking the current question
-        """
-        return (
-            """You are an expert Interview Coach. The candidate provided an inadequate answer to the current interview question. You need to re-ask the SAME question and encourage them to provide a proper, thoughtful response.
-
-CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
-
-RULES:
-1. Your entire response must be exactly one JSON object
-2. Start with '{' and end with '}' - nothing else
-3. Do NOT include markdown code blocks (no ```json or ```)
-4. Do NOT include explanatory text, preamble, summary, or chat responses
-5. Do NOT include comments (// or /* */)
-6. Do NOT use null values - use empty strings or empty arrays
-
-Your role:
-1. Re-ask the EXACT SAME question that was previously asked
-2. Provide feedback explaining why their previous answer was inadequate
-3. Encourage them to provide a detailed, thoughtful response
-4. Do NOT advance to a new question - keep the same question number
-
-RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
-{
-  "current_question_number": 1,
-  "total_questions": 5,
-  "interview_type": "reask",
-  "question": "Re-ask the exact same question that was previously asked",
-  "keywords": ["keyword1", "keyword2"],
-  "tip": "Brief guidance on how to provide a proper answer",
-  "feedback": "Explain why their previous answer was inadequate and what they should improve",
-  "next_challenge": "A brief note on what to focus on for this question"
-}"""
-            + "\n\n" + ANTI_JAILBREAK_DIRECTIVE
-        )
-
-
     @observe(name="interview_coach_process", as_type="agent")
     def process(
         self, input_data: AgentInput | str | bytes, context: SessionContext
@@ -462,6 +422,9 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         session_id = getattr(context, "session_id", "unknown")
         agent_name = self.get_name()
         processing_start_time = time.time()
+        
+        # Use the main system prompt for all scenarios
+        current_system_prompt = self.SYSTEM_PROMPT
         
         # Extract input
         if isinstance(input_data, AgentInput):
@@ -489,7 +452,9 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                         session_id=session_id,
                     )
                 else:
-                    # Validate the user's answer before storing and advancing
+                    # Validate the user's answer and prepare for AI processing
+                    is_valid = True
+                    validation_message = ""
                     if user_answer:
                         is_valid, validation_message = self._comprehensive_validate_answer(
                             user_answer, 
@@ -505,32 +470,12 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                                 answer_preview=user_answer[:50] + "..." if len(user_answer) > 50 else user_answer,
                             )
                         else:
-                            # Invalid answer - don't advance, return validation message
+                            # Invalid answer - don't advance, but let AI agent handle the feedback
                             logger.debug(
-                                "User provided invalid answer, not advancing",
+                                "User provided invalid answer, will use re-ask prompt",
                                 session_id=session_id,
                                 answer_preview=user_answer[:50] + "..." if len(user_answer) > 50 else user_answer,
                                 validation_message=validation_message,
-                            )
-                            # Return a response asking for a proper answer
-                            return AgentResponse(
-                                agent_name=self.get_name(),
-                                content=f'{{"current_question_number": {state["current_question_index"] + 1}, "total_questions": {state["total_questions"]}, "interview_type": "follow_up", "question": "Please provide a proper answer to continue with the interview.", "keywords": [], "tip": "Take your time to think about the question and provide a detailed, thoughtful response.", "feedback": "{validation_message}", "next_challenge": "Focus on giving a complete answer to progress."}}',
-                                reasoning="User provided an inadequate answer, requesting proper response.",
-                                confidence_score=self.CONFIDENCE_SCORE,
-                                decision_trace=[
-                                    f"InterviewCoachAgent: Detected inadequate answer for question {state['current_question_index'] + 1}",
-                                    f"InterviewCoachAgent: Requested proper response instead of advancing",
-                                ],
-                                sharp_metadata={
-                                    "analysis_type": "interview_coaching",
-                                    "confidence_score": self.CONFIDENCE_SCORE,
-                                    "method_used": "validation_check",
-                                    "input_type": "text",
-                                    "current_question_number": state["current_question_index"] + 1,
-                                    "total_questions": state["total_questions"],
-                                    "validation_failed": True,
-                                },
                             )
                     
                     # Check if interview is complete (only if we advanced)
@@ -547,17 +492,10 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 # Build interview-aware prompt
                 input_text = self._build_interview_prompt(input_data, context, user_answer if is_follow_up else None)
                 
-                # Use different system prompt for completion or re-ask
-                current_system_prompt = self.system_prompt
-                state = self._get_interview_state(context)
-                if not state["interview_active"] and state["current_question_index"] >= state["total_questions"]:
-                    current_system_prompt = self._build_completion_system_prompt()
-                elif is_follow_up and user_answer and not self._comprehensive_validate_answer(user_answer, state["asked_questions"][-1] if state["asked_questions"] else "", context, self.USE_AI_VALIDATION)[0]:
-                    # For invalid answers, use a prompt that re-asks the current question
-                    current_system_prompt = self._build_reask_system_prompt()
-                    # Update the input text to include the current question for re-asking
+                # Add validation context if answer was invalid
+                if is_follow_up and user_answer and not is_valid:
                     current_question = state["asked_questions"][-1] if state["asked_questions"] else "Please answer the current interview question properly."
-                    input_text = f"{input_text}\n\nCURRENT QUESTION TO RE-ASK: {current_question}\n\nUSER'S INADEQUATE ANSWER: {user_answer}"
+                    input_text = f"{input_text}\n\nNOTE: The user's previous answer was flagged as inadequate.\n\nCURRENT QUESTION TO RE-ASK: {current_question}\n\nUSER'S INADEQUATE ANSWER: {user_answer}\n\nVALIDATION FEEDBACK: {validation_message}\n\nPlease provide feedback on this inadequate answer and re-ask the same question."
         else:
             input_text = input_data
 
