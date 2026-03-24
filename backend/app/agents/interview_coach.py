@@ -21,7 +21,7 @@ class InterviewCoachAgent(BaseAgent):
     MOCK_RESPONSE_KEY = "InterviewCoachAgent"
 
     SYSTEM_PROMPT = (
-        """You are an expert Interview Coach specializing in personalized interview preparation. Your job is to simulate a realistic interview by asking ONE question at a time and guiding the candidate through their responses.
+        """You are an expert Interview Coach specializing in personalized interview preparation. Your job is to simulate a realistic interview by asking questions ONE at a time and guiding the candidate through their responses.
 
 CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
 
@@ -44,6 +44,7 @@ Your role:
 PROCESS:
 - First message: Introduce the mock interview and ask the FIRST question
 - Subsequent messages: Provide feedback on their answer and ask the NEXT question
+- Continue asking questions in sequence up to a total of 5 questions
 - Always ask questions that bridge their resume to the job requirements
 - Vary question types: behavioral, technical, situational, competency
 
@@ -55,10 +56,10 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
   "question": "Ask ONE question that combines interview simulation with personalized coaching",
   "keywords": ["keyword1", "keyword2"],
   "tip": "Brief guidance on how to approach this question",
-  "feedback": "If this is a follow-up response: provide constructive feedback on their answer",
+  "feedback": "Provide constructive feedback on their answer if this is a follow-up response, otherwise leave empty",
   "next_challenge": "A brief note on what to focus on for the next question"
 }"""
-        + ANTI_JAILBREAK_DIRECTIVE
+        + "\n\n" + ANTI_JAILBREAK_DIRECTIVE
     )
     CONFIDENCE_SCORE = 0.85
     DEFAULT_MODEL = "gemini-2.5-flash-live"
@@ -176,6 +177,40 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             Formatted prompt string
         """
         state = self._get_interview_state(context)
+        
+        # Check if interview is complete
+        if not state["interview_active"] and state["current_question_index"] >= state["total_questions"]:
+            # Build summary prompt
+            resume_data = (
+                input_data.resume.model_dump(exclude_none=True)
+                if input_data.resume is not None
+                else {}
+            )
+            
+            job_desc = (
+                getattr(input_data, "job_description", "") or
+                context.job_description or
+                ""
+            )
+            
+            prompt = f"""Resume:\n{json.dumps(resume_data, indent=2)}
+
+Job Description:\n{job_desc}
+
+Interview Summary:
+- Total Questions Asked: {len(state['asked_questions'])}
+- User Answers: {len(state['user_answers'])}
+- Interview Completed: Yes
+
+All user answers:\n{json.dumps(state['user_answers'], indent=2)}
+
+Previously Asked Questions:\n{json.dumps(state['asked_questions'], indent=2)}
+
+Generate a comprehensive interview summary and feedback for the candidate. Include strengths, areas for improvement, and final recommendations.
+"""
+            return prompt
+        
+        # Normal interview prompt
         resume_data = (
             input_data.resume.model_dump(exclude_none=True)
             if input_data.resume is not None
@@ -208,6 +243,30 @@ Interview Progress:
         
         return prompt
 
+    def _build_completion_system_prompt(self) -> str:
+        """Build system prompt for interview completion summary.
+        
+        Returns:
+            System prompt for generating interview summary
+        """
+        return (
+            """You are an expert Interview Coach providing a comprehensive summary of the completed mock interview.
+
+CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
+
+RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
+{
+  "interview_complete": true,
+  "summary": "Comprehensive summary of the interview performance",
+  "strengths": ["strength1", "strength2"],
+  "areas_for_improvement": ["area1", "area2"],
+  "overall_rating": "Excellent/Good/Satisfactory/Needs Improvement",
+  "recommendations": ["recommendation1", "recommendation2"],
+  "final_feedback": "Encouraging closing message"
+}"""
+            + "\n\n" + ANTI_JAILBREAK_DIRECTIVE
+        )
+
 
     @observe(name="interview_coach_process", as_type="agent")
     def process(
@@ -233,14 +292,15 @@ Interview Progress:
             else:
                 # Check if this is a follow-up response
                 message_history = getattr(input_data, "message_history", []) or []
-                is_follow_up = len(message_history) > 0
+                # Find the last user message in history
+                user_messages = [msg for msg in message_history if getattr(msg, 'role', None) == 'user']
+                is_follow_up = len(user_messages) > 0
                 
-                # Get user's answer if this is a follow-up
+                # Get user's answer if this is a follow-up (the last user message)
                 user_answer = ""
-                if is_follow_up and message_history:
-                    # The last message in history is the user's answer
-                    last_message = message_history[-1]
-                    user_answer = getattr(last_message, "text", "") if hasattr(last_message, "text") else last_message.get("text", "") if isinstance(last_message, dict) else ""
+                if is_follow_up:
+                    last_user_message = user_messages[-1]
+                    user_answer = getattr(last_user_message, "text", "") or ""
                 
                 # Initialize or get state
                 state = self._get_interview_state(context)
@@ -259,9 +319,26 @@ Interview Progress:
                             session_id=session_id,
                             answer_preview=user_answer[:50] + "..." if len(user_answer) > 50 else user_answer,
                         )
+                    
+                    # Check if interview is complete
+                    current_index = context.shared_memory.get("current_question_index", 0)
+                    if current_index >= state["total_questions"]:
+                        # End the interview
+                        context.shared_memory["interview_active"] = False
+                        logger.debug(
+                            "Interview completed - reached total questions",
+                            session_id=session_id,
+                            total_questions=state["total_questions"],
+                        )
                 
                 # Build interview-aware prompt
                 input_text = self._build_interview_prompt(input_data, context, user_answer if is_follow_up else None)
+                
+                # Use different system prompt for completion
+                current_system_prompt = self.system_prompt
+                state = self._get_interview_state(context)
+                if not state["interview_active"] and state["current_question_index"] >= state["total_questions"]:
+                    current_system_prompt = self._build_completion_system_prompt()
         else:
             input_text = input_data
 
@@ -291,7 +368,7 @@ Interview Progress:
 
                 if gemini_live_available:
                     result = self._call_gemini_live_audio(
-                        input_text, self.system_prompt
+                        input_text, current_system_prompt
                     )
                     method_used = "gemini_live_audio"
                 else:
@@ -307,7 +384,7 @@ Interview Progress:
                             session_id=session_id,
                             mock_response_key=self.MOCK_RESPONSE_KEY,
                         )
-                        result = self.call_gemini(input_text, context)
+                        result = self._call_gemini_with_system_prompt(input_text, context, current_system_prompt)
                         method_used = "standard_gemini_fallback"
                     else:
                         method_used = "mock_response_file"
@@ -328,7 +405,7 @@ Interview Progress:
                             f"InterviewCoachAgent using Gemini Live",
                             session_id=session_id,
                         )
-                        result = self._call_gemini_live(input_text)
+                        result = self._call_gemini_live(input_text, current_system_prompt)
                         if not result or result.startswith("Error"):
                             logger.warning(
                                 f"InterviewCoachAgent Gemini Live failed, falling back to standard Gemini",
@@ -336,7 +413,7 @@ Interview Progress:
                                 result_preview=result[:100] if result else "No result",
                             )
                             # Fallback to regular Gemini
-                            result = self.call_gemini(input_text, context)
+                            result = self._call_gemini_with_system_prompt(input_text, context, current_system_prompt)
                             method_used = "standard_gemini_fallback"
                         else:
                             method_used = "gemini_live"
@@ -346,7 +423,7 @@ Interview Progress:
                             session_id=session_id,
                         )
                         # Fallback to regular Gemini
-                        result = self.call_gemini(input_text, context)
+                        result = self._call_gemini_with_system_prompt(input_text, context, current_system_prompt)
                         method_used = "standard_gemini"
 
             processing_time = time.time() - processing_start_time
@@ -359,6 +436,26 @@ Interview Progress:
                 result_length=len(result),
                 result_preview=result[:100] + "..." if len(result) > 100 else result,
             )
+
+            # Parse the JSON response and store the question if it's an interview question
+            try:
+                response_json = json.loads(result)
+                if "question" in response_json and not response_json.get("interview_complete", False):
+                    # Store the asked question
+                    asked_questions = context.shared_memory.get("asked_questions", [])
+                    asked_questions.append(response_json["question"])
+                    context.shared_memory["asked_questions"] = asked_questions
+                    logger.debug(
+                        "Stored asked question",
+                        session_id=session_id,
+                        question_number=len(asked_questions),
+                    )
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Failed to parse InterviewCoachAgent response as JSON",
+                    session_id=session_id,
+                    result_preview=result[:200],
+                )
 
             # Build decision trace for auditability
             input_type = "audio" if isinstance(input_text, bytes) else "text"
@@ -520,11 +617,12 @@ Interview Progress:
             return f"Error contacting Gemini Live for audio: {str(e)}"
 
     @observe(name="_call_gemini_live", as_type="tool")
-    def _call_gemini_live(self, input_text: str) -> Optional[str]:
+    def _call_gemini_live(self, input_text: str, system_prompt: str) -> Optional[str]:
         """Call Gemini Live service with timeout.
 
         Args:
             input_text: Input text for coaching
+            system_prompt: System prompt to use
 
         Returns:
             Response from Gemini Live or None if error
@@ -548,7 +646,7 @@ Interview Progress:
             )
 
             live_start_time = time.time()
-            raw = self.gemini_live_service.send_textAndWaitResponse(input_text, self.system_prompt, 10000)
+            raw = self.gemini_live_service.send_textAndWaitResponse(input_text, system_prompt, 10000)
             live_execution_time = time.time() - live_start_time
 
             if not raw or raw.strip() == "":
@@ -577,3 +675,22 @@ Interview Progress:
                 error_message=str(e),
             )
             return f"Error contacting Gemini Live: {str(e)}"
+
+    def _call_gemini_with_system_prompt(self, input_text: str, context: SessionContext, system_prompt: str) -> str:
+        """Call Gemini API with custom system prompt.
+
+        Args:
+            input_text: User input text
+            context: Session context
+            system_prompt: Custom system prompt to use
+
+        Returns:
+            Gemini response text
+        """
+        # Temporarily change system prompt
+        original_prompt = self.system_prompt
+        self.system_prompt = system_prompt
+        try:
+            return self.call_gemini(input_text, context)
+        finally:
+            self.system_prompt = original_prompt
