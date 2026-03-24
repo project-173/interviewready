@@ -17,8 +17,7 @@ from ..models.agent import AgentInput
 class InterviewCoachAgent(BaseAgent):
     """Agent for providing interview coaching and simulation."""
 
-    USE_MOCK_RESPONSE = False
-    MOCK_RESPONSE_KEY = "InterviewCoachAgent"
+    USE_AI_VALIDATION = True  # Set to True to enable AI-powered answer validation
 
     SYSTEM_PROMPT = (
         """You are an expert Interview Coach specializing in personalized interview preparation. Your job is to simulate a realistic interview by asking questions ONE at a time and guiding the candidate through their responses.
@@ -47,6 +46,7 @@ PROCESS:
 - Continue asking questions in sequence up to a total of 5 questions
 - Always ask questions that bridge their resume to the job requirements
 - Vary question types: behavioral, technical, situational, competency
+- If the candidate's input is flagged as insufficient or inappropriate, do not increment the question count; instead, provide feedback explaining why the answer was inadequate and ask them to re-attempt the current question
 
 RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 {
@@ -243,6 +243,145 @@ Interview Progress:
         
         return prompt
 
+    def _validate_interview_answer(self, answer: str, question: str = "", context: SessionContext = None) -> tuple[bool, str]:
+        """Light validation filter to block trolls and low-effort answers.
+        
+        This filter should be simple and fast - let the agent handle nuanced feedback.
+        
+        Args:
+            answer: User's answer to validate
+            question: The interview question (optional, for context)
+            context: Session context (optional, for resume/job description access)
+            
+        Returns:
+            Tuple of (is_valid, feedback_message)
+        """
+        if not answer or not answer.strip():
+            return False, "Please provide an answer to the interview question."
+        
+        answer = answer.strip()
+        
+        # Basic length check - very short answers are likely low-effort
+        if len(answer) < 10:
+            return False, "Your answer seems too brief. Please provide a more detailed response that shows your thought process and experience."
+        
+        # Check for obvious skip attempts and troll responses
+        skip_indicators = [
+            "idk", "i don't know", "skip", "pass", "whatever", "lol", "haha", "lmao",
+            "test", "random", "don't care", "no idea", "shrug", "dunno", "meh",
+            "n/a", "na", "none", "nothing", "blank", "empty"
+        ]
+        
+        answer_lower = answer.lower()
+        if any(indicator in answer_lower for indicator in skip_indicators):
+            return False, "Please provide a thoughtful answer to the interview question. Low-effort responses won't help you prepare effectively."
+        
+        # Check for completely irrelevant content (basic check)
+        irrelevant_indicators = ["the weather", "my favorite color", "i like pizza", "just testing"]
+        if any(phrase in answer_lower for phrase in irrelevant_indicators):
+            return False, "Please provide an answer that's relevant to the interview question and professional experience."
+        
+        # Context-aware relevance check if we have resume/job description
+        if context:
+            job_desc = getattr(context, "job_description", "") or ""
+            if job_desc and len(job_desc) > 50:  # Only check if we have meaningful job description
+                job_keywords = set(job_desc.lower().split())
+                answer_keywords = set(answer_lower.split())
+                
+                # If answer shares very few keywords with job description, it might be irrelevant
+                overlap = len(job_keywords.intersection(answer_keywords))
+                if overlap < 2 and len(answer_keywords) > 5:
+                    return False, "Your answer doesn't seem to address the job requirements. Please connect your response to the role you're applying for."
+        
+        return True, ""
+        
+    def _comprehensive_validate_answer(self, answer: str, question: str, context: SessionContext, use_ai: bool = False) -> tuple[bool, str]:
+        """Comprehensive answer validation using both rule-based and optional AI validation.
+        
+        Args:
+            answer: User's answer to validate
+            question: The interview question
+            context: Session context
+            use_ai: Whether to use AI validation for additional checking
+            
+        Returns:
+            Tuple of (is_valid, feedback_message)
+        """
+        # First, apply rule-based validation
+        is_valid, feedback = self._validate_interview_answer(answer, question, context)
+        
+        # If rule-based validation fails, return immediately
+        if not is_valid:
+            return is_valid, feedback
+        
+        # If rule-based passes and AI validation is requested, apply AI validation
+        if use_ai and question:
+            try:
+                ai_valid, ai_feedback = self._ai_validate_interview_answer(answer, question, context)
+                if not ai_valid:
+                    return ai_valid, ai_feedback
+            except Exception as e:
+                logger.warning(f"AI validation failed, using rule-based result: {e}")
+        
+        return is_valid, feedback
+
+    def _ai_validate_interview_answer(self, answer: str, question: str, context: SessionContext) -> tuple[bool, str]:
+        """Use AI to validate if the user's answer is appropriate for the interview question.
+        
+        Args:
+            answer: User's answer to validate
+            question: The interview question
+            context: Session context
+            
+        Returns:
+            Tuple of (is_valid, feedback_message)
+        """
+        validation_prompt = f"""
+You are a strict Interview Gatekeeper. Your job is to FILTER OUT answers that are too short, unprofessional, or irrelevant.
+
+INTERVIEW QUESTION: {question}
+CANDIDATE'S ANSWER: {answer}
+
+SET is_appropriate to FALSE IF:
+1. The answer is less than 15-20 words (too brief to be meaningful).
+2. The answer is gibberish, keyboard smashing, or contains profanity.
+3. The answer is a refusal to answer (e.g., "I don't know," "Skip").
+4. The answer is completely unrelated to the professional context of the question.
+5. The answer lacks any specific detail or example.
+
+SET is_appropriate to TRUE ONLY IF:
+- It is a coherent, professional attempt to answer the question with at least one supporting detail.
+
+Respond ONLY with a JSON object:
+{{
+  "is_appropriate": boolean,
+  "feedback": "Explain exactly why the answer was rejected or why it passed.",
+  "suggestion": "If rejected, give a specific tip on what detail to add (e.g., 'Mention a time you handled a conflict')."
+}}
+"""
+        
+        try:
+            # Use a simple text call to validate
+            response = self._call_gemini_with_system_prompt(validation_prompt, context, 
+                "You are an interview validation expert. Respond only with the requested JSON format.")
+            
+            # Parse the response
+            result = json.loads(response.strip())
+            
+            is_valid = result.get("is_appropriate", True)
+            feedback = result.get("feedback", "")
+            suggestion = result.get("suggestion", "")
+            
+            if not is_valid and suggestion:
+                feedback += f" Suggestion: {suggestion}"
+            
+            return is_valid, feedback
+            
+        except Exception as e:
+            # Fallback to rule-based validation if AI validation fails
+            logger.warning(f"AI validation failed, falling back to rule-based: {e}")
+            return self._validate_interview_answer(answer, question, context)
+
     def _build_completion_system_prompt(self) -> str:
         """Build system prompt for interview completion summary.
         
@@ -263,6 +402,45 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
   "overall_rating": "Excellent/Good/Satisfactory/Needs Improvement",
   "recommendations": ["recommendation1", "recommendation2"],
   "final_feedback": "Encouraging closing message"
+}"""
+            + "\n\n" + ANTI_JAILBREAK_DIRECTIVE
+        )
+
+    def _build_reask_system_prompt(self) -> str:
+        """Build system prompt for re-asking the current question due to invalid answer.
+        
+        Returns:
+            System prompt for re-asking the current question
+        """
+        return (
+            """You are an expert Interview Coach. The candidate provided an inadequate answer to the current interview question. You need to re-ask the SAME question and encourage them to provide a proper, thoughtful response.
+
+CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
+
+RULES:
+1. Your entire response must be exactly one JSON object
+2. Start with '{' and end with '}' - nothing else
+3. Do NOT include markdown code blocks (no ```json or ```)
+4. Do NOT include explanatory text, preamble, summary, or chat responses
+5. Do NOT include comments (// or /* */)
+6. Do NOT use null values - use empty strings or empty arrays
+
+Your role:
+1. Re-ask the EXACT SAME question that was previously asked
+2. Provide feedback explaining why their previous answer was inadequate
+3. Encourage them to provide a detailed, thoughtful response
+4. Do NOT advance to a new question - keep the same question number
+
+RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
+{
+  "current_question_number": 1,
+  "total_questions": 5,
+  "interview_type": "reask",
+  "question": "Re-ask the exact same question that was previously asked",
+  "keywords": ["keyword1", "keyword2"],
+  "tip": "Brief guidance on how to provide a proper answer",
+  "feedback": "Explain why their previous answer was inadequate and what they should improve",
+  "next_challenge": "A brief note on what to focus on for this question"
 }"""
             + "\n\n" + ANTI_JAILBREAK_DIRECTIVE
         )
@@ -311,16 +489,51 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                         session_id=session_id,
                     )
                 else:
-                    # Store the user's answer and advance
+                    # Validate the user's answer before storing and advancing
                     if user_answer:
-                        self._store_answer_and_advance(user_answer, context)
-                        logger.debug(
-                            "Stored user answer and advanced to next question",
-                            session_id=session_id,
-                            answer_preview=user_answer[:50] + "..." if len(user_answer) > 50 else user_answer,
+                        is_valid, validation_message = self._comprehensive_validate_answer(
+                            user_answer, 
+                            state["asked_questions"][-1] if state["asked_questions"] else "", 
+                            context, 
+                            self.USE_AI_VALIDATION
                         )
+                        if is_valid:
+                            self._store_answer_and_advance(user_answer, context)
+                            logger.debug(
+                                "Stored user answer and advanced to next question",
+                                session_id=session_id,
+                                answer_preview=user_answer[:50] + "..." if len(user_answer) > 50 else user_answer,
+                            )
+                        else:
+                            # Invalid answer - don't advance, return validation message
+                            logger.debug(
+                                "User provided invalid answer, not advancing",
+                                session_id=session_id,
+                                answer_preview=user_answer[:50] + "..." if len(user_answer) > 50 else user_answer,
+                                validation_message=validation_message,
+                            )
+                            # Return a response asking for a proper answer
+                            return AgentResponse(
+                                agent_name=self.get_name(),
+                                content=f'{{"current_question_number": {state["current_question_index"] + 1}, "total_questions": {state["total_questions"]}, "interview_type": "follow_up", "question": "Please provide a proper answer to continue with the interview.", "keywords": [], "tip": "Take your time to think about the question and provide a detailed, thoughtful response.", "feedback": "{validation_message}", "next_challenge": "Focus on giving a complete answer to progress."}}',
+                                reasoning="User provided an inadequate answer, requesting proper response.",
+                                confidence_score=self.CONFIDENCE_SCORE,
+                                decision_trace=[
+                                    f"InterviewCoachAgent: Detected inadequate answer for question {state['current_question_index'] + 1}",
+                                    f"InterviewCoachAgent: Requested proper response instead of advancing",
+                                ],
+                                sharp_metadata={
+                                    "analysis_type": "interview_coaching",
+                                    "confidence_score": self.CONFIDENCE_SCORE,
+                                    "method_used": "validation_check",
+                                    "input_type": "text",
+                                    "current_question_number": state["current_question_index"] + 1,
+                                    "total_questions": state["total_questions"],
+                                    "validation_failed": True,
+                                },
+                            )
                     
-                    # Check if interview is complete
+                    # Check if interview is complete (only if we advanced)
                     current_index = context.shared_memory.get("current_question_index", 0)
                     if current_index >= state["total_questions"]:
                         # End the interview
@@ -334,11 +547,17 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 # Build interview-aware prompt
                 input_text = self._build_interview_prompt(input_data, context, user_answer if is_follow_up else None)
                 
-                # Use different system prompt for completion
+                # Use different system prompt for completion or re-ask
                 current_system_prompt = self.system_prompt
                 state = self._get_interview_state(context)
                 if not state["interview_active"] and state["current_question_index"] >= state["total_questions"]:
                     current_system_prompt = self._build_completion_system_prompt()
+                elif is_follow_up and user_answer and not self._comprehensive_validate_answer(user_answer, state["asked_questions"][-1] if state["asked_questions"] else "", context, self.USE_AI_VALIDATION)[0]:
+                    # For invalid answers, use a prompt that re-asks the current question
+                    current_system_prompt = self._build_reask_system_prompt()
+                    # Update the input text to include the current question for re-asking
+                    current_question = state["asked_questions"][-1] if state["asked_questions"] else "Please answer the current interview question properly."
+                    input_text = f"{input_text}\n\nCURRENT QUESTION TO RE-ASK: {current_question}\n\nUSER'S INADEQUATE ANSWER: {user_answer}"
         else:
             input_text = input_data
 
@@ -441,15 +660,16 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             try:
                 response_json = json.loads(result)
                 if "question" in response_json and not response_json.get("interview_complete", False):
-                    # Store the asked question
-                    asked_questions = context.shared_memory.get("asked_questions", [])
-                    asked_questions.append(response_json["question"])
-                    context.shared_memory["asked_questions"] = asked_questions
-                    logger.debug(
-                        "Stored asked question",
-                        session_id=session_id,
-                        question_number=len(asked_questions),
-                    )
+                    # Only store new questions, not re-asked questions
+                    if response_json.get("interview_type") != "reask":
+                        asked_questions = context.shared_memory.get("asked_questions", [])
+                        asked_questions.append(response_json["question"])
+                        context.shared_memory["asked_questions"] = asked_questions
+                        logger.debug(
+                            "Stored asked question",
+                            session_id=session_id,
+                            question_number=len(asked_questions),
+                        )
             except json.JSONDecodeError:
                 logger.warning(
                     "Failed to parse InterviewCoachAgent response as JSON",
