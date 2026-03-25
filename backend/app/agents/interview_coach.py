@@ -17,6 +17,8 @@ from ..models.agent import AgentInput
 class InterviewCoachAgent(BaseAgent):
     """Agent for providing interview coaching and simulation."""
 
+    USE_MOCK_RESPONSE = settings.MOCK_INTERVIEW_COACH_AGENT
+    MOCK_RESPONSE_KEY = "InterviewCoachAgent"
     USE_AI_VALIDATION = True  # Set to True to enable AI-powered answer validation
 
     SYSTEM_PROMPT = (
@@ -162,6 +164,47 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             question_index=current_index,
             next_index=current_index + 1,
         )
+
+    def _get_dynamic_mock_key(self, context: SessionContext, is_follow_up: bool = False, is_valid: bool = True) -> str:
+        """Get the appropriate mock response key based on interview state.
+        
+        Args:
+            context: Session context
+            is_follow_up: Whether this is a follow-up due to validation failure
+            is_valid: Whether the previous answer was valid
+            
+        Returns:
+            Mock response key for current interview state
+        """
+        state = self._get_interview_state(context)
+        
+        # Check if interview is complete
+        if not state["interview_active"] and state["current_question_index"] >= state["total_questions"]:
+            return "InterviewCoachAgent_Summary"
+        
+        # Return appropriate question key based on current question number
+        question_num = state["current_question_index"] + 1
+        
+        # If this is a follow-up with invalid answer, use invalid variant
+        if is_follow_up and not is_valid:
+            if question_num == 1:
+                return "InterviewCoachAgent_Q2_Invalid"  # Q1 invalid -> stays on Q1 but with invalid feedback
+            elif question_num == 2:
+                return "InterviewCoachAgent_Q3_Invalid"  # Q2 invalid -> stays on Q2 but with invalid feedback
+            elif question_num == 3:
+                return "InterviewCoachAgent_Q4_Invalid"  # Q3 invalid -> stays on Q3 but with invalid feedback
+            elif question_num == 4:
+                return "InterviewCoachAgent_Q5_Invalid"  # Q4 invalid -> stays on Q4 but with invalid feedback
+            elif question_num == 5:
+                return "InterviewCoachAgent_Q6_Invalid"  # Q5 invalid -> stays on Q5 but with invalid feedback
+        
+        # Normal progression
+        if question_num == 1:
+            return "InterviewCoachAgent"
+        elif question_num <= 5:
+            return f"InterviewCoachAgent_Q{question_num}"
+        else:
+            return "InterviewCoachAgent_Summary"
 
     def _build_interview_prompt(
         self, input_data: AgentInput, context: SessionContext, user_answer: Optional[str] = None
@@ -535,12 +578,14 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             else:
                 # Handle text input
                 if self.USE_MOCK_RESPONSE:
-                    result = self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
+                    # Use dynamic mock key based on interview state and validation status
+                    dynamic_mock_key = self._get_dynamic_mock_key(context, is_follow_up, is_valid)
+                    result = self.get_mock_response_by_key(dynamic_mock_key)
                     if result is None:
                         logger.warning(
                             "InterviewCoachAgent mock enabled but response key not found",
                             session_id=session_id,
-                            mock_response_key=self.MOCK_RESPONSE_KEY,
+                            mock_response_key=dynamic_mock_key,
                         )
                         result = self._call_gemini_with_system_prompt(input_text, context, current_system_prompt)
                         method_used = "standard_gemini_fallback"
