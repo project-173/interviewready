@@ -1,6 +1,7 @@
 """Interview Coach Agent implementation."""
 
 import json
+import re
 import time
 from typing import Optional
 from langfuse import observe
@@ -108,21 +109,19 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             else:
                 print("GEMINI_API_KEY not set; Gemini Live will not be used.")
 
-    def _init_interview_session(self, context: SessionContext) -> None:
-        """Initialize interview session state in shared memory.
-        
-        Args:
-            context: Session context
-        """
+    def _ensure_shared_memory(self, context: SessionContext) -> dict:
         if context.shared_memory is None:
             context.shared_memory = {}
-        
-        context.shared_memory["interview_active"] = True
-        context.shared_memory["current_question_index"] = 0
-        context.shared_memory["asked_questions"] = []
-        context.shared_memory["user_answers"] = []
-        context.shared_memory["total_questions"] = 5
-        
+        return context.shared_memory
+
+    def _init_interview_session(self, context: SessionContext) -> None:
+        """Initialize interview session state in shared memory."""
+        shared_memory = self._ensure_shared_memory(context)
+        shared_memory["interview_active"] = True
+        shared_memory["current_question_index"] = 0
+        shared_memory["asked_questions"] = []
+        shared_memory["user_answers"] = []
+        shared_memory["total_questions"] = 5
         logger.debug(
             "Interview session initialized",
             session_id=getattr(context, "session_id", "unknown"),
@@ -130,49 +129,24 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         )
 
     def _get_interview_state(self, context: SessionContext) -> dict:
-        """Get current interview state from shared memory.
-        
-        Args:
-            context: Session context
-            
-        Returns:
-            Dictionary containing interview state
-        """
-        if context.shared_memory is None:
-            return {
-                "interview_active": False,
-                "current_question_index": 0,
-                "asked_questions": [],
-                "user_answers": [],
-                "total_questions": 5,
-            }
-        
+        """Get current interview state from shared memory."""
+        shared_memory = self._ensure_shared_memory(context)
         return {
-            "interview_active": context.shared_memory.get("interview_active", False),
-            "current_question_index": context.shared_memory.get("current_question_index", 0),
-            "asked_questions": context.shared_memory.get("asked_questions", []),
-            "user_answers": context.shared_memory.get("user_answers", []),
-            "total_questions": context.shared_memory.get("total_questions", 5),
+            "interview_active": shared_memory.get("interview_active", False),
+            "current_question_index": shared_memory.get("current_question_index", 0),
+            "asked_questions": list(shared_memory.get("asked_questions", [])),
+            "user_answers": list(shared_memory.get("user_answers", [])),
+            "total_questions": shared_memory.get("total_questions", 5),
         }
 
     def _store_answer_and_advance(self, user_answer: str, context: SessionContext) -> None:
-        """Store user's answer and advance to next question.
-        
-        Args:
-            user_answer: User's response to the current question
-            context: Session context
-        """
-        if context.shared_memory is None:
-            context.shared_memory = {}
-        
-        user_answers = context.shared_memory.get("user_answers", [])
+        """Store user's answer and advance to next question."""
+        shared_memory = self._ensure_shared_memory(context)
+        user_answers = list(shared_memory.get("user_answers", []))
         user_answers.append(user_answer)
-        context.shared_memory["user_answers"] = user_answers
-        
-        # Move to next question
-        current_index = context.shared_memory.get("current_question_index", 0)
-        context.shared_memory["current_question_index"] = current_index + 1
-        
+        shared_memory["user_answers"] = user_answers
+        current_index = shared_memory.get("current_question_index", 0)
+        shared_memory["current_question_index"] = current_index + 1
         logger.debug(
             "User answer stored and advanced",
             session_id=getattr(context, "session_id", "unknown"),
@@ -180,107 +154,57 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             next_index=current_index + 1,
         )
 
-    def _get_dynamic_mock_key(self, context: SessionContext, is_follow_up: bool = False, is_valid: bool = True) -> str:
-        """Get the appropriate mock response key based on interview state.
-        
-        Args:
-            context: Session context
-            is_follow_up: Whether this is a follow-up due to validation failure
-            is_valid: Whether the previous answer was valid
-            
-        Returns:
-            Mock response key for current interview state
-        """
+    def _store_question_if_new(self, question: str, context: SessionContext) -> None:
+        """Store a new interview question once."""
+        if not question:
+            return
+        shared_memory = self._ensure_shared_memory(context)
+        asked_questions = list(shared_memory.get("asked_questions", []))
+        if asked_questions and asked_questions[-1] == question:
+            return
+        asked_questions.append(question)
+        shared_memory["asked_questions"] = asked_questions
+
+    def _set_interview_complete(self, context: SessionContext) -> None:
+        self._ensure_shared_memory(context)["interview_active"] = False
+
+    def _get_dynamic_mock_key(
+        self, context: SessionContext, is_follow_up: bool = False, can_proceed: bool = True
+    ) -> str:
+        """Get the appropriate mock response key based on interview state."""
         state = self._get_interview_state(context)
-        
-        # Check if interview is complete
+        question_num = state["current_question_index"] + 1
         if not state["interview_active"] and state["current_question_index"] >= state["total_questions"]:
             return "InterviewCoachAgent_Summary"
-        
-        # Return appropriate question key based on current question number
-        question_num = state["current_question_index"] + 1
-        
-        # If this is a follow-up with invalid answer, use invalid variant
-        if is_follow_up and not is_valid:
-            if question_num == 1:
-                return "InterviewCoachAgent_Q2_Invalid"  # Q1 invalid -> stays on Q1 but with invalid feedback
-            elif question_num == 2:
-                return "InterviewCoachAgent_Q3_Invalid"  # Q2 invalid -> stays on Q2 but with invalid feedback
-            elif question_num == 3:
-                return "InterviewCoachAgent_Q4_Invalid"  # Q3 invalid -> stays on Q3 but with invalid feedback
-            elif question_num == 4:
-                return "InterviewCoachAgent_Q5_Invalid"  # Q4 invalid -> stays on Q4 but with invalid feedback
-            elif question_num == 5:
-                return "InterviewCoachAgent_Q6_Invalid"  # Q5 invalid -> stays on Q5 but with invalid feedback
-        
-        # Normal progression
-        if question_num == 1:
+        if is_follow_up and not can_proceed:
+            invalid_keys = {
+                1: "InterviewCoachAgent",
+                2: "InterviewCoachAgent_Q2_Invalid",
+                3: "InterviewCoachAgent_Q3_Invalid",
+                4: "InterviewCoachAgent_Q4_Invalid",
+                5: "InterviewCoachAgent_Q5_Invalid",
+            }
+            return invalid_keys.get(question_num, "InterviewCoachAgent_Q6_Invalid")
+        if question_num <= 1:
             return "InterviewCoachAgent"
-        elif question_num <= 5:
+        if question_num <= 5:
             return f"InterviewCoachAgent_Q{question_num}"
-        else:
-            return "InterviewCoachAgent_Summary"
+        return "InterviewCoachAgent_Summary"
 
     def _build_interview_prompt(
-        self, input_data: AgentInput, context: SessionContext, user_answer: Optional[str] = None
+        self,
+        input_data: AgentInput,
+        context: SessionContext,
+        user_answer: str = "",
     ) -> str:
-        """Build prompt for the interview coach Gemini call.
-        
-        Args:
-            input_data: Agent input with resume and job description
-            context: Session context
-            user_answer: User's answer to current question (if follow-up)
-            
-        Returns:
-            Formatted prompt string
-        """
+        """Build prompt for the interview coach Gemini call."""
         state = self._get_interview_state(context)
-        
-        # Check if interview is complete
-        if not state["interview_active"] and state["current_question_index"] >= state["total_questions"]:
-            # Build summary prompt
-            resume_data = (
-                input_data.resume.model_dump(exclude_none=True)
-                if input_data.resume is not None
-                else {}
-            )
-            
-            job_desc = (
-                getattr(input_data, "job_description", "") or
-                context.job_description or
-                ""
-            )
-            
-            prompt = f"""Resume:\n{json.dumps(resume_data, indent=2)}
-
-Job Description:\n{job_desc}
-
-Interview Summary:
-- Total Questions Asked: {len(state['asked_questions'])}
-- User Answers: {len(state['user_answers'])}
-- Interview Completed: Yes
-
-All user answers:\n{json.dumps(state['user_answers'], indent=2)}
-
-Previously Asked Questions:\n{json.dumps(state['asked_questions'], indent=2)}
-
-Generate a comprehensive interview summary and feedback for the candidate. Include strengths, areas for improvement, and final recommendations.
-"""
-            return prompt
-        
-        # Normal interview prompt
         resume_data = (
             input_data.resume.model_dump(exclude_none=True)
             if input_data.resume is not None
             else {}
         )
-        
-        job_desc = (
-            getattr(input_data, "job_description", "") or
-            context.job_description or
-            ""
-        )
-        
+        job_desc = getattr(input_data, "job_description", "") or context.job_description or ""
         prompt = f"""Resume:\n{json.dumps(resume_data, indent=2)}
 
 Job Description:\n{job_desc}
@@ -290,225 +214,53 @@ Interview Progress:
 - Questions Asked So Far: {len(state['asked_questions'])}
 - Current Interview Session Active: {state['interview_active']}
 """
-        
         if user_answer:
-            prompt += f"\nCandidate's Answer to Previous Question:\n{user_answer}\n"
-            prompt += f"\nPreviously Asked Questions:\n{json.dumps(state['asked_questions'], indent=2)}\n"
+            prompt += f"""
+Candidate's Answer to Previous Question:
+{user_answer}
+
+Previously Asked Questions:
+{json.dumps(state['asked_questions'], indent=2)}
+"""
+            prompt += (
+                "\nEvaluate the candidate's answer yourself. If it is low-effort, irrelevant, trollish, "
+                "or inappropriate, set can_proceed to false and re-ask the same question with specific coaching. "
+                "If it shows genuine thought and meets the bar, set can_proceed to true and move to the next question."
+            )
         else:
-            prompt += f"\nThis is the FIRST question of the interview simulation.\n"
-        
+            prompt += "\nThis is the FIRST question of the interview simulation.\n"
         prompt += "\nGenerate the next interview question with feedback and guidance."
-        
         return prompt
 
-    def _build_completion_system_prompt(self) -> str:
-        """Score the interview answer on multiple criteria with configurable thresholds.
-        
-        Returns a score from 0-100, feedback, and whether it meets minimum requirements.
-        
-        Args:
-            answer: User's answer to score
-            question: The interview question (optional, for context)
-            context: Session context (optional, for resume/job description access)
-            
-        Returns:
-            Tuple of (score, feedback_message, meets_minimum)
-        """
-        if not answer or not answer.strip():
-            return 0.0, "Please provide an answer to the interview question.", False
-        
-        answer = answer.strip()
-        score = 0.0
-        feedback_parts = []
-        
-        # 1. Basic Appropriateness Check (30 points) - STRICT
-        # Check for obvious skip attempts and troll responses
-        skip_indicators = [
-            "idk", "i don't know", "skip", "pass", "whatever", "lol", "haha", "lmao",
-            "test", "random", "don't care", "no idea", "shrug", "dunno", "meh",
-            "n/a", "na", "none", "nothing", "blank", "empty"
-        ]
-        
-        answer_lower = answer.lower()
-        if any(indicator in answer_lower for indicator in skip_indicators):
-            return 0.0, "Please provide a thoughtful answer to the interview question. Low-effort responses won't help you prepare effectively.", False
-        
-        # Check for completely irrelevant content
-        irrelevant_indicators = ["the weather", "my favorite color", "i like pizza", "just testing"]
-        if any(phrase in answer_lower for phrase in irrelevant_indicators):
-            return 0.0, "Please provide an answer that's relevant to the interview question and professional experience.", False
-        
-        # Passed basic appropriateness
-        score += 30.0
-        
-        # 2. Length and Detail (25 points)
-        word_count = len(answer.split())
-        if word_count >= 40:
-            score += 25.0  # Excellent detail
-        elif word_count >= 25:
-            score += 20.0  # Good detail
-        elif word_count >= 15:
-            score += 15.0  # Adequate detail
-            feedback_parts.append("Consider adding more specific examples or details.")
-        elif word_count >= 8:
-            score += 10.0  # Basic detail
-            feedback_parts.append("Your answer could benefit from more specific examples.")
-        else:
-            score += 5.0   # Minimal detail
-            feedback_parts.append("Please provide more detail about your experience and approach.")
-        
-        # 3. Relevance to Job Requirements (25 points)
-        relevance_score = 0.0
-        if context:
-            job_desc = getattr(context, "job_description", "") or ""
-            if job_desc and len(job_desc) > 50:
-                job_keywords = set(job_desc.lower().split())
-                answer_keywords = set(answer_lower.split())
-                
-                overlap = len(job_keywords.intersection(answer_keywords))
-                total_keywords = len(job_keywords)
-                
-                if overlap >= 3:
-                    relevance_score = 25.0  # Strong relevance
-                elif overlap >= 2:
-                    relevance_score = 20.0  # Good relevance
-                    feedback_parts.append("Try to connect your answer more directly to the job requirements.")
-                elif overlap >= 1:
-                    relevance_score = 15.0  # Basic relevance
-                    feedback_parts.append("Consider how your experience relates to the specific role you're applying for.")
-                else:
-                    relevance_score = 5.0   # Low relevance
-                    feedback_parts.append("Your answer doesn't strongly connect to the job requirements.")
-            else:
-                # No job description available, give benefit of doubt
-                relevance_score = 20.0
-        else:
-            relevance_score = 20.0
-        
-        score += relevance_score
-        
-        # 4. Structure and STAR Method Usage (20 points)
-        star_indicators = ["situation", "task", "action", "result", "challenge", "problem", "solution", "outcome"]
-        star_count = sum(1 for indicator in star_indicators if indicator in answer_lower)
-        
-        if star_count >= 3:
-            score += 20.0  # Excellent structure
-        elif star_count >= 2:
-            score += 15.0  # Good structure
-            feedback_parts.append("Consider using the STAR method (Situation, Task, Action, Result) to structure your answer.")
-        elif star_count >= 1:
-            score += 10.0  # Basic structure
-            feedback_parts.append("Your answer could be better structured using the STAR method.")
-        else:
-            score += 5.0   # Poor structure
-            feedback_parts.append("Consider structuring your answer using the STAR method for better clarity.")
-        
-        # Determine if answer meets minimum threshold (60% = 60 points)
-        minimum_threshold = 60.0
-        meets_minimum = score >= minimum_threshold
-        
-        # Compile feedback
-        if meets_minimum:
-            if score >= 90:
-                feedback = "Excellent answer! You provided strong detail and clear structure."
-            elif score >= 80:
-                feedback = "Very good answer with solid detail and relevance."
-            else:
-                feedback = "Good answer that meets the requirements. " + " ".join(feedback_parts[:1])  # Just one suggestion
-        else:
-            feedback = "Your answer needs improvement. " + " ".join(feedback_parts)
-        
-        return score, feedback, meets_minimum
-        
-    def _build_completion_system_prompt(self) -> str:
-        """Comprehensive answer validation using scoring system with configurable thresholds.
-        
-        Args:
-            answer: User's answer to validate
-            question: The interview question
-            context: Session context
-            use_ai: Whether to use AI validation for additional checking
-            
-        Returns:
-            Tuple of (can_proceed, feedback_message, score)
-        """
-        # Apply scoring validation
-        score, feedback, meets_minimum = self._score_interview_answer(answer, question, context)
-        
-        # If AI validation is requested and score is borderline, apply additional AI check
-        if use_ai and question and score >= 40 and score < 70:  # Borderline cases
-            try:
-                ai_valid, ai_feedback = self._ai_validate_interview_answer(answer, question, context)
-                if not ai_valid:
-                    return False, ai_feedback, score
-                # If AI validation passes, allow progression even if score is slightly low
-                if score >= 50:
-                    return True, f"{feedback} (AI validation passed)", score
-            except Exception as e:
-                logger.warning(f"AI validation failed, using score-based result: {e}")
-        
-        # Return results based on scoring
-        can_proceed = meets_minimum
-        return can_proceed, feedback, score
+    def _build_completion_prompt(self, input_data: AgentInput, context: SessionContext) -> str:
+        """Build prompt for the final interview summary."""
+        state = self._get_interview_state(context)
+        resume_data = (
+            input_data.resume.model_dump(exclude_none=True)
+            if input_data.resume is not None
+            else {}
+        )
+        job_desc = getattr(input_data, "job_description", "") or context.job_description or ""
+        return f"""Resume:\n{json.dumps(resume_data, indent=2)}
 
-    def _build_completion_system_prompt(self) -> str:
-        """Build system prompt for interview completion summary.
-        
-        Returns:
-            System prompt for generating interview summary
-        """
-        validation_prompt = f"""
-You are a strict Interview Gatekeeper. Your job is to FILTER OUT answers that are too short, unprofessional, or irrelevant.
+Job Description:\n{job_desc}
 
-INTERVIEW QUESTION: {question}
-CANDIDATE'S ANSWER: {answer}
+Interview Summary:
+- Total Questions Asked: {len(state['asked_questions'])}
+- User Answers: {len(state['user_answers'])}
+- Interview Completed: Yes
 
-SET is_appropriate to FALSE IF:
-1. The answer is less than 15-20 words (too brief to be meaningful).
-2. The answer is gibberish, keyboard smashing, or contains profanity.
-3. The answer is a refusal to answer (e.g., "I don't know," "Skip").
-4. The answer is completely unrelated to the professional context of the question.
-5. The answer lacks any specific detail or example.
+All user answers:
+{json.dumps(state['user_answers'], indent=2)}
 
-SET is_appropriate to TRUE ONLY IF:
-- It is a coherent, professional attempt to answer the question with at least one supporting detail.
+Previously Asked Questions:
+{json.dumps(state['asked_questions'], indent=2)}
 
-Respond ONLY with a JSON object:
-{{
-  "is_appropriate": boolean,
-  "feedback": "Explain exactly why the answer was rejected or why it passed.",
-  "suggestion": "If rejected, give a specific tip on what detail to add (e.g., 'Mention a time you handled a conflict')."
-}}
+Generate a comprehensive interview summary and feedback for the candidate. Include strengths, areas for improvement, and final recommendations.
 """
-        
-        try:
-            # Use a simple text call to validate
-            response = self._call_gemini_with_system_prompt(validation_prompt, context, 
-                "You are an interview validation expert. Respond only with the requested JSON format.")
-            
-            # Parse the response
-            result = json.loads(response.strip())
-            
-            is_valid = result.get("is_appropriate", True)
-            feedback = result.get("feedback", "")
-            suggestion = result.get("suggestion", "")
-            
-            if not is_valid and suggestion:
-                feedback += f" Suggestion: {suggestion}"
-            
-            return is_valid, feedback
-            
-        except Exception as e:
-            # Fallback to rule-based validation if AI validation fails
-            logger.warning(f"AI validation failed, falling back to rule-based: {e}")
-            return True, "Validation failed, allowing progression", 50.0  # Safe fallback
 
     def _build_completion_system_prompt(self) -> str:
-        """Build system prompt for interview completion summary.
-        
-        Returns:
-            System prompt for generating interview summary
-        """
+        """Build system prompt for interview completion summary."""
         return (
             """You are an expert Interview Coach providing a comprehensive summary of the completed mock interview.
 
@@ -524,7 +276,153 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
   "recommendations": ["recommendation1", "recommendation2"],
   "final_feedback": "Encouraging closing message"
 }"""
-            + "\n\n" + ANTI_JAILBREAK_DIRECTIVE
+            + "\n\n"
+            + ANTI_JAILBREAK_DIRECTIVE
+        )
+
+    def _score_interview_answer(
+        self,
+        answer: str,
+        question: str = "",
+        context: Optional[SessionContext] = None,
+    ) -> tuple[float, str, bool]:
+        """Score the interview answer and decide whether to proceed."""
+        if not answer or not answer.strip():
+            return 0.0, "Please provide an answer to the interview question.", False
+        answer = answer.strip()
+        answer_lower = answer.lower()
+        normalized_words = re.findall(r"[a-zA-Z']+", answer_lower)
+        word_count = len(normalized_words)
+        skip_indicators = [
+            "idk", "i don't know", "skip", "pass", "whatever", "lol", "haha",
+            "lmao", "test", "random", "don't care", "no idea", "shrug",
+            "dunno", "meh", "n/a", "na", "none", "nothing", "blank", "empty",
+        ]
+        skip_phrases = [indicator for indicator in skip_indicators if " " in indicator or "/" in indicator or "'" in indicator]
+        skip_tokens = {indicator for indicator in skip_indicators if indicator not in skip_phrases}
+        if any(phrase in answer_lower for phrase in skip_phrases) or any(
+            token in skip_tokens for token in normalized_words
+        ):
+            return 0.0, "Please provide a thoughtful answer to the interview question. Low-effort responses won't help you prepare effectively.", False
+        greeting_only_indicators = {"hello", "hi", "hey", "yo", "sup", "greetings"}
+        if normalized_words and all(token in greeting_only_indicators for token in normalized_words):
+            return 0.0, "Please answer the interview question directly instead of sending a greeting.", False
+        nonsense_indicators = {
+            "nonsense", "nonsence", "asdf", "qwerty", "blah", "blahblah", "lorem",
+            "ipsum", "gibberish",
+        }
+        if any(token in nonsense_indicators for token in normalized_words):
+            return 0.0, "Please provide a professional answer that addresses the interview question.", False
+        if word_count < 5:
+            return 0.0, "Please provide a fuller answer with a relevant example or explanation.", False
+        if len(set(normalized_words)) <= 1 and word_count <= 3:
+            return 0.0, "Please provide a more substantive answer to the interview question.", False
+        irrelevant_indicators = ["the weather", "my favorite color", "i like pizza", "just testing"]
+        if any(phrase in answer_lower for phrase in irrelevant_indicators):
+            return 0.0, "Please provide an answer that's relevant to the interview question and professional experience.", False
+
+        score = 30.0
+        feedback_parts = []
+        if word_count >= 40:
+            score += 25.0
+        elif word_count >= 25:
+            score += 20.0
+        elif word_count >= 15:
+            score += 15.0
+            feedback_parts.append("Consider adding more specific examples or details.")
+        elif word_count >= 8:
+            score += 10.0
+            feedback_parts.append("Your answer could benefit from more specific examples.")
+        else:
+            score += 5.0
+            feedback_parts.append("Please provide more detail about your experience and approach.")
+
+        answer_keywords = set(normalized_words)
+        question_keywords = {
+            token for token in re.findall(r"[a-zA-Z']+", (question or "").lower())
+            if len(token) > 3 and token not in {"tell", "about", "when", "have", "with", "your", "this", "that"}
+        }
+        if question_keywords:
+            overlap = len(question_keywords.intersection(answer_keywords))
+            if overlap >= 2:
+                score += 15.0
+            elif overlap == 1:
+                score += 8.0
+                feedback_parts.append("Tie your answer more directly to the specific interview question.")
+            else:
+                feedback_parts.append("Your answer does not address the interview question clearly enough.")
+
+        job_desc = getattr(context, "job_description", "") or "" if context else ""
+        if job_desc and len(job_desc) > 50:
+            job_keywords = {token for token in job_desc.lower().split() if len(token) > 3}
+            overlap = len(job_keywords.intersection(answer_keywords))
+            if overlap >= 3:
+                score += 25.0
+            elif overlap == 2:
+                score += 20.0
+                feedback_parts.append("Try to connect your answer more directly to the job requirements.")
+            elif overlap == 1:
+                score += 15.0
+                feedback_parts.append("Consider how your experience relates to the specific role you're applying for.")
+            else:
+                score += 5.0
+                feedback_parts.append("Your answer doesn't strongly connect to the job requirements.")
+        else:
+            score += 10.0
+
+        star_indicators = ["situation", "task", "action", "result", "challenge", "problem", "solution", "outcome"]
+        star_count = sum(1 for indicator in star_indicators if indicator in answer_lower)
+        if star_count >= 3:
+            score += 20.0
+        elif star_count == 2:
+            score += 15.0
+            feedback_parts.append("Consider using the STAR method (Situation, Task, Action, Result) to structure your answer.")
+        elif star_count == 1:
+            score += 10.0
+            feedback_parts.append("Your answer could be better structured using the STAR method.")
+        else:
+            score += 5.0
+            feedback_parts.append("Consider structuring your answer using the STAR method for better clarity.")
+
+        meets_minimum = score >= 60.0
+        if meets_minimum:
+            if score >= 90:
+                feedback = "Excellent answer! You provided strong detail and clear structure."
+            elif score >= 80:
+                feedback = "Very good answer with solid detail and relevance."
+            else:
+                feedback = "Good answer that meets the requirements."
+                if feedback_parts:
+                    feedback += f" {feedback_parts[0]}"
+        else:
+            feedback = "Your answer needs improvement."
+            if feedback_parts:
+                feedback += f" {' '.join(feedback_parts)}"
+        return score, feedback, meets_minimum
+
+    def _extract_follow_up(self, input_data: AgentInput) -> tuple[bool, str]:
+        """Extract the latest user answer from message history."""
+        message_history = getattr(input_data, "message_history", []) or []
+        user_messages = [msg for msg in message_history if getattr(msg, "role", None) == "user"]
+        if not user_messages:
+            return False, ""
+        last_user_message = user_messages[-1]
+        return True, (getattr(last_user_message, "text", "") or "").strip()
+
+    def _generate_summary_response(
+        self, input_data: AgentInput, context: SessionContext
+    ) -> tuple[str, str]:
+        """Generate the final interview summary."""
+        if self.USE_MOCK_RESPONSE:
+            result = self.get_mock_response_by_key("InterviewCoachAgent_Summary")
+            if result is not None:
+                return result, "mock_response_file"
+        prompt = self._build_completion_prompt(input_data, context)
+        return (
+            self._call_gemini_with_system_prompt(
+                prompt, context, self._build_completion_system_prompt()
+            ),
+            "standard_gemini",
         )
 
     @observe(name="interview_coach_process", as_type="agent")
@@ -543,50 +441,41 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         session_id = getattr(context, "session_id", "unknown")
         agent_name = self.get_name()
         processing_start_time = time.time()
-        
-        # Determine which system prompt to use
+        is_follow_up = False
+        user_answer = ""
+        fallback_score: Optional[float] = None
+        fallback_feedback = ""
+        fallback_can_proceed = True
+        model_answer_score: Optional[float] = None
+        model_can_proceed: Optional[bool] = None
         state = self._get_interview_state(context)
-        
-        # Check if this response will complete the interview
-        will_complete_interview = False
-        if is_follow_up and user_answer:
-            # If we proceed from current question, will we reach the end?
-            will_complete_interview = (state["current_question_index"] + 1) >= state["total_questions"]
-        
-        if will_complete_interview:
-            current_system_prompt = self._build_completion_system_prompt()
-        else:
-            current_system_prompt = self.SYSTEM_PROMPT
-        
+
         # Extract input
         if isinstance(input_data, AgentInput):
             if input_data.audio_data is not None:
                 input_text = input_data.audio_data
             else:
-                # Check if this is a follow-up response
-                message_history = getattr(input_data, "message_history", []) or []
-                # Find the last user message in history
-                user_messages = [msg for msg in message_history if getattr(msg, 'role', None) == 'user']
-                is_follow_up = len(user_messages) > 0
-                
-                # Get user's answer if this is a follow-up (the last user message)
-                user_answer = ""
-                if is_follow_up:
-                    last_user_message = user_messages[-1]
-                    user_answer = getattr(last_user_message, "text", "") or ""
-                
-                # Initialize or get state
-                state = self._get_interview_state(context)
-
                 if not state["interview_active"]:
                     self._init_interview_session(context)
+                    state = self._get_interview_state(context)
                     logger.debug(
                         "First question of interview - initializing session",
                         session_id=session_id,
                     )
-                
-                # Build interview-aware prompt
-                input_text = self._build_interview_prompt(input_data, context, user_answer if is_follow_up else None)
+
+                is_follow_up, user_answer = self._extract_follow_up(input_data)
+                if is_follow_up and self.USE_MOCK_RESPONSE:
+                    fallback_score, fallback_feedback, fallback_can_proceed = self._score_interview_answer(
+                        user_answer,
+                        state["asked_questions"][-1] if state["asked_questions"] else "",
+                        context,
+                    )
+
+                input_text = self._build_interview_prompt(
+                    input_data,
+                    context,
+                    user_answer=user_answer,
+                )
         else:
             input_text = input_data
 
@@ -616,7 +505,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 
                 if gemini_live_available:
                     result = self._call_gemini_live_audio(
-                        input_text, current_system_prompt
+                        input_text, self.SYSTEM_PROMPT
                     )
                     method_used = "gemini_live_audio"
                 else:
@@ -625,9 +514,11 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             else:
                 # Handle text input
                 if self.USE_MOCK_RESPONSE:
-                    # Use dynamic mock key based on interview state
-                    # In mock mode, we simulate AI scoring, so assume valid by default
-                    dynamic_mock_key = self._get_dynamic_mock_key(context, is_follow_up, True)
+                    dynamic_mock_key = self._get_dynamic_mock_key(
+                        context,
+                        is_follow_up,
+                        fallback_can_proceed,
+                    )
                     result = self.get_mock_response_by_key(dynamic_mock_key)
                     if result is None:
                         logger.warning(
@@ -635,7 +526,9 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                             session_id=session_id,
                             mock_response_key=dynamic_mock_key,
                         )
-                        result = self._call_gemini_with_system_prompt(input_text, context, current_system_prompt)
+                        result = self._call_gemini_with_system_prompt(
+                            input_text, context, self.SYSTEM_PROMPT
+                        )
                         method_used = "standard_gemini_fallback"
                     else:
                         method_used = "mock_response_file"
@@ -656,7 +549,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                             f"InterviewCoachAgent using Gemini Live",
                             session_id=session_id,
                         )
-                        result = self._call_gemini_live(input_text, current_system_prompt)
+                        result = self._call_gemini_live(input_text, self.SYSTEM_PROMPT)
                         if not result or result.startswith("Error"):
                             logger.warning(
                                 f"InterviewCoachAgent Gemini Live failed, falling back to standard Gemini",
@@ -664,7 +557,9 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                                 result_preview=result[:100] if result else "No result",
                             )
                             # Fallback to regular Gemini
-                            result = self._call_gemini_with_system_prompt(input_text, context, current_system_prompt)
+                            result = self._call_gemini_with_system_prompt(
+                                input_text, context, self.SYSTEM_PROMPT
+                            )
                             method_used = "standard_gemini_fallback"
                         else:
                             method_used = "gemini_live"
@@ -674,7 +569,9 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                             session_id=session_id,
                         )
                         # Fallback to regular Gemini
-                        result = self._call_gemini_with_system_prompt(input_text, context, current_system_prompt)
+                        result = self._call_gemini_with_system_prompt(
+                            input_text, context, self.SYSTEM_PROMPT
+                        )
                         method_used = "standard_gemini"
 
             processing_time = time.time() - processing_start_time
@@ -691,64 +588,62 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             # Parse the JSON response and handle progression logic
             try:
                 response_json = json.loads(result)
-                
-                # Extract scoring information from AI response
-                answer_score = response_json.get("answer_score", 100)  # Default to 100 for new questions
-                can_proceed = response_json.get("can_proceed", True)   # Default to True for new questions
-                
-                # Handle completion responses
                 if response_json.get("interview_complete", False):
-                    # Mark interview as complete
-                    context.shared_memory["interview_active"] = False
+                    self._set_interview_complete(context)
                     logger.debug(
                         "Interview completed - AI generated completion summary",
                         session_id=session_id,
                     )
-                else:
-                    # Handle progression based on AI's scoring decision
-                    if is_follow_up and user_answer:
-                        if can_proceed:
-                            self._store_answer_and_advance(user_answer, context)
-                            logger.debug(
-                                "AI approved answer progression",
-                                session_id=session_id,
-                                answer_score=answer_score,
-                                answer_preview=user_answer[:50] + "..." if len(user_answer) > 50 else user_answer,
-                            )
-                        else:
-                            # AI decided not to proceed - don't advance
-                            logger.debug(
-                                "AI rejected answer progression",
-                                session_id=session_id,
-                                answer_score=answer_score,
-                                answer_preview=user_answer[:50] + "..." if len(user_answer) > 50 else user_answer,
-                            )
-                    
-                    # Check if interview is complete (only if we advanced)
-                    current_index = context.shared_memory.get("current_question_index", 0)
-                    if current_index >= state["total_questions"]:
-                        # End the interview
-                        context.shared_memory["interview_active"] = False
-                        logger.debug(
-                            "Interview completed - reached total questions",
-                            session_id=session_id,
-                            total_questions=state["total_questions"],
+                elif isinstance(input_data, AgentInput):
+                    model_answer_score = response_json.get("answer_score")
+                    model_can_proceed = response_json.get("can_proceed")
+                    if model_can_proceed is None and is_follow_up:
+                        model_answer_score, fallback_feedback, fallback_can_proceed = self._score_interview_answer(
+                            user_answer,
+                            state["asked_questions"][-1] if state["asked_questions"] else "",
+                            context,
                         )
-                
-                # Store the question if it's an interview question
-                if "question" in response_json and not response_json.get("interview_complete", False):
-                    # Only store new questions, not re-asked questions
-                    if response_json.get("interview_type") != "reask":
-                        asked_questions = context.shared_memory.get("asked_questions", [])
-                        asked_questions.append(response_json["question"])
-                        context.shared_memory["asked_questions"] = asked_questions
-                        logger.debug(
-                            "Stored asked question",
-                            session_id=session_id,
-                            question_number=len(asked_questions),
+                        model_can_proceed = fallback_can_proceed
+                        if "feedback" not in response_json and fallback_feedback:
+                            response_json["feedback"] = fallback_feedback
+                        if "answer_score" not in response_json:
+                            response_json["answer_score"] = round(model_answer_score, 2)
+                        if "can_proceed" not in response_json:
+                            response_json["can_proceed"] = model_can_proceed
+                        result = json.dumps(response_json)
+
+                    if is_follow_up and user_answer and model_can_proceed:
+                        self._store_answer_and_advance(user_answer, context)
+
+                    state = self._get_interview_state(context)
+                    if (
+                        is_follow_up
+                        and user_answer
+                        and model_can_proceed
+                        and state["current_question_index"] >= state["total_questions"]
+                    ):
+                        self._set_interview_complete(context)
+                        result, method_used = self._generate_summary_response(
+                            input_data, context
                         )
-                        
+                        response_json = json.loads(result)
+                        state = self._get_interview_state(context)
+
+                    if (
+                        response_json.get("question")
+                        and response_json.get("current_question_number", state["current_question_index"] + 1)
+                        == state["current_question_index"] + 1
+                    ):
+                        self._store_question_if_new(response_json["question"], context)
+                    if state["current_question_index"] >= state["total_questions"]:
+                        self._set_interview_complete(context)
             except json.JSONDecodeError:
+                if isinstance(input_data, AgentInput) and is_follow_up:
+                    model_answer_score, fallback_feedback, fallback_can_proceed = self._score_interview_answer(
+                        user_answer,
+                        state["asked_questions"][-1] if state["asked_questions"] else "",
+                        context,
+                    )
                 logger.warning(
                     "Failed to parse InterviewCoachAgent response as JSON",
                     session_id=session_id,
@@ -758,8 +653,12 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             # Build decision trace for auditability
             input_type = "audio" if isinstance(input_text, bytes) else "text"
             state = self._get_interview_state(context)
+            current_question_number = min(
+                state["current_question_index"] + 1,
+                state["total_questions"],
+            )
             decision_trace = [
-                f"InterviewCoachAgent: Processing interview question {state['current_question_index'] + 1} of {state['total_questions']}",
+                f"InterviewCoachAgent: Processing interview question {current_question_number} of {state['total_questions']}",
                 f"InterviewCoachAgent: Generated targeted interview question for {input_type} input",
                 f"InterviewCoachAgent: Used coaching model with confidence {self.CONFIDENCE_SCORE}",
                 f"InterviewCoachAgent: Method used: {method_used}",
@@ -801,9 +700,18 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 ),
                 "method_used": method_used,
                 "input_type": input_type,
-                "current_question_number": state["current_question_index"] + 1,
+                "current_question_number": current_question_number,
                 "total_questions": state["total_questions"],
             }
+            if model_answer_score is not None:
+                sharp_metadata["answer_score"] = round(float(model_answer_score), 2)
+            elif fallback_score is not None:
+                sharp_metadata["answer_score"] = round(fallback_score, 2)
+
+            if model_can_proceed is not None:
+                sharp_metadata["can_proceed"] = model_can_proceed
+            elif is_follow_up:
+                sharp_metadata["can_proceed"] = fallback_can_proceed
 
             response = AgentResponse(
                 agent_name=self.get_name(),
@@ -822,7 +730,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 confidence_score=self.CONFIDENCE_SCORE,
                 analysis_type=analysis_type,
                 method_used=method_used,
-                question_number=state["current_question_index"] + 1,
+                question_number=current_question_number,
             )
             return response
 
