@@ -445,6 +445,9 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 
                 # Initialize or get state
                 state = self._get_interview_state(context)
+                is_valid = True
+                validation_message = ""
+
                 if not state["interview_active"]:
                     self._init_interview_session(context)
                     logger.debug(
@@ -453,8 +456,6 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                     )
                 else:
                     # Validate the user's answer and prepare for AI processing
-                    is_valid = True
-                    validation_message = ""
                     if user_answer:
                         is_valid, validation_message = self._comprehensive_validate_answer(
                             user_answer, 
