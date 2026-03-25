@@ -19,7 +19,6 @@ class InterviewCoachAgent(BaseAgent):
 
     USE_MOCK_RESPONSE = settings.MOCK_INTERVIEW_COACH_AGENT
     MOCK_RESPONSE_KEY = "InterviewCoachAgent"
-    USE_AI_VALIDATION = True  # Set to True to enable AI-powered answer validation
 
     SYSTEM_PROMPT = (
         """You are an expert Interview Coach specializing in personalized interview preparation. Your job is to simulate a realistic interview by asking questions ONE at a time and guiding the candidate through their responses.
@@ -44,11 +43,25 @@ Your role:
 
 PROCESS:
 - First message: Introduce the mock interview and ask the FIRST question
-- Subsequent messages: Provide feedback on their answer and ask the NEXT question
+- Subsequent messages: Evaluate the candidate's answer, provide a SCORE (0-100), and decide whether to proceed or re-ask
 - Continue asking questions in sequence up to a total of 5 questions
 - Always ask questions that bridge their resume to the job requirements
 - Vary question types: behavioral, technical, situational, competency
-- If the candidate's input is flagged as insufficient or inappropriate, do not increment the question count; instead, provide feedback explaining why the answer was inadequate and ask them to re-attempt the current question
+
+SCORING GUIDELINES:
+- Score answers from 0-100 based on quality, relevance, and completeness
+- 0-30: Completely inadequate (trolls, irrelevant, no effort)
+- 31-60: Basic attempt but needs significant improvement
+- 61-80: Good solid answer that meets requirements
+- 81-100: Excellent answer with strong detail and structure
+- Consider: relevance to job, use of specific examples, STAR method structure, length/detail
+- STRICT on appropriateness: block trolls, irrelevant answers, and low-effort responses
+- GENEROUS on genuine effort: allow progression for answers that show real thought
+
+PROGRESSION RULES:
+- If score >= 60: Proceed to next question with positive feedback
+- If score < 60: Re-ask the same question with constructive feedback
+- Always provide specific suggestions for improvement
 
 RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 {
@@ -59,6 +72,8 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
   "keywords": ["keyword1", "keyword2"],
   "tip": "Brief guidance on how to approach this question",
   "feedback": "Provide constructive feedback on their answer if this is a follow-up response, otherwise leave empty",
+  "answer_score": 85,
+  "can_proceed": true,
   "next_challenge": "A brief note on what to focus on for the next question"
 }"""
         + "\n\n" + ANTI_JAILBREAK_DIRECTIVE
@@ -286,28 +301,27 @@ Interview Progress:
         
         return prompt
 
-    def _validate_interview_answer(self, answer: str, question: str = "", context: SessionContext = None) -> tuple[bool, str]:
-        """Light validation filter to block trolls and low-effort answers.
+    def _build_completion_system_prompt(self) -> str:
+        """Score the interview answer on multiple criteria with configurable thresholds.
         
-        This filter should be simple and fast - let the agent handle nuanced feedback.
+        Returns a score from 0-100, feedback, and whether it meets minimum requirements.
         
         Args:
-            answer: User's answer to validate
+            answer: User's answer to score
             question: The interview question (optional, for context)
             context: Session context (optional, for resume/job description access)
             
         Returns:
-            Tuple of (is_valid, feedback_message)
+            Tuple of (score, feedback_message, meets_minimum)
         """
         if not answer or not answer.strip():
-            return False, "Please provide an answer to the interview question."
+            return 0.0, "Please provide an answer to the interview question.", False
         
         answer = answer.strip()
+        score = 0.0
+        feedback_parts = []
         
-        # Basic length check - very short answers are likely low-effort
-        if len(answer) < 10:
-            return False, "Your answer seems too brief. Please provide a more detailed response that shows your thought process and experience."
-        
+        # 1. Basic Appropriateness Check (30 points) - STRICT
         # Check for obvious skip attempts and troll responses
         skip_indicators = [
             "idk", "i don't know", "skip", "pass", "whatever", "lol", "haha", "lmao",
@@ -317,29 +331,97 @@ Interview Progress:
         
         answer_lower = answer.lower()
         if any(indicator in answer_lower for indicator in skip_indicators):
-            return False, "Please provide a thoughtful answer to the interview question. Low-effort responses won't help you prepare effectively."
+            return 0.0, "Please provide a thoughtful answer to the interview question. Low-effort responses won't help you prepare effectively.", False
         
-        # Check for completely irrelevant content (basic check)
+        # Check for completely irrelevant content
         irrelevant_indicators = ["the weather", "my favorite color", "i like pizza", "just testing"]
         if any(phrase in answer_lower for phrase in irrelevant_indicators):
-            return False, "Please provide an answer that's relevant to the interview question and professional experience."
+            return 0.0, "Please provide an answer that's relevant to the interview question and professional experience.", False
         
-        # Context-aware relevance check if we have resume/job description
+        # Passed basic appropriateness
+        score += 30.0
+        
+        # 2. Length and Detail (25 points)
+        word_count = len(answer.split())
+        if word_count >= 40:
+            score += 25.0  # Excellent detail
+        elif word_count >= 25:
+            score += 20.0  # Good detail
+        elif word_count >= 15:
+            score += 15.0  # Adequate detail
+            feedback_parts.append("Consider adding more specific examples or details.")
+        elif word_count >= 8:
+            score += 10.0  # Basic detail
+            feedback_parts.append("Your answer could benefit from more specific examples.")
+        else:
+            score += 5.0   # Minimal detail
+            feedback_parts.append("Please provide more detail about your experience and approach.")
+        
+        # 3. Relevance to Job Requirements (25 points)
+        relevance_score = 0.0
         if context:
             job_desc = getattr(context, "job_description", "") or ""
-            if job_desc and len(job_desc) > 50:  # Only check if we have meaningful job description
+            if job_desc and len(job_desc) > 50:
                 job_keywords = set(job_desc.lower().split())
                 answer_keywords = set(answer_lower.split())
                 
-                # If answer shares very few keywords with job description, it might be irrelevant
                 overlap = len(job_keywords.intersection(answer_keywords))
-                if overlap < 2 and len(answer_keywords) > 5:
-                    return False, "Your answer doesn't seem to address the job requirements. Please connect your response to the role you're applying for."
+                total_keywords = len(job_keywords)
+                
+                if overlap >= 3:
+                    relevance_score = 25.0  # Strong relevance
+                elif overlap >= 2:
+                    relevance_score = 20.0  # Good relevance
+                    feedback_parts.append("Try to connect your answer more directly to the job requirements.")
+                elif overlap >= 1:
+                    relevance_score = 15.0  # Basic relevance
+                    feedback_parts.append("Consider how your experience relates to the specific role you're applying for.")
+                else:
+                    relevance_score = 5.0   # Low relevance
+                    feedback_parts.append("Your answer doesn't strongly connect to the job requirements.")
+            else:
+                # No job description available, give benefit of doubt
+                relevance_score = 20.0
+        else:
+            relevance_score = 20.0
         
-        return True, ""
+        score += relevance_score
         
-    def _comprehensive_validate_answer(self, answer: str, question: str, context: SessionContext, use_ai: bool = False) -> tuple[bool, str]:
-        """Comprehensive answer validation using both rule-based and optional AI validation.
+        # 4. Structure and STAR Method Usage (20 points)
+        star_indicators = ["situation", "task", "action", "result", "challenge", "problem", "solution", "outcome"]
+        star_count = sum(1 for indicator in star_indicators if indicator in answer_lower)
+        
+        if star_count >= 3:
+            score += 20.0  # Excellent structure
+        elif star_count >= 2:
+            score += 15.0  # Good structure
+            feedback_parts.append("Consider using the STAR method (Situation, Task, Action, Result) to structure your answer.")
+        elif star_count >= 1:
+            score += 10.0  # Basic structure
+            feedback_parts.append("Your answer could be better structured using the STAR method.")
+        else:
+            score += 5.0   # Poor structure
+            feedback_parts.append("Consider structuring your answer using the STAR method for better clarity.")
+        
+        # Determine if answer meets minimum threshold (60% = 60 points)
+        minimum_threshold = 60.0
+        meets_minimum = score >= minimum_threshold
+        
+        # Compile feedback
+        if meets_minimum:
+            if score >= 90:
+                feedback = "Excellent answer! You provided strong detail and clear structure."
+            elif score >= 80:
+                feedback = "Very good answer with solid detail and relevance."
+            else:
+                feedback = "Good answer that meets the requirements. " + " ".join(feedback_parts[:1])  # Just one suggestion
+        else:
+            feedback = "Your answer needs improvement. " + " ".join(feedback_parts)
+        
+        return score, feedback, meets_minimum
+        
+    def _build_completion_system_prompt(self) -> str:
+        """Comprehensive answer validation using scoring system with configurable thresholds.
         
         Args:
             answer: User's answer to validate
@@ -348,36 +430,32 @@ Interview Progress:
             use_ai: Whether to use AI validation for additional checking
             
         Returns:
-            Tuple of (is_valid, feedback_message)
+            Tuple of (can_proceed, feedback_message, score)
         """
-        # First, apply rule-based validation
-        is_valid, feedback = self._validate_interview_answer(answer, question, context)
+        # Apply scoring validation
+        score, feedback, meets_minimum = self._score_interview_answer(answer, question, context)
         
-        # If rule-based validation fails, return immediately
-        if not is_valid:
-            return is_valid, feedback
-        
-        # If rule-based passes and AI validation is requested, apply AI validation
-        if use_ai and question:
+        # If AI validation is requested and score is borderline, apply additional AI check
+        if use_ai and question and score >= 40 and score < 70:  # Borderline cases
             try:
                 ai_valid, ai_feedback = self._ai_validate_interview_answer(answer, question, context)
                 if not ai_valid:
-                    return ai_valid, ai_feedback
+                    return False, ai_feedback, score
+                # If AI validation passes, allow progression even if score is slightly low
+                if score >= 50:
+                    return True, f"{feedback} (AI validation passed)", score
             except Exception as e:
-                logger.warning(f"AI validation failed, using rule-based result: {e}")
+                logger.warning(f"AI validation failed, using score-based result: {e}")
         
-        return is_valid, feedback
+        # Return results based on scoring
+        can_proceed = meets_minimum
+        return can_proceed, feedback, score
 
-    def _ai_validate_interview_answer(self, answer: str, question: str, context: SessionContext) -> tuple[bool, str]:
-        """Use AI to validate if the user's answer is appropriate for the interview question.
+    def _build_completion_system_prompt(self) -> str:
+        """Build system prompt for interview completion summary.
         
-        Args:
-            answer: User's answer to validate
-            question: The interview question
-            context: Session context
-            
         Returns:
-            Tuple of (is_valid, feedback_message)
+            System prompt for generating interview summary
         """
         validation_prompt = f"""
 You are a strict Interview Gatekeeper. Your job is to FILTER OUT answers that are too short, unprofessional, or irrelevant.
@@ -423,7 +501,7 @@ Respond ONLY with a JSON object:
         except Exception as e:
             # Fallback to rule-based validation if AI validation fails
             logger.warning(f"AI validation failed, falling back to rule-based: {e}")
-            return self._validate_interview_answer(answer, question, context)
+            return True, "Validation failed, allowing progression", 50.0  # Safe fallback
 
     def _build_completion_system_prompt(self) -> str:
         """Build system prompt for interview completion summary.
@@ -466,8 +544,19 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         agent_name = self.get_name()
         processing_start_time = time.time()
         
-        # Use the main system prompt for all scenarios
-        current_system_prompt = self.SYSTEM_PROMPT
+        # Determine which system prompt to use
+        state = self._get_interview_state(context)
+        
+        # Check if this response will complete the interview
+        will_complete_interview = False
+        if is_follow_up and user_answer:
+            # If we proceed from current question, will we reach the end?
+            will_complete_interview = (state["current_question_index"] + 1) >= state["total_questions"]
+        
+        if will_complete_interview:
+            current_system_prompt = self._build_completion_system_prompt()
+        else:
+            current_system_prompt = self.SYSTEM_PROMPT
         
         # Extract input
         if isinstance(input_data, AgentInput):
@@ -488,8 +577,6 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 
                 # Initialize or get state
                 state = self._get_interview_state(context)
-                is_valid = True
-                validation_message = ""
 
                 if not state["interview_active"]:
                     self._init_interview_session(context)
@@ -497,49 +584,9 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                         "First question of interview - initializing session",
                         session_id=session_id,
                     )
-                else:
-                    # Validate the user's answer and prepare for AI processing
-                    if user_answer:
-                        is_valid, validation_message = self._comprehensive_validate_answer(
-                            user_answer, 
-                            state["asked_questions"][-1] if state["asked_questions"] else "", 
-                            context, 
-                            self.USE_AI_VALIDATION
-                        )
-                        if is_valid:
-                            self._store_answer_and_advance(user_answer, context)
-                            logger.debug(
-                                "Stored user answer and advanced to next question",
-                                session_id=session_id,
-                                answer_preview=user_answer[:50] + "..." if len(user_answer) > 50 else user_answer,
-                            )
-                        else:
-                            # Invalid answer - don't advance, but let AI agent handle the feedback
-                            logger.debug(
-                                "User provided invalid answer, will use re-ask prompt",
-                                session_id=session_id,
-                                answer_preview=user_answer[:50] + "..." if len(user_answer) > 50 else user_answer,
-                                validation_message=validation_message,
-                            )
-                    
-                    # Check if interview is complete (only if we advanced)
-                    current_index = context.shared_memory.get("current_question_index", 0)
-                    if current_index >= state["total_questions"]:
-                        # End the interview
-                        context.shared_memory["interview_active"] = False
-                        logger.debug(
-                            "Interview completed - reached total questions",
-                            session_id=session_id,
-                            total_questions=state["total_questions"],
-                        )
                 
                 # Build interview-aware prompt
                 input_text = self._build_interview_prompt(input_data, context, user_answer if is_follow_up else None)
-                
-                # Add validation context if answer was invalid
-                if is_follow_up and user_answer and not is_valid:
-                    current_question = state["asked_questions"][-1] if state["asked_questions"] else "Please answer the current interview question properly."
-                    input_text = f"{input_text}\n\nNOTE: The user's previous answer was flagged as inadequate.\n\nCURRENT QUESTION TO RE-ASK: {current_question}\n\nUSER'S INADEQUATE ANSWER: {user_answer}\n\nVALIDATION FEEDBACK: {validation_message}\n\nPlease provide feedback on this inadequate answer and re-ask the same question."
         else:
             input_text = input_data
 
@@ -578,8 +625,9 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             else:
                 # Handle text input
                 if self.USE_MOCK_RESPONSE:
-                    # Use dynamic mock key based on interview state and validation status
-                    dynamic_mock_key = self._get_dynamic_mock_key(context, is_follow_up, is_valid)
+                    # Use dynamic mock key based on interview state
+                    # In mock mode, we simulate AI scoring, so assume valid by default
+                    dynamic_mock_key = self._get_dynamic_mock_key(context, is_follow_up, True)
                     result = self.get_mock_response_by_key(dynamic_mock_key)
                     if result is None:
                         logger.warning(
@@ -640,9 +688,54 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 result_preview=result[:100] + "..." if len(result) > 100 else result,
             )
 
-            # Parse the JSON response and store the question if it's an interview question
+            # Parse the JSON response and handle progression logic
             try:
                 response_json = json.loads(result)
+                
+                # Extract scoring information from AI response
+                answer_score = response_json.get("answer_score", 100)  # Default to 100 for new questions
+                can_proceed = response_json.get("can_proceed", True)   # Default to True for new questions
+                
+                # Handle completion responses
+                if response_json.get("interview_complete", False):
+                    # Mark interview as complete
+                    context.shared_memory["interview_active"] = False
+                    logger.debug(
+                        "Interview completed - AI generated completion summary",
+                        session_id=session_id,
+                    )
+                else:
+                    # Handle progression based on AI's scoring decision
+                    if is_follow_up and user_answer:
+                        if can_proceed:
+                            self._store_answer_and_advance(user_answer, context)
+                            logger.debug(
+                                "AI approved answer progression",
+                                session_id=session_id,
+                                answer_score=answer_score,
+                                answer_preview=user_answer[:50] + "..." if len(user_answer) > 50 else user_answer,
+                            )
+                        else:
+                            # AI decided not to proceed - don't advance
+                            logger.debug(
+                                "AI rejected answer progression",
+                                session_id=session_id,
+                                answer_score=answer_score,
+                                answer_preview=user_answer[:50] + "..." if len(user_answer) > 50 else user_answer,
+                            )
+                    
+                    # Check if interview is complete (only if we advanced)
+                    current_index = context.shared_memory.get("current_question_index", 0)
+                    if current_index >= state["total_questions"]:
+                        # End the interview
+                        context.shared_memory["interview_active"] = False
+                        logger.debug(
+                            "Interview completed - reached total questions",
+                            session_id=session_id,
+                            total_questions=state["total_questions"],
+                        )
+                
+                # Store the question if it's an interview question
                 if "question" in response_json and not response_json.get("interview_complete", False):
                     # Only store new questions, not re-asked questions
                     if response_json.get("interview_type") != "reask":
@@ -654,6 +747,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                             session_id=session_id,
                             question_number=len(asked_questions),
                         )
+                        
             except json.JSONDecodeError:
                 logger.warning(
                     "Failed to parse InterviewCoachAgent response as JSON",

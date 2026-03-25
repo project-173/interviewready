@@ -92,6 +92,8 @@
         "keywords": ["problem-solving", "technical-challenge", "solution"],
         "tip": "Use the STAR method: describe the Situation, Task, Action you took, and Result achieved. Your previous answer was too brief - please provide more detail about the specific problem, your approach, and the outcome.",
         "feedback": "Your answer seems too brief. Please provide a more detailed response that shows your thought process and experience. Try to include specific examples of the problem you faced and how you solved it.",
+        "answer_score": 35,
+        "can_proceed": false,
         "next_challenge": "Focus on demonstrating your analytical thinking and technical expertise with concrete examples"
     },
     "InterviewCoachAgent_Q2_Invalid": {
@@ -102,6 +104,8 @@
         "keywords": ["problem-solving", "technical-challenge", "solution"],
         "tip": "Use the STAR method: describe the Situation, Task, Action you took, and Result achieved. Your answer was too vague - please provide a specific technical problem you actually solved, not a generic response.",
         "feedback": "Your answer was too generic and didn't demonstrate specific technical problem-solving. Interviewers want to hear about real challenges you faced and concrete solutions you implemented.",
+        "answer_score": 25,
+        "can_proceed": false,
         "next_challenge": "Focus on demonstrating your analytical thinking and technical expertise with concrete examples"
     },
     "InterviewCoachAgent_Q2": {
@@ -112,6 +116,8 @@
         "keywords": ["learning", "adaptability", "technical-growth"],
         "tip": "Explain the context, what you needed to learn, your learning strategy, and how you applied it successfully.",
         "feedback": "Good start with your technical problem example. Now let's explore your learning agility - this is crucial for software development roles.",
+        "answer_score": 75,
+        "can_proceed": true,
         "next_challenge": "Demonstrate your ability to quickly adapt to new technologies"
     },
     "InterviewCoachAgent_Q3_Invalid": {
@@ -122,16 +128,8 @@
         "keywords": ["learning", "adaptability", "technical-growth"],
         "tip": "Explain the context, what you needed to learn, your learning strategy, and how you applied it successfully. Your previous answer lacked specific details about what you learned and how you applied it.",
         "feedback": "Your answer was too brief and didn't show the specific technology you learned or how you applied it in practice. Be more specific about the learning process and outcomes.",
-        "next_challenge": "Demonstrate your ability to quickly adapt to new technologies"
-    },
-    "InterviewCoachAgent_Q3_Invalid": {
-        "current_question_number": 2,
-        "total_questions": 5,
-        "interview_type": "technical",
-        "question": "Tell me about a time when you had to learn a new technology or framework quickly. How did you approach it?",
-        "keywords": ["learning", "adaptability", "technical-growth"],
-        "tip": "Explain the context, what you needed to learn, your learning strategy, and how you applied it successfully. Your previous answer lacked specific details about what you learned and how you applied it.",
-        "feedback": "Your answer was too brief and didn't show the specific technology you learned or how you applied it in practice. Be more specific about the learning process and outcomes.",
+        "answer_score": 45,
+        "can_proceed": false,
         "next_challenge": "Demonstrate your ability to quickly adapt to new technologies"
     },
     "InterviewCoachAgent_Q4": {
@@ -142,6 +140,8 @@
         "keywords": ["code-quality", "best-practices", "testing"],
         "tip": "Discuss testing strategies, code reviews, documentation, and any tools or processes you use to maintain high code standards.",
         "feedback": "Good handling of the production issue scenario. Quality assurance is fundamental to successful software development.",
+        "answer_score": 80,
+        "can_proceed": true,
         "next_challenge": "Demonstrate your commitment to code quality and professional standards"
     },
     "InterviewCoachAgent_Q3": {
@@ -152,6 +152,8 @@
         "keywords": ["prioritization", "problem-solving", "communication"],
         "tip": "Consider the stakeholders involved, your decision-making process, and how you'd balance immediate fixes with long-term solutions.",
         "feedback": "Excellent example of your learning approach. Now let's see how you handle high-pressure situations - a common scenario in tech roles.",
+        "answer_score": 85,
+        "can_proceed": true,
         "next_challenge": "Show your crisis management and stakeholder communication skills"
     },
     "InterviewCoachAgent_Q4_Invalid": {
@@ -162,6 +164,8 @@
         "keywords": ["prioritization", "problem-solving", "communication"],
         "tip": "Consider the stakeholders involved, your decision-making process, and how you'd balance immediate fixes with long-term solutions. Your answer didn't address stakeholder communication or long-term solutions.",
         "feedback": "Your response focused only on the technical fix but didn't consider communication with stakeholders or preventing future issues. Think about the broader impact and team coordination.",
+        "answer_score": 35,
+        "can_proceed": false,
         "next_challenge": "Show your crisis management and stakeholder communication skills"
     },
     "InterviewCoachAgent_Q5": {
@@ -172,6 +176,8 @@
         "keywords": ["collaboration", "conflict-resolution", "communication"],
         "tip": "Focus on your approach to understanding different perspectives, finding common ground, and achieving positive outcomes.",
         "feedback": "Strong foundation in code quality practices. One more question about collaboration and interpersonal skills.",
+        "answer_score": 90,
+        "can_proceed": true,
         "next_challenge": "Show your ability to work effectively with diverse personalities"
     },
     "InterviewCoachAgent_Q5_Invalid": {
@@ -182,6 +188,8 @@
         "keywords": ["code-quality", "best-practices", "testing"],
         "tip": "Discuss testing strategies, code reviews, documentation, and any tools or processes you use to maintain high code standards. Your answer was too generic - provide specific examples of tools and processes you actually use.",
         "feedback": "Your answer about code quality was too vague. Interviewers want specific examples of testing strategies, code review processes, and quality tools you've used in practice.",
+        "answer_score": 50,
+        "can_proceed": false,
         "next_challenge": "Demonstrate your commitment to code quality and professional standards"
     },
     "InterviewCoachAgent_Q6_Invalid": {
@@ -192,6 +200,8 @@
         "keywords": ["collaboration", "conflict-resolution", "communication"],
         "tip": "Focus on your approach to understanding different perspectives, finding common ground, and achieving positive outcomes. Your answer was too negative - focus on resolution and positive outcomes instead of just complaining.",
         "feedback": "Your response focused on the difficulty rather than how you successfully managed the collaboration. Emphasize your communication strategies and positive resolution.",
+        "answer_score": 40,
+        "can_proceed": false,
         "next_challenge": "Show your ability to work effectively with diverse personalities"
     },
     "InterviewCoachAgent_Summary": {
