@@ -239,18 +239,104 @@ export const AlignmentReportStep: React.FC<{ report: AlignmentReport; onStartInt
   </div>
 );
 
+export const InterviewModeSelectionStep: React.FC<{
+  onSelect: (mode: 'CHAT' | 'VOICE') => void;
+}> = ({ onSelect }) => (
+  <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 space-y-8">
+    <div className="text-center">
+      <h3 className="text-xl font-bold text-slate-900 mb-2">Select Interview Format</h3>
+      <p className="text-sm text-slate-500">Choose how you'd like to practice today. This choice is final for this session.</p>
+    </div>
+
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <button 
+        onClick={() => onSelect('CHAT')}
+        className="flex flex-col items-center p-8 bg-white border border-slate-200 rounded-2xl hover:border-slate-900 hover:shadow-md transition-all group text-center"
+      >
+        <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-6 group-hover:bg-slate-900 group-hover:text-white transition-colors">
+          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+          </svg>
+        </div>
+        <h4 className="font-bold text-lg mb-2">Text Chat</h4>
+        <p className="text-xs text-slate-500 leading-relaxed">Standard text-based interface. Best for quick practice or public spaces.</p>
+      </button>
+
+      <button 
+        onClick={() => onSelect('VOICE')}
+        className="flex flex-col items-center p-8 bg-white border border-slate-200 rounded-2xl hover:border-slate-900 hover:shadow-md transition-all group text-center"
+      >
+        <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-6 group-hover:bg-slate-900 group-hover:text-white transition-colors">
+          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+          </svg>
+        </div>
+        <h4 className="font-bold text-lg mb-2">Organic Voice</h4>
+        <p className="text-xs text-slate-500 leading-relaxed">Immersive voice simulation. Hands-free conversation with real-time audio analysis.</p>
+      </button>
+    </div>
+  </div>
+);
+
 export const InterviewStep: React.FC<{ 
   history: { role: 'user' | 'agent'; text: string }[]; 
   onSend: (msg: string) => void;
   onSendAudio: (audio: Uint8Array) => void;
   isLoading: boolean;
   chatEndRef: React.RefObject<HTMLDivElement>;
-}> = ({ history, onSend, onSendAudio, isLoading, chatEndRef }) => {
+  mode: 'CHAT' | 'VOICE';
+}> = ({ history, onSend, onSendAudio, isLoading, chatEndRef, mode }) => {
   const [isRecording, setIsRecording] = React.useState(false);
+  const [isSpeaking, setIsSpeaking] = React.useState(false);
   const [audioContext, setAudioContext] = React.useState<AudioContext | null>(null);
   const [mediaStream, setMediaStream] = React.useState<MediaStream | null>(null);
   const [processor, setProcessor] = React.useState<ScriptProcessorNode | null>(null);
   const audioChunksRef = React.useRef<Float32Array[]>([]);
+  const animationFrameRef = React.useRef<number | null>(null);
+  const silenceTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  const speakText = (text: string) => {
+    if (!('speechSynthesis' in window)) return;
+    
+    // Stop any current speech
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    // Select a natural sounding voice if available
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(v => v.name.includes('Google') || v.name.includes('Natural')) || voices[0];
+    if (preferredVoice) utterance.voice = preferredVoice;
+    
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      if (mode === 'VOICE' && !isRecording) {
+        // Delay slightly to avoid catching the end of the AI's own voice
+        setTimeout(() => startRecording(), 500);
+      }
+    };
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  useEffect(() => {
+    if (mode === 'VOICE' && history.length > 0) {
+      const lastMessage = history[history.length - 1];
+      if (lastMessage.role === 'agent') {
+        speakText(lastMessage.text);
+      }
+    }
+    
+    return () => {
+      window.speechSynthesis.cancel();
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+    };
+  }, [history.length, mode]);
 
   const startRecording = async () => {
     try {
@@ -274,12 +360,61 @@ export const InterviewStep: React.FC<{
       setMediaStream(stream);
       setProcessor(scriptProcessor);
       setIsRecording(true);
+
+      // Organic VAD Logic
+      if (mode === 'VOICE') {
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        
+        let lastSpeakTime = Date.now();
+        const SILENCE_THRESHOLD = 15; // Low threshold for VAD
+        const SILENCE_DURATION = 1500; // 1.5s of silence to trigger
+        const MAX_RECORDING_TIME = 60000; // 60s safety limit
+
+        // Safety timeout in case VAD fails
+        silenceTimeoutRef.current = setTimeout(() => {
+          stopRecording();
+        }, MAX_RECORDING_TIME);
+
+        const checkSilence = () => {
+          if (!stream.active) return;
+          
+          analyser.getByteFrequencyData(dataArray);
+          const average = dataArray.reduce((x, y) => x + y) / bufferLength;
+
+          if (average > SILENCE_THRESHOLD) {
+            lastSpeakTime = Date.now();
+          } else if (Date.now() - lastSpeakTime > SILENCE_DURATION) {
+            stopRecording();
+            return;
+          }
+          
+          animationFrameRef.current = requestAnimationFrame(checkSilence);
+        };
+        
+        animationFrameRef.current = requestAnimationFrame(checkSilence);
+      }
     } catch (error) {
       console.error('Error starting recording:', error);
+      setIsRecording(false);
     }
   };
 
   const stopRecording = () => {
+    // Cleanup first to prevent multiple triggers
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (silenceTimeoutRef.current) {
+      clearTimeout(silenceTimeoutRef.current);
+      silenceTimeoutRef.current = null;
+    }
+
     if (audioContext && mediaStream && processor) {
       processor.disconnect();
       audioContext.close();
@@ -314,6 +449,85 @@ export const InterviewStep: React.FC<{
       startRecording();
     }
   };
+
+  if (mode === 'VOICE') {
+    return (
+      <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-[calc(100vh-340px)] flex flex-col items-center justify-center space-y-12">
+        <div className="text-center space-y-4">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+            {isSpeaking ? (
+              <>
+                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+                AI is Speaking
+              </>
+            ) : isRecording ? (
+              <>
+                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                Listening to you
+              </>
+            ) : isLoading ? (
+              <>
+                <div className="w-2 h-2 rounded-full bg-slate-400 animate-spin"></div>
+                AI is thinking
+              </>
+            ) : (
+              'Ready'
+            )}
+          </div>
+          <h3 className="text-xl font-medium text-slate-800 max-w-md mx-auto leading-relaxed">
+            {history.length > 0 && history[history.length - 1].role === 'agent' 
+              ? history[history.length - 1].text 
+              : "Preparing your interview..."}
+          </h3>
+        </div>
+
+        <div className="relative">
+          {/* Animated Waveform Background */}
+          {(isRecording || isSpeaking) && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className={`absolute w-32 h-32 rounded-full opacity-20 animate-ping ${isSpeaking ? 'bg-blue-400' : 'bg-red-400'}`}></div>
+              <div className={`absolute w-40 h-40 rounded-full opacity-10 animate-pulse ${isSpeaking ? 'bg-blue-400' : 'bg-red-400'}`}></div>
+            </div>
+          )}
+          
+          <button
+            onClick={handleMicClick}
+            disabled={isLoading || isSpeaking}
+            className={`relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-500 shadow-xl ${
+              isRecording 
+                ? 'bg-red-500 text-white scale-110 shadow-red-200' 
+                : isSpeaking 
+                  ? 'bg-blue-500 text-white shadow-blue-200'
+                  : 'bg-white border-2 border-slate-100 text-slate-400 hover:border-slate-300 hover:text-slate-600'
+            } disabled:opacity-50`}
+          >
+            {isRecording ? (
+              <svg className="w-10 h-10" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+              </svg>
+            ) : isSpeaking ? (
+              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+              </svg>
+            ) : (
+              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
+              </svg>
+            )}
+          </button>
+        </div>
+
+        <div className="flex gap-4">
+           <button 
+             onClick={() => window.location.reload()}
+             className="text-[10px] font-bold text-slate-400 hover:text-slate-600 uppercase tracking-widest transition-colors"
+           >
+             Exit Interview
+           </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-[calc(100vh-340px)] flex flex-col">

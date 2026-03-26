@@ -9,6 +9,7 @@ on:
       - main
       - python-convert
       - fix-audio
+      - add-audio-interview
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
