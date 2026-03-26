@@ -176,18 +176,22 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         question_num = state["current_question_index"] + 1
         if not state["interview_active"] and state["current_question_index"] >= state["total_questions"]:
             return "InterviewCoachAgent_Summary"
-        if is_follow_up and not can_proceed:
-            invalid_keys = {
-                1: "InterviewCoachAgent",
-                2: "InterviewCoachAgent_Q2_Invalid",
-                3: "InterviewCoachAgent_Q3_Invalid",
-                4: "InterviewCoachAgent_Q4_Invalid",
-                5: "InterviewCoachAgent_Q5_Invalid",
-            }
-            return invalid_keys.get(question_num, "InterviewCoachAgent_Q6_Invalid")
-        if question_num <= 1:
+        if is_follow_up:
+            if not can_proceed:
+                invalid_keys = {
+                    1: "InterviewCoachAgent_Q1_Invalid",
+                    2: "InterviewCoachAgent_Q2_Invalid",
+                    3: "InterviewCoachAgent_Q3_Invalid",
+                    4: "InterviewCoachAgent_Q4_Invalid",
+                    5: "InterviewCoachAgent_Q5_Invalid",
+                }
+                return invalid_keys.get(question_num, "InterviewCoachAgent_Q5_Invalid")
+            if question_num < state["total_questions"]:
+                return f"InterviewCoachAgent_Q{question_num + 1}"
+            return "InterviewCoachAgent_Q5"
+        if question_num == 1:
             return "InterviewCoachAgent"
-        if question_num <= 5:
+        if question_num <= state["total_questions"]:
             return f"InterviewCoachAgent_Q{question_num}"
         return "InterviewCoachAgent_Summary"
 

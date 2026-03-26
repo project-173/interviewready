@@ -90,13 +90,13 @@
         "interview_type": "behavioral",
         "question": "Describe a challenging technical problem you solved recently and how you approached it.",
         "keywords": ["problem-solving", "technical-challenge", "solution"],
-        "tip": "Use the STAR method: describe the Situation, Task, Action you took, and Result achieved. Your previous answer was too brief - please provide more detail about the specific problem, your approach, and the outcome.",
-        "feedback": "Your answer seems too brief. Please provide a more detailed response that shows your thought process and experience. Try to include specific examples of the problem you faced and how you solved it.",
-        "answer_score": 35,
-        "can_proceed": false,
+        "tip": "Use the STAR method: describe the Situation, Task, Action you took, and Result achieved. Focus on a real technical challenge, your decision-making, and the measurable result.",
+        "feedback": "",
+        "answer_score": 0,
+        "can_proceed": true,
         "next_challenge": "Focus on demonstrating your analytical thinking and technical expertise with concrete examples"
     },
-    "InterviewCoachAgent_Q2_Invalid": {
+    "InterviewCoachAgent_Q1_Invalid": {
         "current_question_number": 1,
         "total_questions": 5,
         "interview_type": "behavioral",
@@ -120,7 +120,7 @@
         "can_proceed": true,
         "next_challenge": "Demonstrate your ability to quickly adapt to new technologies"
     },
-    "InterviewCoachAgent_Q3_Invalid": {
+    "InterviewCoachAgent_Q2_Invalid": {
         "current_question_number": 2,
         "total_questions": 5,
         "interview_type": "technical",
@@ -156,7 +156,7 @@
         "can_proceed": true,
         "next_challenge": "Show your crisis management and stakeholder communication skills"
     },
-    "InterviewCoachAgent_Q4_Invalid": {
+    "InterviewCoachAgent_Q3_Invalid": {
         "current_question_number": 3,
         "total_questions": 5,
         "interview_type": "situational",
@@ -180,7 +180,7 @@
         "can_proceed": true,
         "next_challenge": "Show your ability to work effectively with diverse personalities"
     },
-    "InterviewCoachAgent_Q5_Invalid": {
+    "InterviewCoachAgent_Q4_Invalid": {
         "current_question_number": 4,
         "total_questions": 5,
         "interview_type": "competency",
@@ -192,7 +192,7 @@
         "can_proceed": false,
         "next_challenge": "Demonstrate your commitment to code quality and professional standards"
     },
-    "InterviewCoachAgent_Q6_Invalid": {
+    "InterviewCoachAgent_Q5_Invalid": {
         "current_question_number": 5,
         "total_questions": 5,
         "interview_type": "behavioral",
