@@ -8,6 +8,7 @@ on:
       - security
       - main
       - python-convert
+      - fix-audio
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
