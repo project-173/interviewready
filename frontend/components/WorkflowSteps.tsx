@@ -285,7 +285,8 @@ export const InterviewStep: React.FC<{
   isLoading: boolean;
   chatEndRef: React.RefObject<HTMLDivElement>;
   mode: 'CHAT' | 'VOICE';
-}> = ({ history, onSend, onSendAudio, isLoading, chatEndRef, mode }) => {
+  sessionId: string;
+}> = ({ history, onSend, onSendAudio, isLoading, chatEndRef, mode, sessionId }) => {
   const [isRecording, setIsRecording] = React.useState(false);
   const [isSpeaking, setIsSpeaking] = React.useState(false);
   const [audioContext, setAudioContext] = React.useState<AudioContext | null>(null);
@@ -294,14 +295,64 @@ export const InterviewStep: React.FC<{
   const audioChunksRef = React.useRef<Float32Array[]>([]);
   const animationFrameRef = React.useRef<number | null>(null);
   const silenceTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const socketRef = React.useRef<WebSocket | null>(null);
+
+  // For Live Streaming Voice
+  useEffect(() => {
+    if (mode !== 'VOICE') return;
+
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${API_BASE_URL.replace(/^https?:\/\//, '')}/api/v1/interview/live?sessionId=${sessionId}`;
+
+    const socket = new WebSocket(wsUrl);
+    socketRef.current = socket;
+
+    socket.onmessage = async (event) => {
+      if (event.data instanceof Blob) {
+        // AI Speaking: Play the raw audio chunk
+        const arrayBuffer = await event.data.arrayBuffer();
+        playStreamedAudio(arrayBuffer);
+      } else {
+        const msg = JSON.parse(event.data);
+        if (msg.text) {
+          // Update history with AI transcription if needed
+        }
+        if (msg.event === 'turn_complete') {
+          setIsSpeaking(false);
+          startRecording();
+        }
+      }
+    };
+
+    return () => {
+      socket.close();
+    };
+  }, [mode, sessionId]);
+
+  const playStreamedAudio = async (arrayBuffer: ArrayBuffer) => {
+    if (!audioContext) return;
+    setIsSpeaking(true);
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    const source = audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioContext.destination);
+    source.start();
+  };
 
   const speakText = (text: string) => {
     if (!('speechSynthesis' in window)) return;
     
+    // Strip labels like "Question X of Y" or "Interview question" from the voice output
+    const cleanText = text
+      .replace(/^Question \d+ of \d+\n\n/i, '')
+      .replace(/^Interview question\n\n/i, '')
+      .replace(/^Interview complete\.\n\n/i, '');
+
     // Stop any current speech
     window.speechSynthesis.cancel();
 
-    const utterance = new SpeechSynthesisUtterance(text);
+    const utterance = new SpeechSynthesisUtterance(cleanText);
     
     // Select a natural sounding voice if available
     const voices = window.speechSynthesis.getVoices();
@@ -324,7 +375,8 @@ export const InterviewStep: React.FC<{
   };
 
   useEffect(() => {
-    if (mode === 'VOICE' && history.length > 0) {
+    // Browser TTS fallback only if socket isn't active
+    if (mode === 'VOICE' && history.length > 0 && !socketRef.current) {
       const lastMessage = history[history.length - 1];
       if (lastMessage.role === 'agent') {
         speakText(lastMessage.text);

@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
 from langfuse import Langfuse, observe, propagate_attributes
 from app.core.limiter import limiter
+from app.core.config import settings
 
 from app.api.v1.services import get_orchestration_agent
 
@@ -16,7 +17,7 @@ SessionId = Annotated[str | None, Query(alias="sessionId")]
 OrchestrationAgent = Annotated[object, Depends(get_orchestration_agent)]
 
 @router.get("")
-@limiter.limit("20/minute")
+@limiter.limit(settings.DEFAULT_RATE_LIMIT)
 @observe(name="list_agents")
 async def list_agents(
     request: Request,

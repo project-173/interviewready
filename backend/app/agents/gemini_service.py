@@ -323,3 +323,20 @@ class GeminiLiveService:
             return response.text
         except Exception as e:
             return f"Error in Gemini: {str(e)}"
+
+    def get_live_session(self, system_prompt: str):
+        """Create a live session with Gemini Multimodal Live API.
+        
+        Note: This is a placeholder for actual WebSocket session management.
+        The Google SDK supports 'live' sessions via WebSockets.
+        """
+        if not self.connected or not self.client:
+            return None
+            
+        return self.client.models.connect(
+            model=self.model_name,
+            config=types.LiveConnectConfig(
+                system_instruction=system_prompt,
+                response_modalities=["audio"],
+            )
+        )

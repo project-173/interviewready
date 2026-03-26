@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   SharedState, 
   WorkflowStatus,
-  ChatRequest
+  ChatRequest,
+  InterviewMode
 } from './types';
 import {
   contentStrengthAgent, 
-  alignmentAgent, 
+  alignmentAgent,
   backendService 
 } from './backendService';
 import { StepIndicator } from './components/StepIndicator';
@@ -19,7 +20,8 @@ import {
   ContentStep, 
   AlignmentStep, 
   AlignmentReportStep, 
-  InterviewStep 
+  InterviewStep,
+  InterviewModeSelectionStep
 } from './components/WorkflowSteps';
 
 const AppContent: React.FC = () => {
@@ -330,9 +332,18 @@ const WorkflowController: React.FC<{
     }
   };
 
-  const startInterview = async () => {
+  const startInterviewSelection = () => {
     setState(prev => ({
       ...prev,
+      status: WorkflowStatus.SELECTING_INTERVIEW_MODE,
+      interviewHistory: [],
+    }));
+  };
+
+  const startInterview = async (mode: InterviewMode) => {
+    setState(prev => ({
+      ...prev,
+      interviewMode: mode,
       status: WorkflowStatus.INTERVIEWING,
       interviewHistory: [],
     }));
@@ -355,7 +366,7 @@ const WorkflowController: React.FC<{
       setError(err.message);
       setState(prev => ({
         ...prev,
-        status: WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL,
+        status: WorkflowStatus.SELECTING_INTERVIEW_MODE,
         interviewHistory: [],
       }));
     } finally {
@@ -414,8 +425,9 @@ const WorkflowController: React.FC<{
       {(state.status === WorkflowStatus.CRITIQUING || state.status === WorkflowStatus.AWAITING_CRITIC_APPROVAL) && state.criticReport && <CriticStep report={state.criticReport} onApprove={approveCritic} />}
       {(state.status === WorkflowStatus.ANALYZING_CONTENT || state.status === WorkflowStatus.AWAITING_CONTENT_APPROVAL) && state.contentReport && <ContentStep report={state.contentReport} onApprove={approveContent} />}
       {(state.status === WorkflowStatus.ALIGNING_JD) && <AlignmentStep jd={state.jobDescription} onChangeJD={(val) => setState(prev => ({ ...prev, jobDescription: val }))} onAnalyze={runAlignment} isLoading={false} />}
-      {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterview} />}
-      {state.status === WorkflowStatus.INTERVIEWING && <InterviewStep history={state.interviewHistory} onSend={handleInterviewMessage} onSendAudio={handleInterviewAudioMessage} isLoading={false} chatEndRef={chatEndRef} />}
+      {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterviewSelection} />}
+      {(state.status === WorkflowStatus.SELECTING_INTERVIEW_MODE) && <InterviewModeSelectionStep onSelect={startInterview} />}
+      {state.status === WorkflowStatus.INTERVIEWING && <InterviewStep history={state.interviewHistory} onSend={handleInterviewMessage} onSendAudio={handleInterviewAudioMessage} isLoading={false} chatEndRef={chatEndRef} mode={state.interviewMode || 'CHAT'} sessionId={backendService.getSessionId()} />}
     </>
   );
 };

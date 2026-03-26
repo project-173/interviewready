@@ -16,6 +16,8 @@ from langfuse import Langfuse, observe, propagate_attributes
 langfuse = Langfuse()
 from app.models import AgentResponse, ChatApiResponse, ChatRequest
 from app.utils.json_parser import parse_json_payload
+from app.core.limiter import limiter
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -23,7 +25,7 @@ langfuse = get_client()
 
 
 @router.post("")
-@limiter.limit("10/minute")
+@limiter.limit(settings.DEFAULT_RATE_LIMIT)
 @observe(name="chat_endpoint")
 async def chat_endpoint(
     http_request: Request,
@@ -107,7 +109,10 @@ def _extract_api_payload(response: AgentResponse) -> dict[str, Any] | list[Any] 
 
 def _parse_json_payload(content: str) -> dict[str, Any] | list[Any] | None:
     """Parse JSON payload from raw content or fenced markdown code block."""
-    parsed = parse_json_payload(content, allow_array=True)
-    if isinstance(parsed, (dict, list)):
-        return parsed
+    try:
+        parsed = parse_json_payload(content, allow_array=True)
+        if isinstance(parsed, (dict, list)):
+            return parsed
+    except Exception as exc:
+        logger.warning(f"Failed to parse JSON payload in chat endpoint: {exc}", content_preview=content[:100])
     return None

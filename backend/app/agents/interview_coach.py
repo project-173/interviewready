@@ -142,17 +142,28 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
     def _store_answer_and_advance(self, user_answer: str, context: SessionContext) -> None:
         """Store user's answer and advance to next question."""
         shared_memory = self._ensure_shared_memory(context)
+        # Ensure we don't duplicate answers if the process is called multiple times for the same state
         user_answers = list(shared_memory.get("user_answers", []))
-        user_answers.append(user_answer)
-        shared_memory["user_answers"] = user_answers
         current_index = shared_memory.get("current_question_index", 0)
-        shared_memory["current_question_index"] = current_index + 1
-        logger.debug(
-            "User answer stored and advanced",
-            session_id=getattr(context, "session_id", "unknown"),
-            question_index=current_index,
-            next_index=current_index + 1,
-        )
+        
+        # If we have more answers than the current index, we might be re-processing or have a race
+        if len(user_answers) <= current_index:
+            user_answers.append(user_answer)
+            shared_memory["user_answers"] = user_answers
+            shared_memory["current_question_index"] = current_index + 1
+            logger.debug(
+                "User answer stored and advanced",
+                session_id=getattr(context, "session_id", "unknown"),
+                question_index=current_index,
+                next_index=current_index + 1,
+            )
+        else:
+            logger.warning(
+                "User answer already stored for this index, skipping advance",
+                session_id=getattr(context, "session_id", "unknown"),
+                current_index=current_index,
+                num_answers=len(user_answers),
+            )
 
     def _store_question_if_new(self, question: str, context: SessionContext) -> None:
         """Store a new interview question once."""
@@ -598,7 +609,12 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 
             # Parse the JSON response and handle progression logic
             try:
-                response_json = json.loads(result)
+                # Robust JSON parsing (handles markdown blocks)
+                from ..utils.json_parser import parse_json_payload
+                response_json = parse_json_payload(result)
+                if response_json is None:
+                    raise json.JSONDecodeError("Failed to parse JSON from result", result, 0)
+
                 if response_json.get("interview_complete", False):
                     self._set_interview_complete(context)
                     logger.debug(
