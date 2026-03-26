@@ -7,19 +7,20 @@ import {
 import {
   contentStrengthAgent, 
   alignmentAgent, 
+  interviewCoachAgent,
   backendService 
 } from './backendService';
 import { StepIndicator } from './components/StepIndicator';
 import { ResumePreview } from './components/ResumePreview';
 import { LoadingState } from './components/LoadingState';
 import { LoadingProvider, useLoading } from './contexts/LoadingContext';
-import {
-    UploadStep,
-    CriticStep,
-    ContentStep,
-    AlignmentStep,
-    AlignmentReportStep,
-    InterviewStep, InterviewModeSelectionStep
+import { 
+  UploadStep, 
+  CriticStep, 
+  ContentStep, 
+  AlignmentStep, 
+  AlignmentReportStep, 
+  InterviewStep 
 } from './components/WorkflowSteps';
 
 const AppContent: React.FC = () => {
@@ -330,46 +331,12 @@ const WorkflowController: React.FC<{
     }
   };
 
-  const startInterviewSelection = () => {
-    setState(prev => ({
-      ...prev,
-      status: WorkflowStatus.SELECTING_INTERVIEW_MODE,
-      interviewHistory: [],
+  const startInterview = async () => {
+    setState(prev => ({ 
+      ...prev, 
+      status: WorkflowStatus.INTERVIEWING, 
+      interviewHistory: [{ role: 'agent', text: "Ready to practice? Based on your profile, tell me why you're a fit for this role." }]
     }));
-  };
-
-  const startInterview = async (mode: 'CHAT' | 'VOICE') => {
-    setState(prev => ({
-      ...prev,
-      interviewMode: mode,
-      status: WorkflowStatus.INTERVIEWING,
-      interviewHistory: [],
-    }));
-    startLoading('Starting interview...', ['Preparing first question', 'Personalizing coach guidance']);
-    setError(null);
-    try {
-      updateProgress(50, 0);
-      const openingQuestion = await backendService.interviewCoachAgent(
-        state.currentResume,
-        state.jobDescription,
-        [],
-      );
-      updateProgress(100, 1);
-      setState(prev => ({
-        ...prev,
-        status: WorkflowStatus.INTERVIEWING,
-        interviewHistory: [{ role: 'agent', text: openingQuestion }],
-      }));
-    } catch (err: any) {
-      setError(err.message);
-      setState(prev => ({
-        ...prev,
-        status: WorkflowStatus.SELECTING_INTERVIEW_MODE,
-        interviewHistory: [],
-      }));
-    } finally {
-      stopLoading();
-    }
   };
 
   const handleInterviewMessage = async (msg: string) => {
@@ -378,11 +345,7 @@ const WorkflowController: React.FC<{
     startLoading('Coach is thinking...', ['Analyzing your response', 'Generating feedback']);
     try {
       updateProgress(50, 0);
-      const responseText = await backendService.interviewCoachAgent(
-        state.currentResume,
-        state.jobDescription,
-        updatedHistory,
-      );
+      const responseText = await interviewCoachAgent(state.alignmentReport, updatedHistory);
       updateProgress(100, 1);
       setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
     } catch (err: any) {
@@ -407,7 +370,7 @@ const WorkflowController: React.FC<{
       };
       updateProgress(66, 1);
       const response = await backendService.callChatEndpoint(request);
-      const responseText = backendService.formatInterviewCoachPayload(response.payload ?? response.content);
+      const responseText = typeof response.payload === 'string' ? response.payload : JSON.stringify(response.payload);
       updateProgress(100, 2);
       setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
     } catch (err: any) {
@@ -423,9 +386,8 @@ const WorkflowController: React.FC<{
       {(state.status === WorkflowStatus.CRITIQUING || state.status === WorkflowStatus.AWAITING_CRITIC_APPROVAL) && state.criticReport && <CriticStep report={state.criticReport} onApprove={approveCritic} />}
       {(state.status === WorkflowStatus.ANALYZING_CONTENT || state.status === WorkflowStatus.AWAITING_CONTENT_APPROVAL) && state.contentReport && <ContentStep report={state.contentReport} onApprove={approveContent} />}
       {(state.status === WorkflowStatus.ALIGNING_JD) && <AlignmentStep jd={state.jobDescription} onChangeJD={(val) => setState(prev => ({ ...prev, jobDescription: val }))} onAnalyze={runAlignment} isLoading={false} />}
-      {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterviewSelection} />}
-      {(state.status === WorkflowStatus.SELECTING_INTERVIEW_MODE) && <InterviewModeSelectionStep onSelect={startInterview} />}
-      {state.status === WorkflowStatus.INTERVIEWING && <InterviewStep history={state.interviewHistory} onSend={handleInterviewMessage} onSendAudio={handleInterviewAudioMessage} isLoading={false} chatEndRef={chatEndRef} mode={state.interviewMode || 'CHAT'} />}
+      {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterview} />}
+      {state.status === WorkflowStatus.INTERVIEWING && <InterviewStep history={state.interviewHistory} onSend={handleInterviewMessage} onSendAudio={handleInterviewAudioMessage} isLoading={false} chatEndRef={chatEndRef} />}
     </>
   );
 };
