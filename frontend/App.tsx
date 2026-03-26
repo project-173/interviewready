@@ -341,6 +341,17 @@ const WorkflowController: React.FC<{
   };
 
   const startInterview = async (mode: InterviewMode) => {
+    // Proactively initialize audio for voice mode to satisfy browser autoplay policy
+    if (mode === 'VOICE') {
+      try {
+        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+        // Just warm it up, the InterviewStep will use its own state or we could pass this one
+      } catch (e) {
+        console.warn('Initial AudioContext warm-up failed:', e);
+      }
+    }
+
     setState(prev => ({
       ...prev,
       interviewMode: mode,

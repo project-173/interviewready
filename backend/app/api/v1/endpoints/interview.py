@@ -59,16 +59,22 @@ async def interview_live_websocket(
         system_instruction += f"\n\nTarget Job Description:\n{context.job_description}"
 
     try:
+        # Wrap system instruction correctly for LiveConnectConfig
+        system_content = types.Content(parts=[types.Part.from_text(text=system_instruction)])
+
         # Connect to Gemini Multimodal Live
         async with client.aio.models.connect(
             model=settings.GEMINI_MODEL,
             config=types.LiveConnectConfig(
-                system_instruction=system_instruction,
-                response_modalities=["audio"],
+                system_instruction=system_content,
+                response_modalities=[types.LiveClientRealtimeInputMessageRealtimeClientContentRealtimeInputMessageRealtimeClientContentResponseModalities.AUDIO],
             )
         ) as session:
-            # Send an initial empty message to trigger the proactive greeting
-            await session.send(input="START_INTERVIEW_NOW", end_of_turn=True)
+            # Send an initial message formatted properly to trigger the proactive greeting
+            await session.send(
+                input=types.LiveClientContent(parts=[types.Part.from_text(text="START_INTERVIEW_NOW")]),
+                end_of_turn=True
+            )
             
             async def send_to_client():
                 """Relay audio from Gemini to Frontend."""
@@ -96,10 +102,10 @@ async def interview_live_websocket(
                     while True:
                         data = await websocket.receive()
                         if "bytes" in data:
-                            # Send raw audio to Gemini
+                            # Send raw audio to Gemini with correct sample rate MIME type
                             await session.send(
                                 input=types.LiveClientContent(
-                                    parts=[types.Part.from_bytes(data=data["bytes"], mime_type="audio/pcm")]
+                                    parts=[types.Part.from_bytes(data=data["bytes"], mime_type="audio/pcm;rate=16000")]
                                 ),
                                 end_of_turn=False # VAD handled by Gemini or Frontend
                             )
@@ -109,7 +115,10 @@ async def interview_live_websocket(
                             if msg.get("event") == "end_of_turn":
                                 await session.send(input=types.LiveClientContent(parts=[]), end_of_turn=True)
                             elif msg.get("text"):
-                                await session.send(input=msg["text"], end_of_turn=True)
+                                await session.send(
+                                    input=types.LiveClientContent(parts=[types.Part.from_text(text=msg["text"])]),
+                                    end_of_turn=True
+                                )
                 except WebSocketDisconnect:
                     raise
                 except Exception as e:

@@ -308,6 +308,11 @@ export const InterviewStep: React.FC<{
     const socket = new WebSocket(wsUrl);
     socketRef.current = socket;
 
+    socket.onopen = () => {
+      console.log('Voice WebSocket connected');
+      startRecording(); // Automatically start listening upon connection
+    };
+
     socket.onmessage = async (event) => {
       if (event.data instanceof Blob) {
         // AI Speaking: Play the raw audio chunk
@@ -315,12 +320,9 @@ export const InterviewStep: React.FC<{
         playStreamedAudio(arrayBuffer);
       } else {
         const msg = JSON.parse(event.data);
-        if (msg.text) {
-          // Update history with AI transcription if needed
-        }
         if (msg.event === 'turn_complete') {
           setIsSpeaking(false);
-          startRecording();
+          // startRecording is already running in continuous mode or will be resumed
         }
       }
     };
@@ -331,13 +333,31 @@ export const InterviewStep: React.FC<{
   }, [mode, sessionId]);
 
   const playStreamedAudio = async (arrayBuffer: ArrayBuffer) => {
-    if (!audioContext) return;
-    setIsSpeaking(true);
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-    const source = audioContext.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioContext.destination);
-    source.start();
+    try {
+      let currentCtx = audioContext;
+      if (!currentCtx) {
+        currentCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        setAudioContext(currentCtx);
+      }
+      
+      if (currentCtx.state === 'suspended') {
+        await currentCtx.resume();
+      }
+
+      setIsSpeaking(true);
+      const audioBuffer = await currentCtx.decodeAudioData(arrayBuffer);
+      const source = currentCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(currentCtx.destination);
+      source.start();
+      
+      source.onended = () => {
+        // If nothing else is playing, we could set isSpeaking to false, 
+        // but turn_complete event is more reliable for turn-taking.
+      };
+    } catch (err) {
+      console.error('Error playing streamed audio:', err);
+    }
   };
 
   const speakText = (text: string) => {
@@ -392,7 +412,14 @@ export const InterviewStep: React.FC<{
 
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 16000
+        } 
+      });
       const context = new (window.AudioContext || (window as any).webkitAudioContext)();
       const source = context.createMediaStreamSource(stream);
       const scriptProcessor = context.createScriptProcessor(4096, 1, 1);
@@ -469,7 +496,8 @@ export const InterviewStep: React.FC<{
 
     if (audioContext && mediaStream && processor) {
       processor.disconnect();
-      audioContext.close();
+      // Don't close context here for continuous mode unless explicitly exiting
+      // audioContext.close(); 
       mediaStream.getTracks().forEach(track => track.stop());
 
       // Convert Float32Array chunks to Int16Array PCM
@@ -477,20 +505,28 @@ export const InterviewStep: React.FC<{
       const allSamples: number[] = [];
       
       audioChunksRef.current.forEach(chunk => {
-        // Simple downsampling from 44.1kHz or 48kHz to 16kHz
         const ratio = audioContext.sampleRate / sampleRate;
         for (let i = 0; i < chunk.length; i += ratio) {
-          allSamples.push(chunk[Math.floor(i)] * 32767); // Convert to 16-bit
+          allSamples.push(chunk[Math.floor(i)] * 32767);
         }
       });
 
       const pcmData = new Int16Array(allSamples);
-      onSendAudio(new Uint8Array(pcmData.buffer));
+      const audioBytes = new Uint8Array(pcmData.buffer);
 
-      setAudioContext(null);
-      setMediaStream(null);
-      setProcessor(null);
+      // In Voice mode, we send directly to the websocket if it's open
+      if (mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(audioBytes);
+      } else {
+        onSendAudio(audioBytes);
+      }
+
       setIsRecording(false);
+      
+      // In VOICE mode, we immediately start the next capture cycle for "hands-free" feel
+      if (mode === 'VOICE' && !isSpeaking) {
+        setTimeout(() => startRecording(), 100);
+      }
     }
   };
 
