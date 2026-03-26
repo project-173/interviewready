@@ -170,6 +170,121 @@ def test_interview_coach_advances_on_valid_answers_until_summary(monkeypatch) ->
     assert final_context.shared_memory["user_answers"][-1] == "This is a detailed, relevant interview answer."
 
 
+def test_interview_coach_handles_invalid_then_valid_and_reaches_summary(monkeypatch) -> None:
+    agent = _build_agent(monkeypatch)
+    context = SessionContext(
+        session_id="s-e2e",
+        user_id="u-e2e",
+    )
+
+    opening_response = agent.process(
+        AgentInput(intent="INTERVIEW_COACH", job_description="Backend engineer role"),
+        context,
+    )
+    opening_payload = json.loads(opening_response.content)
+    assert opening_payload["current_question_number"] == 1
+    assert context.shared_memory["current_question_index"] == 0
+    assert context.shared_memory["interview_active"] is True
+
+    invalid_response = agent.process(
+        AgentInput(
+            intent="INTERVIEW_COACH",
+            message_history=[{"role": "user", "text": "idk"}],
+        ),
+        context,
+    )
+    invalid_payload = json.loads(invalid_response.content)
+    assert invalid_payload["can_proceed"] is False
+    assert invalid_payload["current_question_number"] == 1
+    assert context.shared_memory["current_question_index"] == 0
+    assert context.shared_memory["user_answers"] == []
+
+    monkeypatch.setattr(
+        agent,
+        "_score_interview_answer",
+        lambda *args, **kwargs: (85.0, "Strong answer.", True),
+    )
+
+    valid_answer = (
+        "Situation: I led a backend migration with strict uptime requirements. "
+        "Task: improve reliability and delivery speed. "
+        "Action: I coordinated design reviews, automated testing, and rollout safeguards. "
+        "Result: we reduced incidents and shipped faster."
+    )
+
+    expected_question_numbers = [2, 3, 4, 5]
+    for expected_question_number in expected_question_numbers:
+        response = agent.process(
+            AgentInput(
+                intent="INTERVIEW_COACH",
+                message_history=[{"role": "user", "text": valid_answer}],
+            ),
+            context,
+        )
+
+        payload = json.loads(response.content)
+        assert payload["can_proceed"] is True
+        assert payload["current_question_number"] == expected_question_number
+        assert context.shared_memory["current_question_index"] == expected_question_number - 1
+
+    summary_response = agent.process(
+        AgentInput(
+            intent="INTERVIEW_COACH",
+            message_history=[{"role": "user", "text": valid_answer}],
+        ),
+        context,
+    )
+    summary_payload = json.loads(summary_response.content)
+    assert summary_payload["interview_complete"] is True
+    assert context.shared_memory["interview_active"] is False
+    assert context.shared_memory["current_question_index"] == 5
+    assert len(context.shared_memory["user_answers"]) == 5
+
+
+def test_interview_coach_advances_on_dict_history_from_question_four(monkeypatch) -> None:
+    agent = _build_agent(monkeypatch)
+
+    monkeypatch.setattr(
+        agent,
+        "_score_interview_answer",
+        lambda *args, **kwargs: (85.0, "Strong answer.", True),
+    )
+
+    context = SessionContext(
+        session_id="s-dict-q4",
+        user_id="u-dict-q4",
+        shared_memory={
+            "interview_active": True,
+            "current_question_index": 3,
+            "asked_questions": ["Q1", "Q2", "Q3", "Q4"],
+            "user_answers": ["a1", "a2", "a3"],
+            "total_questions": 5,
+        },
+    )
+
+    response = agent.process(
+        AgentInput(
+            intent="INTERVIEW_COACH",
+            message_history=[
+                {
+                    "role": "user",
+                    "text": (
+                        "I keep code quality high with automated tests, careful code reviews, "
+                        "clear documentation, and refactoring during feature work."
+                    ),
+                }
+            ],
+        ),
+        context,
+    )
+
+    payload = json.loads(response.content)
+    assert payload["can_proceed"] is True
+    assert payload["current_question_number"] == 5
+    assert context.shared_memory["current_question_index"] == 4
+    assert context.shared_memory["user_answers"][-1].startswith("I keep code quality high")
+
+
 def test_interview_coach_keeps_same_question_on_invalid_answers(monkeypatch) -> None:
     agent = _build_agent(monkeypatch)
 
@@ -344,6 +459,191 @@ def test_interview_coach_uses_model_approval_and_generates_summary(monkeypatch) 
     assert context.shared_memory["interview_active"] is False
     assert context.shared_memory["current_question_index"] == 5
     assert context.shared_memory["user_answers"][-1] == final_answer
+
+
+def test_interview_coach_normalizes_question_number_after_progression(monkeypatch) -> None:
+    agent = _build_live_agent(monkeypatch)
+    context = SessionContext(
+        session_id="s-normalize-qnum",
+        user_id="u-normalize-qnum",
+        shared_memory={
+            "interview_active": True,
+            "current_question_index": 3,
+            "asked_questions": ["Q1", "Q2", "Q3", "Q4"],
+            "user_answers": ["a1", "a2", "a3"],
+            "total_questions": 5,
+        },
+    )
+
+    monkeypatch.setattr(
+        agent,
+        "_call_gemini_with_system_prompt",
+        lambda *args, **kwargs: json.dumps(
+            {
+                "current_question_number": 4,
+                "total_questions": 5,
+                "interview_type": "behavioral",
+                "question": "Can you describe a time when you improved code quality across your team?",
+                "keywords": ["quality", "process"],
+                "tip": "Use STAR and quantify the outcome.",
+                "feedback": "Outstanding response on system design.",
+                "answer_score": 95,
+                "can_proceed": True,
+                "next_challenge": "Focus on process improvement impact.",
+            }
+        ),
+    )
+
+    response = agent.process(
+        AgentInput(
+            intent="INTERVIEW_COACH",
+            message_history=[
+                {
+                    "role": "user",
+                    "text": (
+                        "I designed a recommendation engine with real-time updates, scalable ranking, "
+                        "and close PM collaboration."
+                    ),
+                }
+            ],
+        ),
+        context,
+    )
+
+    payload = json.loads(response.content)
+    assert payload["current_question_number"] == 5
+    assert payload["question"] == "Can you describe a time when you improved code quality across your team?"
+    assert context.shared_memory["current_question_index"] == 4
+    assert context.shared_memory["asked_questions"][-1] == payload["question"]
+
+
+def test_interview_coach_generates_summary_after_five_sequential_valid_answers(monkeypatch) -> None:
+    agent = _build_live_agent(monkeypatch)
+    context = SessionContext(
+        session_id="s-live-e2e",
+        user_id="u-live-e2e",
+        job_description="Senior backend engineer with Python, APIs, reliability, code quality, and collaboration.",
+    )
+
+    scripted_responses = iter(
+        [
+            {
+                "current_question_number": 1,
+                "total_questions": 5,
+                "interview_type": "technical",
+                "question": "Q1",
+                "keywords": ["k1"],
+                "tip": "t1",
+                "feedback": "",
+                "answer_score": 0,
+                "can_proceed": True,
+                "next_challenge": "n1",
+            },
+            {
+                "current_question_number": 1,
+                "total_questions": 5,
+                "interview_type": "technical",
+                "question": "Q2",
+                "keywords": ["k2"],
+                "tip": "t2",
+                "feedback": "Good.",
+                "answer_score": 82,
+                "can_proceed": True,
+                "next_challenge": "n2",
+            },
+            {
+                "current_question_number": 2,
+                "total_questions": 5,
+                "interview_type": "behavioral",
+                "question": "Q3",
+                "keywords": ["k3"],
+                "tip": "t3",
+                "feedback": "Good.",
+                "answer_score": 84,
+                "can_proceed": True,
+                "next_challenge": "n3",
+            },
+            {
+                "current_question_number": 3,
+                "total_questions": 5,
+                "interview_type": "situational",
+                "question": "Q4",
+                "keywords": ["k4"],
+                "tip": "t4",
+                "feedback": "Good.",
+                "answer_score": 86,
+                "can_proceed": True,
+                "next_challenge": "n4",
+            },
+            {
+                "current_question_number": 4,
+                "total_questions": 5,
+                "interview_type": "competency",
+                "question": "Q5",
+                "keywords": ["k5"],
+                "tip": "t5",
+                "feedback": "Good.",
+                "answer_score": 88,
+                "can_proceed": True,
+                "next_challenge": "n5",
+            },
+            {
+                "interview_complete": True,
+                "summary": "Strong interview overall.",
+                "strengths": ["Structured answers", "Technical depth"],
+                "areas_for_improvement": ["Quantify impact earlier"],
+                "overall_rating": "Good",
+                "recommendations": ["Practice concise openings"],
+                "final_feedback": "Keep refining your STAR examples.",
+            },
+        ]
+    )
+
+    monkeypatch.setattr(
+        agent,
+        "_call_gemini_with_system_prompt",
+        lambda *args, **kwargs: json.dumps(next(scripted_responses)),
+    )
+
+    opening_response = agent.process(
+        AgentInput(intent="INTERVIEW_COACH", job_description=context.job_description),
+        context,
+    )
+    assert json.loads(opening_response.content)["current_question_number"] == 1
+
+    valid_answer = (
+        "Situation: I improved a backend service under tight reliability constraints. "
+        "Task: reduce incidents and increase delivery confidence. "
+        "Action: I added tests, observability, and safer deployment steps. "
+        "Result: incidents dropped and release speed improved."
+    )
+
+    for expected_question_number in [2, 3, 4, 5]:
+        response = agent.process(
+            AgentInput(
+                intent="INTERVIEW_COACH",
+                message_history=[{"role": "user", "text": valid_answer}],
+            ),
+            context,
+        )
+        payload = json.loads(response.content)
+        assert payload["current_question_number"] == expected_question_number
+        assert payload["can_proceed"] is True
+
+    summary_response = agent.process(
+        AgentInput(
+            intent="INTERVIEW_COACH",
+            message_history=[{"role": "user", "text": valid_answer}],
+        ),
+        context,
+    )
+    summary_payload = json.loads(summary_response.content)
+    assert summary_payload["interview_complete"] is True
+    assert summary_payload["summary"] == "Strong interview overall."
+    assert context.shared_memory["interview_active"] is False
+    assert context.shared_memory["current_question_index"] == 5
+    assert context.shared_memory["asked_questions"] == ["Q1", "Q2", "Q3", "Q4", "Q5"]
+    assert len(context.shared_memory["user_answers"]) == 5
 
 
 def test_interview_coach_completes_after_final_valid_answer(monkeypatch) -> None:

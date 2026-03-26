@@ -407,11 +407,18 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
     def _extract_follow_up(self, input_data: AgentInput) -> tuple[bool, str]:
         """Extract the latest user answer from message history."""
         message_history = getattr(input_data, "message_history", []) or []
-        user_messages = [msg for msg in message_history if getattr(msg, "role", None) == "user"]
+        def _message_value(message, key: str) -> str:
+            if isinstance(message, dict):
+                value = message.get(key, "")
+            else:
+                value = getattr(message, key, "")
+            return (value or "").strip() if isinstance(value, str) else value
+
+        user_messages = [msg for msg in message_history if _message_value(msg, "role") == "user"]
         if not user_messages:
             return False, ""
         last_user_message = user_messages[-1]
-        return True, (getattr(last_user_message, "text", "") or "").strip()
+        return True, _message_value(last_user_message, "text")
 
     def _generate_summary_response(
         self, input_data: AgentInput, context: SessionContext
@@ -633,12 +640,20 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                         response_json = json.loads(result)
                         state = self._get_interview_state(context)
 
+                    if not response_json.get("interview_complete", False):
+                        response_json["current_question_number"] = min(
+                            state["current_question_index"] + 1,
+                            state["total_questions"],
+                        )
+                        response_json["total_questions"] = state["total_questions"]
+
                     if (
                         response_json.get("question")
                         and response_json.get("current_question_number", state["current_question_index"] + 1)
                         == state["current_question_index"] + 1
                     ):
                         self._store_question_if_new(response_json["question"], context)
+                    result = json.dumps(response_json)
                     if state["current_question_index"] >= state["total_questions"]:
                         self._set_interview_complete(context)
             except json.JSONDecodeError:
