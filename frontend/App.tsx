@@ -7,7 +7,6 @@ import {
 import {
   contentStrengthAgent, 
   alignmentAgent, 
-  interviewCoachAgent,
   backendService 
 } from './backendService';
 import { StepIndicator } from './components/StepIndicator';
@@ -332,11 +331,36 @@ const WorkflowController: React.FC<{
   };
 
   const startInterview = async () => {
-    setState(prev => ({ 
-      ...prev, 
-      status: WorkflowStatus.INTERVIEWING, 
-      interviewHistory: [{ role: 'agent', text: "Ready to practice? Based on your profile, tell me why you're a fit for this role." }]
+    setState(prev => ({
+      ...prev,
+      status: WorkflowStatus.INTERVIEWING,
+      interviewHistory: [],
     }));
+    startLoading('Starting interview...', ['Preparing first question', 'Personalizing coach guidance']);
+    setError(null);
+    try {
+      updateProgress(50, 0);
+      const openingQuestion = await backendService.interviewCoachAgent(
+        state.currentResume,
+        state.jobDescription,
+        [],
+      );
+      updateProgress(100, 1);
+      setState(prev => ({
+        ...prev,
+        status: WorkflowStatus.INTERVIEWING,
+        interviewHistory: [{ role: 'agent', text: openingQuestion }],
+      }));
+    } catch (err: any) {
+      setError(err.message);
+      setState(prev => ({
+        ...prev,
+        status: WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL,
+        interviewHistory: [],
+      }));
+    } finally {
+      stopLoading();
+    }
   };
 
   const handleInterviewMessage = async (msg: string) => {
@@ -345,7 +369,11 @@ const WorkflowController: React.FC<{
     startLoading('Coach is thinking...', ['Analyzing your response', 'Generating feedback']);
     try {
       updateProgress(50, 0);
-      const responseText = await interviewCoachAgent(state.alignmentReport, updatedHistory);
+      const responseText = await backendService.interviewCoachAgent(
+        state.currentResume,
+        state.jobDescription,
+        updatedHistory,
+      );
       updateProgress(100, 1);
       setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
     } catch (err: any) {
@@ -370,7 +398,7 @@ const WorkflowController: React.FC<{
       };
       updateProgress(66, 1);
       const response = await backendService.callChatEndpoint(request);
-      const responseText = typeof response.payload === 'string' ? response.payload : JSON.stringify(response.payload);
+      const responseText = backendService.formatInterviewCoachPayload(response.payload ?? response.content);
       updateProgress(100, 2);
       setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
     } catch (err: any) {
