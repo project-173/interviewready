@@ -28,8 +28,8 @@ langfuse = get_client()
 @limiter.limit(settings.DEFAULT_RATE_LIMIT)
 @observe(name="chat_endpoint")
 async def chat_endpoint(
-    http_request: Request,
-    request: ChatRequest,
+    request: Request,
+    chat_request: ChatRequest,
     session_id: Annotated[str, Query(alias="sessionId")],
 ) -> ChatApiResponse:
     """Run orchestration for the chat message within a user-owned session."""
@@ -70,7 +70,7 @@ async def chat_endpoint(
 
             try:
                 internal_response = await run_in_threadpool(
-                    orchestrator.orchestrate, request, context
+                    orchestrator.orchestrate, chat_request, context
                 )
                 result = ChatApiResponse(
                     agent=internal_response.agent_name,
