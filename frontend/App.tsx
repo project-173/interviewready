@@ -347,6 +347,9 @@ const WorkflowController: React.FC<{
       status: WorkflowStatus.INTERVIEWING,
       interviewHistory: [],
     }));
+
+    if (mode === 'VOICE') return; // Handled by WebSocket auto-start
+
     startLoading('Starting interview...', ['Preparing first question', 'Personalizing coach guidance']);
     setError(null);
     try {

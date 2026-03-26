@@ -41,7 +41,11 @@ async def interview_live_websocket(
     system_instruction = (
         "You are an expert Interview Coach. This is a LIVE voice interview. "
         "Speak naturally. Be encouraging. Ask one question at a time. "
-        "Your goal is to simulate a real interview based on the user's resume."
+        "Your goal is to simulate a real interview based on the user's resume and job description.\n\n"
+        "PROACTIVE GREETING RULE:\n"
+        "Immediately greet the candidate, reference the specific role they are applying for, "
+        "and ask the FIRST targeted interview question. Do NOT wait for the user to speak first. "
+        "Start the conversation yourself NOW."
     )
 
     if context.resume_data:
@@ -50,6 +54,9 @@ async def interview_live_websocket(
         if isinstance(resume_context, dict):
             resume_context = json.dumps(resume_context, indent=2)
         system_instruction += f"\n\nCandidate Resume Context:\n{resume_context}"
+
+    if context.job_description:
+        system_instruction += f"\n\nTarget Job Description:\n{context.job_description}"
 
     try:
         # Connect to Gemini Multimodal Live
@@ -60,6 +67,8 @@ async def interview_live_websocket(
                 response_modalities=["audio"],
             )
         ) as session:
+            # Send an initial empty message to trigger the proactive greeting
+            await session.send(input="START_INTERVIEW_NOW", end_of_turn=True)
             
             async def send_to_client():
                 """Relay audio from Gemini to Frontend."""

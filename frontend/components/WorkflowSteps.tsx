@@ -523,13 +523,11 @@ export const InterviewStep: React.FC<{
                 AI is thinking
               </>
             ) : (
-              'Ready'
+              'Live Interview'
             )}
           </div>
-          <h3 className="text-xl font-medium text-slate-800 max-w-md mx-auto leading-relaxed">
-            {history.length > 0 && history[history.length - 1].role === 'agent' 
-              ? history[history.length - 1].text 
-              : "Preparing your interview..."}
+          <h3 className="text-xl font-medium text-slate-800 max-w-md mx-auto leading-relaxed h-8">
+            {!isSpeaking && !isRecording && !isLoading ? "Connected" : ""}
           </h3>
         </div>
 
