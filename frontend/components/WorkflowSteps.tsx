@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { StructuralAssessment, ContentAnalysisReport, AlignmentReport } from '../types';
@@ -289,7 +288,6 @@ export const InterviewStep: React.FC<{
 }> = ({ history, onSend, onSendAudio, isLoading, chatEndRef, mode, sessionId }) => {
   const [isRecording, setIsRecording] = React.useState(false);
   const [isSpeaking, setIsSpeaking] = React.useState(false);
-  const [audioContext, setAudioContext] = React.useState<AudioContext | null>(null);
   const [mediaStream, setMediaStream] = React.useState<MediaStream | null>(null);
   const [processor, setProcessor] = React.useState<AudioWorkletNode | null>(null);
   const audioChunksRef = React.useRef<Float32Array[]>([]);
@@ -299,6 +297,23 @@ export const InterviewStep: React.FC<{
   const animationFrameRef = React.useRef<number | null>(null);
   const silenceTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const socketRef = React.useRef<WebSocket | null>(null);
+
+  // Refs to track current state inside stale closures (WebSocket handlers, timers, VAD)
+  const isSpeakingRef = React.useRef(false);
+  const isRecordingRef = React.useRef(false);
+  // Single shared AudioContext for playback — avoids creating a new one per audio chunk
+  const playbackContextRef = React.useRef<AudioContext | null>(null);
+  // Separate AudioContext for microphone capture
+  const recordingContextRef = React.useRef<AudioContext | null>(null);
+
+  // Keep refs in sync with state so closures always have fresh values
+  React.useEffect(() => {
+    isSpeakingRef.current = isSpeaking;
+  }, [isSpeaking]);
+
+  React.useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
 
   // For Live Streaming Voice
   useEffect(() => {
@@ -321,49 +336,8 @@ export const InterviewStep: React.FC<{
 
     socket.onopen = () => {
       console.log('Voice WebSocket connected');
-      // MIC DELAY: Give the AI time to greet before VAD starts
-      setTimeout(() => {
-        if (socketRef.current?.readyState === WebSocket.OPEN && !isSpeaking) {
-          startRecording();
-        }
-      }, 5000);
-    };
-
-    socket.onmessage = async (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === "audioStream") {
-          console.log("Audio chunk received, size:", msg.data.length);
-          const float32Data = base64ToFloat32(msg.data);
-          playbackQueueRef.current.push(float32Data);
-          if (!isQueueProcessingRef.current) {
-            processPlaybackQueue();
-          }
-        } else if (msg.type === "textStream") {
-          // Update history with live transcription if needed
-          console.log("AI Transcription:", msg.data);
-        } else if (msg.interrupted) {
-          // Clear playback queue if user interrupts AI
-          console.log("AI Interrupted, clearing playback queue");
-          playbackQueueRef.current = [];
-          setIsSpeaking(false);
-        } else if (msg.event === 'turn_complete' || msg.event === 'generation_complete') {
-          // Turn or Generation complete
-          console.log(`Event received: ${msg.event}`);
-          // We don't necessarily stop speaking until the queue is empty, 
-          // but we know no more chunks are coming for this turn.
-        } else if (msg.type === "warning") {
-          console.warn("AI Session Warning:", msg.data);
-        } else if (msg.error) {
-          console.error('WebSocket error message:', msg.error);
-        }
-      } catch (e) {
-        // Fallback for raw binary if sent
-        if (event.data instanceof Blob) {
-          const arrayBuffer = await event.data.arrayBuffer();
-          playStreamedAudio(arrayBuffer);
-        }
-      }
+      // Do NOT start recording here — wait for the AI's opening turn_complete event
+      // to avoid capturing the AI's own audio output as microphone input.
     };
 
     const base64ToFloat32 = (base64: string) => {
@@ -376,14 +350,57 @@ export const InterviewStep: React.FC<{
       return float32;
     };
 
+    socket.onmessage = async (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'audioStream') {
+          console.log('Audio chunk received, size:', msg.data.length);
+          const float32Data = base64ToFloat32(msg.data);
+          playbackQueueRef.current.push(float32Data);
+          if (!isQueueProcessingRef.current) {
+            processPlaybackQueue();
+          }
+        } else if (msg.type === 'textStream') {
+          // Update history with live transcription if needed
+          console.log('AI Transcription:', msg.data);
+        } else if (msg.interrupted) {
+          // Clear playback queue if user interrupts AI
+          console.log('AI Interrupted, clearing playback queue');
+          playbackQueueRef.current = [];
+          isSpeakingRef.current = false;
+          setIsSpeaking(false);
+        } else if (msg.event === 'turn_complete' || msg.event === 'generation_complete') {
+          // AI finished its turn — safe to open the microphone now
+          console.log(`Event received: ${msg.event} — opening mic`);
+          if (!isRecordingRef.current) {
+            startRecording();
+          }
+        } else if (msg.type === 'warning') {
+          console.warn('AI Session Warning:', msg.data);
+        } else if (msg.error) {
+          console.error('WebSocket error message:', msg.error);
+        }
+      } catch (e) {
+        // Fallback for raw binary if sent
+        if (event.data instanceof Blob) {
+          const arrayBuffer = await event.data.arrayBuffer();
+          playStreamedAudio(arrayBuffer);
+        }
+      }
+    };
+
     socket.onerror = (error) => {
       console.error('WebSocket Error:', error);
+      isSpeakingRef.current = false;
+      isRecordingRef.current = false;
       setIsSpeaking(false);
       setIsRecording(false);
     };
 
     socket.onclose = (event) => {
       console.log('WebSocket closed:', event.code, event.reason || 'No reason provided');
+      isSpeakingRef.current = false;
+      isRecordingRef.current = false;
       setIsSpeaking(false);
       setIsRecording(false);
       if (event.code !== 1000 && mode === 'VOICE') {
@@ -406,20 +423,27 @@ export const InterviewStep: React.FC<{
 
   const processPlaybackQueue = async () => {
     if (playbackQueueRef.current.length === 0) return;
-    
-    let currentCtx = audioContext;
+
+    // Use the shared ref-based AudioContext to avoid creating a new one per audio chunk
+    let currentCtx = playbackContextRef.current;
     if (!currentCtx || currentCtx.state === 'closed') {
       currentCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      setAudioContext(currentCtx);
+      playbackContextRef.current = currentCtx;
       nextStartTimeRef.current = 0;
     }
 
     if (currentCtx.state === 'suspended') {
-      try { await currentCtx.resume(); } catch (e) { console.warn("Context resume failed", e); }
+      try { await currentCtx.resume(); } catch (e) { console.warn('Context resume failed', e); }
     }
 
     isQueueProcessingRef.current = true;
+    isSpeakingRef.current = true;
     setIsSpeaking(true);
+
+    // Stop the microphone while the AI is speaking to prevent audio feedback
+    if (isRecordingRef.current) {
+      stopRecording();
+    }
 
     while (playbackQueueRef.current.length > 0) {
       const audioChunks = playbackQueueRef.current.shift()!;
@@ -432,7 +456,7 @@ export const InterviewStep: React.FC<{
 
       const now = currentCtx.currentTime;
       if (nextStartTimeRef.current < now) {
-        nextStartTimeRef.current = now + 0.02; // Reduced buffer for lower latency
+        nextStartTimeRef.current = now + 0.02; // Small buffer for lower latency
       }
       
       source.start(nextStartTimeRef.current);
@@ -440,6 +464,7 @@ export const InterviewStep: React.FC<{
 
       source.onended = () => {
         if (playbackQueueRef.current.length === 0) {
+          isSpeakingRef.current = false;
           setIsSpeaking(false);
         }
       };
@@ -449,12 +474,12 @@ export const InterviewStep: React.FC<{
   };
 
   const playStreamedAudio = async (arrayBuffer: ArrayBuffer) => {
-    // Legacy fallback
+    // Legacy fallback for raw binary blobs
     try {
-      let currentCtx = audioContext;
-      if (!currentCtx) {
+      let currentCtx = playbackContextRef.current;
+      if (!currentCtx || currentCtx.state === 'closed') {
         currentCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        setAudioContext(currentCtx);
+        playbackContextRef.current = currentCtx;
       }
       const audioBuffer = await currentCtx.decodeAudioData(arrayBuffer);
       const source = currentCtx.createBufferSource();
@@ -488,10 +513,14 @@ export const InterviewStep: React.FC<{
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
 
-    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onstart = () => {
+      isSpeakingRef.current = true;
+      setIsSpeaking(true);
+    };
     utterance.onend = () => {
+      isSpeakingRef.current = false;
       setIsSpeaking(false);
-      if (mode === 'VOICE' && !isRecording) {
+      if (mode === 'VOICE' && !isRecordingRef.current) {
         // Delay slightly to avoid catching the end of the AI's own voice
         setTimeout(() => startRecording(), 500);
       }
@@ -517,16 +546,18 @@ export const InterviewStep: React.FC<{
   }, [history.length, mode]);
 
   const startRecording = async () => {
-    if (isRecording || isSpeaking) return;
+    // Use refs for the guard to avoid stale closure issues
+    if (isRecordingRef.current || isSpeakingRef.current) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
       });
       
-      let context = audioContext;
+      // Use a dedicated AudioContext for microphone capture (separate from playback)
+      let context = recordingContextRef.current;
       if (!context || context.state === 'closed') {
         context = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-        setAudioContext(context);
+        recordingContextRef.current = context;
       }
       
       if (context.state === 'suspended') {
@@ -576,11 +607,11 @@ export const InterviewStep: React.FC<{
       source.connect(workletNode);
       setMediaStream(stream);
       setProcessor(workletNode);
+      isRecordingRef.current = true;
       setIsRecording(true);
 
       // Organic VAD Logic
       if (mode === 'VOICE') {
-        const connectionTime = Date.now();
         const analyser = context.createAnalyser();
         analyser.fftSize = 256;
         source.connect(analyser);
@@ -601,13 +632,15 @@ export const InterviewStep: React.FC<{
         const checkSilence = () => {
           if (!stream.active) return;
           
-          analyser.getByteFrequencyData(dataArray);
-          const average = dataArray.reduce((x, y) => x + y) / bufferLength;
-
-          if (Date.now() - connectionTime < 5000) {
-            animationFrameRef.current = requestAnimationFrame(checkSilence);
+          // If AI started speaking, stop the mic immediately to prevent feedback
+          if (isSpeakingRef.current) {
+            console.log('VAD: AI is speaking, stopping mic to prevent feedback');
+            stopRecording();
             return;
           }
+
+          analyser.getByteFrequencyData(dataArray);
+          const average = dataArray.reduce((x, y) => x + y) / bufferLength;
 
           if (average > SILENCE_THRESHOLD) {
             lastSpeakTime = Date.now();
@@ -624,6 +657,7 @@ export const InterviewStep: React.FC<{
       }
     } catch (error) {
       console.error('Error starting recording:', error);
+      isRecordingRef.current = false;
       setIsRecording(false);
     }
   };
@@ -638,6 +672,9 @@ export const InterviewStep: React.FC<{
       silenceTimeoutRef.current = null;
     }
 
+    // Update the ref immediately so other closures see the change right away
+    isRecordingRef.current = false;
+
     if (mediaStream && processor) {
       processor.disconnect();
       mediaStream.getTracks().forEach(track => track.stop());
@@ -647,7 +684,7 @@ export const InterviewStep: React.FC<{
         const sampleRate = 16000;
         const allSamples: number[] = [];
         audioChunksRef.current.forEach(chunk => {
-          const ratio = (audioContext?.sampleRate || 16000) / sampleRate;
+          const ratio = (recordingContextRef.current?.sampleRate || 16000) / sampleRate;
           for (let i = 0; i < chunk.length; i += ratio) {
             allSamples.push(chunk[Math.floor(i)] * 32767);
           }
@@ -663,8 +700,8 @@ export const InterviewStep: React.FC<{
   };
 
   const handleMicClick = () => {
-    if (mode !== 'VOICE' || isSpeaking) return;
-    if (isRecording) {
+    if (mode !== 'VOICE' || isSpeakingRef.current) return;
+    if (isRecordingRef.current) {
       stopRecording(true);
     } else {
       startRecording();
