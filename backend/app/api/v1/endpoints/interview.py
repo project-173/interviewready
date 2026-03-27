@@ -78,10 +78,21 @@ async def interview_live_websocket(
                 )
             )
         ) as session:
+            # WARM-UP DELAY: Give Gemini a moment to fully initialize its stream
+            logger.info(f"Connected to Gemini Live for {session_id}. Waiting for warm-up...")
+            await asyncio.sleep(2.5) 
+            
             # Send an initial message formatted properly to trigger the proactive greeting
-            logger.info(f"Starting Gemini Live session for {session_id}")
+            logger.info(f"Sending initial greeting trigger for {session_id}")
             await session.send(
-                input=types.LiveClientContent(parts=[types.Part.from_text(text="START_INTERVIEW_SESSION: Greet me and ask the first question.")]),
+                input=types.LiveClientContent(parts=[types.Part.from_text(text="Please start the interview session now. Greet me and ask the first question.")]),
+                end_of_turn=True
+            )
+            
+            # Double-trigger after another short delay to ensure it catches
+            await asyncio.sleep(1.0)
+            await session.send(
+                input=types.LiveClientContent(parts=[types.Part.from_text(text="Proceed with the interview greeting and first question.")]),
                 end_of_turn=True
             )
             

@@ -342,6 +342,7 @@ export const InterviewStep: React.FC<{
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === "audioStream") {
+          console.log("Audio chunk received, size:", msg.data.length);
           const float32Data = base64ToFloat32(msg.data);
           playbackQueueRef.current.push(float32Data);
           if (!isQueueProcessingRef.current) {
@@ -403,7 +404,7 @@ export const InterviewStep: React.FC<{
   }, [mode, sessionId]);
 
   const processPlaybackQueue = async () => {
-    if (isQueueProcessingRef.current || playbackQueueRef.current.length === 0) return;
+    if (playbackQueueRef.current.length === 0) return;
     
     let currentCtx = audioContext;
     if (!currentCtx || currentCtx.state === 'closed') {
@@ -412,26 +413,39 @@ export const InterviewStep: React.FC<{
       nextStartTimeRef.current = currentCtx.currentTime;
     }
 
-    if (currentCtx.state === 'suspended') await currentCtx.resume();
+    if (currentCtx.state === 'suspended') {
+      await currentCtx.resume();
+    }
 
     isQueueProcessingRef.current = true;
     setIsSpeaking(true);
 
     while (playbackQueueRef.current.length > 0) {
       const audioChunks = playbackQueueRef.current.shift()!;
-      const audioBuffer = currentCtx.createBuffer(1, audioChunks.length, 24000); // Gemini uses 24kHz
+      // Gemini Live typically uses 24000Hz Mono
+      const audioBuffer = currentCtx.createBuffer(1, audioChunks.length, 24000);
       audioBuffer.copyToChannel(audioChunks, 0);
 
       const source = currentCtx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(currentCtx.destination);
 
-      if (nextStartTimeRef.current < currentCtx.currentTime) {
-        nextStartTimeRef.current = currentCtx.currentTime;
+      // Precise scheduling to prevent gaps
+      const now = currentCtx.currentTime;
+      if (nextStartTimeRef.current < now) {
+        nextStartTimeRef.current = now + 0.05; // 50ms buffer for stability
       }
       
       source.start(nextStartTimeRef.current);
+      console.log(`Playing audio chunk at ${nextStartTimeRef.current.toFixed(3)}s`);
       nextStartTimeRef.current += audioBuffer.duration;
+
+      // Clean up reference when done
+      source.onended = () => {
+        if (playbackQueueRef.current.length === 0 && !isQueueProcessingRef.current) {
+          // Optional: set setIsSpeaking(false) if we want to know exact end
+        }
+      };
     }
 
     isQueueProcessingRef.current = false;
