@@ -291,8 +291,11 @@ export const InterviewStep: React.FC<{
   const [isSpeaking, setIsSpeaking] = React.useState(false);
   const [audioContext, setAudioContext] = React.useState<AudioContext | null>(null);
   const [mediaStream, setMediaStream] = React.useState<MediaStream | null>(null);
-  const [processor, setProcessor] = React.useState<ScriptProcessorNode | null>(null);
+  const [processor, setProcessor] = React.useState<AudioWorkletNode | null>(null);
   const audioChunksRef = React.useRef<Float32Array[]>([]);
+  const playbackQueueRef = React.useRef<Float32Array[]>([]);
+  const isQueueProcessingRef = React.useRef(false);
+  const nextStartTimeRef = React.useRef(0);
   const animationFrameRef = React.useRef<number | null>(null);
   const silenceTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const socketRef = React.useRef<WebSocket | null>(null);
@@ -336,21 +339,39 @@ export const InterviewStep: React.FC<{
     };
 
     socket.onmessage = async (event) => {
-      if (event.data instanceof Blob) {
-        const arrayBuffer = await event.data.arrayBuffer();
-        playStreamedAudio(arrayBuffer);
-      } else {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.event === 'turn_complete') {
-            setIsSpeaking(false);
-          } else if (msg.error) {
-            console.error('WebSocket error message:', msg.error);
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "audioStream") {
+          const float32Data = base64ToFloat32(msg.data);
+          playbackQueueRef.current.push(float32Data);
+          if (!isQueueProcessingRef.current) {
+            processPlaybackQueue();
           }
-        } catch (e) {
-          console.error('Failed to parse WebSocket message:', e);
+        } else if (msg.type === "textStream") {
+          // Update history with live transcription if needed
+          console.log("AI Transcription:", msg.data);
+        } else if (msg.event === 'turn_complete') {
+          setIsSpeaking(false);
+        } else if (msg.error) {
+          console.error('WebSocket error message:', msg.error);
+        }
+      } catch (e) {
+        // Fallback for raw binary if sent
+        if (event.data instanceof Blob) {
+          const arrayBuffer = await event.data.arrayBuffer();
+          playStreamedAudio(arrayBuffer);
         }
       }
+    };
+
+    const base64ToFloat32 = (base64: string) => {
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const int16 = new Int16Array(bytes.buffer);
+      const float32 = new Float32Array(int16.length);
+      for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
+      return float32;
     };
 
     socket.onerror = (error) => {
@@ -381,38 +402,56 @@ export const InterviewStep: React.FC<{
     };
   }, [mode, sessionId]);
 
+  const processPlaybackQueue = async () => {
+    if (isQueueProcessingRef.current || playbackQueueRef.current.length === 0) return;
+    
+    let currentCtx = audioContext;
+    if (!currentCtx || currentCtx.state === 'closed') {
+      currentCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      setAudioContext(currentCtx);
+      nextStartTimeRef.current = currentCtx.currentTime;
+    }
+
+    if (currentCtx.state === 'suspended') await currentCtx.resume();
+
+    isQueueProcessingRef.current = true;
+    setIsSpeaking(true);
+
+    while (playbackQueueRef.current.length > 0) {
+      const audioChunks = playbackQueueRef.current.shift()!;
+      const audioBuffer = currentCtx.createBuffer(1, audioChunks.length, 24000); // Gemini uses 24kHz
+      audioBuffer.copyToChannel(audioChunks, 0);
+
+      const source = currentCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(currentCtx.destination);
+
+      if (nextStartTimeRef.current < currentCtx.currentTime) {
+        nextStartTimeRef.current = currentCtx.currentTime;
+      }
+      
+      source.start(nextStartTimeRef.current);
+      nextStartTimeRef.current += audioBuffer.duration;
+    }
+
+    isQueueProcessingRef.current = false;
+  };
+
   const playStreamedAudio = async (arrayBuffer: ArrayBuffer) => {
+    // Legacy fallback
     try {
       let currentCtx = audioContext;
       if (!currentCtx) {
         currentCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
         setAudioContext(currentCtx);
       }
-      
-      if (currentCtx.state === 'suspended') {
-        await currentCtx.resume();
-        console.log('AudioContext resumed on-demand:', currentCtx.state);
-      }
-
-      setIsSpeaking(true);
-      
-      // We expect the server to send PCM or WAV. 
-      // If it's raw PCM 16kHz Mono, decodeAudioData might fail.
-      // But Gemini typically sends encoded chunks or we've set it to handle it.
-      // Assuming decodeAudioData works for the chunk format sent by backend.
       const audioBuffer = await currentCtx.decodeAudioData(arrayBuffer);
       const source = currentCtx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(currentCtx.destination);
       source.start();
-      
-      source.onended = () => {
-        // We'll rely on the turn_complete event to set isSpeaking to false
-      };
     } catch (err) {
-      console.error('Error playing streamed audio chunk:', err);
-      // If decodeAudioData fails, the data might be raw PCM.
-      // In a real production app, we'd handle raw PCM by creating a buffer manually.
+      console.error('Legacy playback failed:', err);
     }
   };
 
@@ -469,31 +508,55 @@ export const InterviewStep: React.FC<{
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: 16000
-        } 
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
       });
-      const context = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const context = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       const source = context.createMediaStreamSource(stream);
-      const scriptProcessor = context.createScriptProcessor(4096, 1, 1);
 
-      audioChunksRef.current = [];
+      // AudioWorklet for low-latency Int16 conversion (from sample code)
+      const workletCode = `
+        class AudioProcessor extends AudioWorkletProcessor {
+          constructor() { 
+            super();
+            this.buffer = new Int16Array(512);
+            this.index = 0;
+          }
+          process(inputs) {
+            const input = inputs[0][0];
+            if (input) {
+              for (let i = 0; i < input.length; i++) {
+                this.buffer[this.index++] = input[i] * 32768;
+                if (this.index >= this.buffer.length) {
+                  this.port.postMessage({ event: 'chunk', data: this.buffer.slice().buffer });
+                  this.index = 0;
+                }
+              }
+            }
+            return true;
+          }
+        }
+        registerProcessor('audio-recorder-worklet', AudioProcessor);
+      `;
 
-      scriptProcessor.onaudioprocess = (event) => {
-        const inputBuffer = event.inputBuffer;
-        const inputData = inputBuffer.getChannelData(0);
-        audioChunksRef.current.push(new Float32Array(inputData));
+      const blob = new Blob([workletCode], { type: 'application/javascript' });
+      const url = URL.createObjectURL(blob);
+      await context.audioWorklet.addModule(url);
+      
+      const workletNode = new AudioWorkletNode(context, 'audio-recorder-worklet');
+      
+      workletNode.port.onmessage = (ev) => {
+        if (ev.data.event === 'chunk' && socketRef.current?.readyState === WebSocket.OPEN) {
+          const base64 = btoa(String.fromCharCode(...new Uint8Array(ev.data.data)));
+          socketRef.current.send(JSON.stringify({ type: 'realtimeInput', audioData: base64 }));
+        }
       };
 
-      source.connect(scriptProcessor);
-      scriptProcessor.connect(context.destination);
+      source.connect(workletNode);
+      // We don't connect to destination to avoid hearing ourselves
 
       setAudioContext(context);
       setMediaStream(stream);
-      setProcessor(scriptProcessor);
+      setProcessor(workletNode);
       setIsRecording(true);
 
       // Organic VAD Logic

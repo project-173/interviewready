@@ -71,11 +71,14 @@ async def interview_live_websocket(
             model=settings.GEMINI_MODEL,
             config=types.LiveConnectConfig(
                 system_instruction=system_content,
-                response_modalities=[types.LiveClientRealtimeInputMessageRealtimeClientContentRealtimeInputMessageRealtimeClientContentResponseModalities.AUDIO],
+                response_modalities=["AUDIO"],
+                # Enable transcription for better UX
+                output_audio_transcription=types.LiveConnectConfigOutputAudioTranscription(
+                    enabled=True
+                )
             )
         ) as session:
             # Send an initial message formatted properly to trigger the proactive greeting
-            # Using a more explicit command and ensuring end_of_turn=True
             logger.info(f"Starting Gemini Live session for {session_id}")
             await session.send(
                 input=types.LiveClientContent(parts=[types.Part.from_text(text="START_INTERVIEW_SESSION: Greet me and ask the first question.")]),
@@ -86,20 +89,24 @@ async def interview_live_websocket(
                 """Relay audio from Gemini to Frontend."""
                 try:
                     async for message in session.receive():
-                        if message.server_content:
-                            if message.server_content.model_turn:
-                                parts = message.server_content.model_turn.parts
-                                for part in parts:
-                                    if part.inline_data:
-                                        # Wrap raw PCM in WAV header for browser compatibility
-                                        wav_data = pcm_to_wav(part.inline_data.data, sample_rate=24000)
-                                        await websocket.send_bytes(wav_data)
-                                    elif part.text:
-                                        # Send text transcription if available
-                                        await websocket.send_json({"text": part.text})
-                            
-                            if message.server_content.turn_complete:
-                                await websocket.send_json({"event": "turn_complete"})
+                        # Handle audio output transcription
+                        if message.server_content and message.server_content.output_audio_transcription:
+                            transcription = message.server_content.output_audio_transcription.text
+                            if transcription:
+                                await websocket.send_json({"type": "textStream", "data": transcription})
+
+                        # Handle audio data
+                        if message.server_content and message.server_content.model_turn:
+                            parts = message.server_content.model_turn.parts
+                            for part in parts:
+                                if part.inline_data:
+                                    # Send as structured JSON with base64 data to match sample code pattern
+                                    # This is more reliable for handling multiple streams
+                                    encoded_audio = base64.b64encode(part.inline_data.data).decode('utf-8')
+                                    await websocket.send_json({"type": "audioStream", "data": encoded_audio})
+                        
+                        if message.server_content and message.server_content.turn_complete:
+                            await websocket.send_json({"event": "turn_complete"})
                             
                 except Exception as e:
                     logger.error(f"Error receiving from Gemini: {e}")
@@ -110,23 +117,37 @@ async def interview_live_websocket(
                 try:
                     while True:
                         data = await websocket.receive()
+                        
+                        # Support both binary and JSON text formats
                         if "bytes" in data:
-                            # Send raw audio to Gemini with correct sample rate MIME type
+                            # Direct binary PCM
                             await session.send(
                                 input=types.LiveClientContent(
                                     parts=[types.Part.from_bytes(data=data["bytes"], mime_type="audio/pcm;rate=16000")]
                                 ),
-                                end_of_turn=False # VAD handled by Gemini or Frontend
+                                end_of_turn=False
                             )
                         elif "text" in data:
-                            # Send text command or heartbeat to Gemini
                             try:
                                 msg = json.loads(data["text"])
-                                if msg.get("event") == "ping":
-                                    # Just a heartbeat, no need to forward to Gemini unless we want to keep IT alive too
+                                # Handle sample-code style input
+                                if msg.get("type") == "realtimeInput" and msg.get("audioData"):
+                                    audio_bytes = base64.b64decode(msg["audioData"])
+                                    await session.send(
+                                        input=types.LiveClientContent(
+                                            parts=[types.Part.from_bytes(data=audio_bytes, mime_type="audio/pcm;rate=16000")]
+                                        ),
+                                        end_of_turn=False
+                                    )
+                                elif msg.get("type") == "contentUpdateText" and msg.get("text"):
+                                    await session.send(
+                                        input=types.LiveClientContent(parts=[types.Part.from_text(text=msg["text"])]),
+                                        end_of_turn=True
+                                    )
+                                # Handle heartbeat
+                                elif msg.get("event") == "ping":
                                     continue
-                                elif msg.get("event") == "end_of_turn":
-                                    await session.send(input=types.LiveClientContent(parts=[]), end_of_turn=True)
+                                # Legacy support
                                 elif msg.get("text"):
                                     await session.send(
                                         input=types.LiveClientContent(parts=[types.Part.from_text(text=msg["text"])]),
