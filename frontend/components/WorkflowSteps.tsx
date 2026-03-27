@@ -361,8 +361,13 @@ export const InterviewStep: React.FC<{
           console.log("AI Interrupted, clearing playback queue");
           playbackQueueRef.current = [];
           setIsSpeaking(false);
-        } else if (msg.event === 'turn_complete') {
-          setIsSpeaking(false);
+        } else if (msg.event === 'turn_complete' || msg.event === 'generation_complete') {
+          // Turn or Generation complete
+          console.log(`Event received: ${msg.event}`);
+          // We don't necessarily stop speaking until the queue is empty, 
+          // but we know no more chunks are coming for this turn.
+        } else if (msg.type === "warning") {
+          console.warn("AI Session Warning:", msg.data);
         } else if (msg.error) {
           console.error('WebSocket error message:', msg.error);
         }
@@ -585,6 +590,7 @@ export const InterviewStep: React.FC<{
 
       // Organic VAD Logic
       if (mode === 'VOICE') {
+        const connectionTime = Date.now();
         const analyser = context.createAnalyser();
         analyser.fftSize = 256;
         source.connect(analyser);
@@ -609,8 +615,11 @@ export const InterviewStep: React.FC<{
           analyser.getByteFrequencyData(dataArray);
           const average = dataArray.reduce((x, y) => x + y) / bufferLength;
 
-          // Visual feedback console log (optional, for debugging)
-          // if (average > 5) console.log('VAD level:', average);
+          // SILENCE SUPPRESSION: Ignore VAD for the first 5 seconds to let the AI greet us
+          if (Date.now() - connectionTime < 5000) {
+            animationFrameRef.current = requestAnimationFrame(checkSilence);
+            return;
+          }
 
           if (average > SILENCE_THRESHOLD) {
             lastSpeakTime = Date.now();

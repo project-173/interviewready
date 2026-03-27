@@ -77,6 +77,10 @@ async def interview_live_websocket(
             config=types.LiveConnectConfig(
                 system_instruction=system_instruction_content,
                 response_modalities=[types.Modality.AUDIO],
+                # Enable context window compression for long interviews (>15m)
+                context_window_compression=types.ContextWindowCompressionConfig(
+                    sliding_window=types.SlidingWindow(),
+                ),
                 # As per SKILL.md: use minimal thinkingLevel for latency
                 thinking_config=types.LiveConnectConfigThinkingConfig(
                     include_thoughts=True
@@ -87,34 +91,50 @@ async def interview_live_websocket(
             await websocket.send_json({"type": "textStream", "data": "Voice session active. AI is initializing..."})
 
             async def send_to_client():
-                """Relay ALL parts of Gemini messages as per SKILL.md 'IMPORTANT' note."""
+                """Relay ALL parts of Gemini messages safely."""
                 try:
                     async for response in session.receive():
-                        content = response.server_content
-                        if not content:
-                            continue
+                        try:
+                            content = response.server_content
+                            if not content:
+                                continue
 
-                        # 1. Handle Interruption (Critical for smooth voice UX)
-                        if content.interrupted:
-                            await websocket.send_json({"interrupted": True})
-                        
-                        # 2. Handle Audio Data (Multiple parts possible)
-                        if content.model_turn:
-                            for part in content.model_turn.parts:
-                                if part.inline_data:
-                                    encoded_audio = base64.b64encode(part.inline_data.data).decode('utf-8')
-                                    await websocket.send_json({"type": "audioStream", "data": encoded_audio})
+                            # 1. Handle Interruption
+                            if hasattr(content, 'interrupted') and content.interrupted:
+                                await websocket.send_json({"interrupted": True})
+                            
+                            # 2. Handle Audio Data
+                            if hasattr(content, 'model_turn') and content.model_turn:
+                                for part in content.model_turn.parts:
+                                    if part.inline_data:
+                                        encoded_audio = base64.b64encode(part.inline_data.data).decode('utf-8')
+                                        await websocket.send_json({"type": "audioStream", "data": encoded_audio})
 
-                        # 3. Handle Transcription (Input and Output)
-                        if content.input_audio_transcription:
-                            await websocket.send_json({"type": "inputTranscription", "data": content.input_audio_transcription.text})
-                        
-                        if content.output_audio_transcription:
-                            await websocket.send_json({"type": "textStream", "data": content.output_audio_transcription.text})
-                        
-                        # 4. Handle Turn Complete
-                        if content.turn_complete:
-                            await websocket.send_json({"event": "turn_complete"})
+                            # 3. Handle Transcription (Using correct SDK attribute names)
+                            # The SDK uses 'input_transcription' and 'output_transcription'
+                            if hasattr(content, 'input_transcription') and content.input_transcription:
+                                await websocket.send_json({"type": "inputTranscription", "data": content.input_transcription.text})
+                            
+                            if hasattr(content, 'output_transcription') and content.output_transcription:
+                                await websocket.send_json({"type": "textStream", "data": content.output_transcription.text})
+                            
+                            # 4. Handle Turn Complete / Generation Complete
+                            if hasattr(content, 'turn_complete') and content.turn_complete:
+                                await websocket.send_json({"event": "turn_complete"})
+                            
+                            if hasattr(content, 'generation_complete') and content.generation_complete:
+                                await websocket.send_json({"event": "generation_complete"})
+
+                        # 5. Handle GoAway Signal (Session about to end)
+                        if response.go_away:
+                            await websocket.send_json({
+                                "type": "warning", 
+                                "data": f"Session will terminate in {response.go_away.time_left} due to connection limits."
+                            })
+
+                        except Exception as inner_e:
+                            logger.error(f"Error processing Gemini message part: {inner_e}")
+                            # Don't crash the whole session if one part fails
                             
                 except Exception as e:
                     logger.error(f"Gemini receive error: {e}")
@@ -159,8 +179,10 @@ async def interview_live_websocket(
                     logger.error(f"Error receiving from Client: {e}")
                     await websocket.send_json({"error": f"Client communication error: {str(e)}"})
 
-            # Run both relay loops
-            await asyncio.gather(send_to_client(), receive_from_client())
+            # Run both relay loops using TaskGroup for robustness
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(send_to_client())
+                tg.create_task(receive_from_client())
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for session {session_id}")
