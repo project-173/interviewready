@@ -335,7 +335,12 @@ export const InterviewStep: React.FC<{
       } catch (e) {
         console.error('Failed to initialize AudioContext on open:', e);
       }
-      startRecording();
+      // DELAY MIC: Give the AI airtime to greet us first before we start listening/detecting silence
+      setTimeout(() => {
+        if (socketRef.current?.readyState === WebSocket.OPEN) {
+          startRecording();
+        }
+      }, 4000);
     };
 
     socket.onmessage = async (event) => {
@@ -351,6 +356,11 @@ export const InterviewStep: React.FC<{
         } else if (msg.type === "textStream") {
           // Update history with live transcription if needed
           console.log("AI Transcription:", msg.data);
+        } else if (msg.interrupted) {
+          // Clear playback queue if user interrupts AI
+          console.log("AI Interrupted, clearing playback queue");
+          playbackQueueRef.current = [];
+          setIsSpeaking(false);
         } else if (msg.event === 'turn_complete') {
           setIsSpeaking(false);
         } else if (msg.error) {
