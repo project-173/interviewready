@@ -131,8 +131,7 @@ async def interview_live_websocket(
                                 "type": "warning", 
                                 "data": f"Session will terminate in {response.go_away.time_left} due to connection limits."
                             })
-
-                        except Exception as inner_e:
+                    except Exception as inner_e:
                             logger.error(f"Error processing Gemini message part: {inner_e}")
                             # Don't crash the whole session if one part fails
                             
