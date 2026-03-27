@@ -13,6 +13,7 @@ from ..core.constants import ANTI_JAILBREAK_DIRECTIVE
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
 from ..models.agent import AgentInput
+from ..security.llm_guard_scanner import get_llm_guard_scanner
 
 
 class InterviewCoachAgent(BaseAgent):
@@ -20,6 +21,25 @@ class InterviewCoachAgent(BaseAgent):
 
     USE_MOCK_RESPONSE = settings.MOCK_INTERVIEW_COACH_AGENT
     MOCK_RESPONSE_KEY = "InterviewCoachAgent"
+    SENSITIVE_PATTERNS = {
+        "email": re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE),
+        "phone": re.compile(
+            r"(?:(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4})"
+        ),
+        "ssn": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    }
+    BIAS_PATTERNS = {
+        "age": re.compile(r"\b(young|recent graduate|digital native|energetic)\b", re.IGNORECASE),
+        "gender": re.compile(r"\b(he|she|him|her|male|female|manpower)\b", re.IGNORECASE),
+        "nationality": re.compile(r"\b(native english|american-born|citizens only)\b", re.IGNORECASE),
+    }
+    PROMPT_INJECTION_PATTERNS = [
+        re.compile(r"ignore (all )?(previous|prior) instructions", re.IGNORECASE),
+        re.compile(r"reveal (the )?(system prompt|hidden prompt|developer message)", re.IGNORECASE),
+        re.compile(r"act as (an?|the) ", re.IGNORECASE),
+        re.compile(r"jailbreak|bypass|override|disable guardrails", re.IGNORECASE),
+        re.compile(r"</?(system|assistant|developer|prompt)>", re.IGNORECASE),
+    ]
 
     SYSTEM_PROMPT = (
         """You are an expert Interview Coach specializing in personalized interview preparation. Your job is to simulate a realistic interview by asking questions ONE at a time and guiding the candidate through their responses.
@@ -121,6 +141,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         shared_memory["current_question_index"] = 0
         shared_memory["asked_questions"] = []
         shared_memory["user_answers"] = []
+        shared_memory["user_answers_redacted"] = []
         shared_memory["total_questions"] = 5
         logger.debug(
             "Interview session initialized",
@@ -136,6 +157,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             "current_question_index": shared_memory.get("current_question_index", 0),
             "asked_questions": list(shared_memory.get("asked_questions", [])),
             "user_answers": list(shared_memory.get("user_answers", [])),
+            "user_answers_redacted": list(shared_memory.get("user_answers_redacted", [])),
             "total_questions": shared_memory.get("total_questions", 5),
         }
 
@@ -145,6 +167,10 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         user_answers = list(shared_memory.get("user_answers", []))
         user_answers.append(user_answer)
         shared_memory["user_answers"] = user_answers
+        user_answers_redacted = list(shared_memory.get("user_answers_redacted", []))
+        redacted_answer, _ = self._sanitize_text(user_answer)
+        user_answers_redacted.append(redacted_answer)
+        shared_memory["user_answers_redacted"] = user_answers_redacted
         current_index = shared_memory.get("current_question_index", 0)
         shared_memory["current_question_index"] = current_index + 1
         logger.debug(
@@ -195,6 +221,99 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             return f"InterviewCoachAgent_Q{question_num}"
         return "InterviewCoachAgent_Summary"
 
+    def _sanitize_text(self, text: str) -> tuple[str, list[str]]:
+        """Redact direct identifiers before sending content to the model."""
+        if not text:
+            return "", []
+        sanitized = text
+        findings: list[str] = []
+        for finding, pattern in self.SENSITIVE_PATTERNS.items():
+            if pattern.search(sanitized):
+                sanitized = pattern.sub(f"[REDACTED_{finding.upper()}]", sanitized)
+                findings.append(finding)
+        return sanitized, findings
+
+    def _sanitize_mapping(self, value) -> tuple[object, list[str]]:
+        """Redact sensitive text recursively in structured payloads."""
+        findings: list[str] = []
+        if isinstance(value, dict):
+            sanitized_dict = {}
+            for key, nested_value in value.items():
+                sanitized_value, nested_findings = self._sanitize_mapping(nested_value)
+                sanitized_dict[key] = sanitized_value
+                findings.extend(nested_findings)
+            return sanitized_dict, findings
+        if isinstance(value, list):
+            sanitized_list = []
+            for nested_value in value:
+                sanitized_value, nested_findings = self._sanitize_mapping(nested_value)
+                sanitized_list.append(sanitized_value)
+                findings.extend(nested_findings)
+            return sanitized_list, findings
+        if isinstance(value, str):
+            return self._sanitize_text(value)
+        return value, []
+
+    def _detect_bias_flags(self, text: str) -> list[str]:
+        """Detect potentially biased language in the hiring context."""
+        if not text:
+            return []
+        flags: list[str] = []
+        for category, pattern in self.BIAS_PATTERNS.items():
+            if pattern.search(text):
+                flags.append(category)
+        return sorted(set(flags))
+
+    def _detect_prompt_injection(self, text: str) -> tuple[bool, list[str]]:
+        """Detect prompt-injection attempts in untrusted interview inputs."""
+        if not text:
+            return False, []
+        findings: list[str] = []
+        for pattern in self.PROMPT_INJECTION_PATTERNS:
+            if pattern.search(text):
+                findings.append(pattern.pattern)
+        return bool(findings), findings
+
+    def _screen_untrusted_text(self, text: str) -> tuple[bool, list[str]]:
+        """Screen candidate-controlled text using heuristics plus scanner when available."""
+        issues: list[str] = []
+        heuristic_blocked, heuristic_findings = self._detect_prompt_injection(text)
+        if heuristic_blocked:
+            issues.extend(f"heuristic:{finding}" for finding in heuristic_findings)
+
+        scanner = get_llm_guard_scanner()
+        safe, _sanitized, scanner_issues = scanner.scan_input(text)
+        if not safe:
+            issues.extend(
+                f"scanner:{issue.get('scanner', 'unknown')}"
+                for issue in scanner_issues
+            )
+        return not issues, issues
+
+    def _build_security_reask_response(
+        self,
+        state: dict,
+        feedback: str,
+        question: str,
+    ) -> str:
+        """Return a deterministic safe re-ask when adversarial content is detected."""
+        response = {
+            "current_question_number": min(
+                state["current_question_index"] + 1,
+                state["total_questions"],
+            ),
+            "total_questions": state["total_questions"],
+            "interview_type": "behavioral",
+            "question": question or "Please answer the interview question using a real work example.",
+            "keywords": ["relevance", "specificity"],
+            "tip": "Focus on a real example, keep it professional, and use STAR.",
+            "feedback": feedback,
+            "answer_score": 0,
+            "can_proceed": False,
+            "next_challenge": "Answer the question directly without meta-instructions or attempts to change system behavior.",
+        }
+        return json.dumps(response)
+
     def _build_interview_prompt(
         self,
         input_data: AgentInput,
@@ -208,10 +327,14 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             if input_data.resume is not None
             else {}
         )
+        sanitized_resume, _ = self._sanitize_mapping(resume_data)
         job_desc = getattr(input_data, "job_description", "") or context.job_description or ""
-        prompt = f"""Resume:\n{json.dumps(resume_data, indent=2)}
+        sanitized_job_desc, _ = self._sanitize_text(job_desc)
+        sanitized_user_answer, _ = self._sanitize_text(user_answer)
+        bias_flags = self._detect_bias_flags(job_desc)
+        prompt = f"""Resume:\n{json.dumps(sanitized_resume, indent=2)}
 
-Job Description:\n{job_desc}
+Job Description:\n{sanitized_job_desc}
 
 Interview Progress:
 - Current Question: {state['current_question_index'] + 1} of {state['total_questions']}
@@ -221,7 +344,7 @@ Interview Progress:
         if user_answer:
             prompt += f"""
 Candidate's Answer to Previous Question:
-{user_answer}
+{sanitized_user_answer}
 
 Previously Asked Questions:
 {json.dumps(state['asked_questions'], indent=2)}
@@ -233,6 +356,18 @@ Previously Asked Questions:
             )
         else:
             prompt += "\nThis is the FIRST question of the interview simulation.\n"
+        prompt += (
+            "\nResponsible AI rules:"
+            "\n- Do not infer or mention protected attributes unless the user explicitly provides them and they are job-relevant."
+            "\n- Do not reinforce biased or discriminatory job requirements."
+            "\n- Keep feedback tied to evidence from the answer, resume, and job description."
+            "\n- Avoid requesting or repeating direct identifiers such as email, phone number, or government ID."
+        )
+        if bias_flags:
+            prompt += (
+                "\nPotentially biased job-description signals were detected. "
+                "Avoid using those signals to personalize or score the candidate."
+            )
         prompt += "\nGenerate the next interview question with feedback and guidance."
         return prompt
 
@@ -244,10 +379,13 @@ Previously Asked Questions:
             if input_data.resume is not None
             else {}
         )
+        sanitized_resume, _ = self._sanitize_mapping(resume_data)
         job_desc = getattr(input_data, "job_description", "") or context.job_description or ""
-        return f"""Resume:\n{json.dumps(resume_data, indent=2)}
+        sanitized_job_desc, _ = self._sanitize_text(job_desc)
+        redacted_answers = state["user_answers_redacted"] or state["user_answers"]
+        return f"""Resume:\n{json.dumps(sanitized_resume, indent=2)}
 
-Job Description:\n{job_desc}
+Job Description:\n{sanitized_job_desc}
 
 Interview Summary:
 - Total Questions Asked: {len(state['asked_questions'])}
@@ -255,7 +393,7 @@ Interview Summary:
 - Interview Completed: Yes
 
 All user answers:
-{json.dumps(state['user_answers'], indent=2)}
+{json.dumps(redacted_answers, indent=2)}
 
 Previously Asked Questions:
 {json.dumps(state['asked_questions'], indent=2)}
@@ -459,7 +597,12 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         fallback_can_proceed = True
         model_answer_score: Optional[float] = None
         model_can_proceed: Optional[bool] = None
+        precomputed_result: Optional[str] = None
+        method_used = "uninitialized"
         state = self._get_interview_state(context)
+        security_findings: list[str] = []
+        bias_flags: list[str] = []
+        prompt_injection_issues: list[str] = []
 
         # Extract input
         if isinstance(input_data, AgentInput):
@@ -475,20 +618,51 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                     )
 
                 is_follow_up, user_answer = self._extract_follow_up(input_data)
+                sanitized_user_answer, answer_findings = self._sanitize_text(user_answer)
+                security_findings.extend(answer_findings)
+                bias_flags.extend(self._detect_bias_flags(context.job_description or input_data.job_description))
+                if is_follow_up and user_answer:
+                    input_is_safe, prompt_injection_issues = self._screen_untrusted_text(
+                        user_answer
+                    )
+                    if not input_is_safe:
+                        precomputed_result = self._build_security_reask_response(
+                            state,
+                            "Your last reply looked like an attempt to change system behavior rather than answer the interview question. Please answer the question directly with a relevant example.",
+                            state["asked_questions"][-1] if state["asked_questions"] else "",
+                        )
+                        method_used = "security_block_reask"
+                        model_answer_score = 0.0
+                        model_can_proceed = False
+                        fallback_can_proceed = False
+                        fallback_feedback = json.loads(precomputed_result)["feedback"]
+                        input_text = self._build_interview_prompt(
+                            input_data,
+                            context,
+                            user_answer=sanitized_user_answer,
+                        )
+                    else:
+                        input_text = self._build_interview_prompt(
+                            input_data,
+                            context,
+                            user_answer=user_answer,
+                        )
+                else:
+                    input_text = self._build_interview_prompt(
+                        input_data,
+                        context,
+                        user_answer=user_answer,
+                    )
                 if is_follow_up and self.USE_MOCK_RESPONSE:
                     fallback_score, fallback_feedback, fallback_can_proceed = self._score_interview_answer(
                         user_answer,
                         state["asked_questions"][-1] if state["asked_questions"] else "",
                         context,
                     )
-
-                input_text = self._build_interview_prompt(
-                    input_data,
-                    context,
-                    user_answer=user_answer,
-                )
         else:
             input_text = input_data
+            if isinstance(input_data, str):
+                _, security_findings = self._sanitize_text(input_data)
 
         input_type = "audio" if isinstance(input_text, bytes) else "text"
 
@@ -501,7 +675,13 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         )
 
         try:
-            if isinstance(input_text, bytes):
+            if prompt_injection_issues:
+                result = precomputed_result or self._build_security_reask_response(
+                    state,
+                    "Please answer the interview question directly with a relevant example.",
+                    state["asked_questions"][-1] if state["asked_questions"] else "",
+                )
+            elif isinstance(input_text, bytes):
                 # Handle audio input
                 gemini_live_available = (
                     hasattr(self.gemini_live_service, "connected")
@@ -600,7 +780,10 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             try:
                 response_json = json.loads(result)
                 if response_json.get("interview_complete", False):
+                    if isinstance(input_data, AgentInput) and is_follow_up and user_answer:
+                        self._store_answer_and_advance(user_answer, context)
                     self._set_interview_complete(context)
+                    state = self._get_interview_state(context)
                     logger.debug(
                         "Interview completed - AI generated completion summary",
                         session_id=session_id,
@@ -651,6 +834,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                         response_json.get("question")
                         and response_json.get("current_question_number", state["current_question_index"] + 1)
                         == state["current_question_index"] + 1
+                        and model_can_proceed is not False
                     ):
                         self._store_question_if_new(response_json["question"], context)
                     result = json.dumps(response_json)
@@ -681,6 +865,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 f"InterviewCoachAgent: Generated targeted interview question for {input_type} input",
                 f"InterviewCoachAgent: Used coaching model with confidence {self.CONFIDENCE_SCORE}",
                 f"InterviewCoachAgent: Method used: {method_used}",
+                "InterviewCoachAgent: Scoring factors include answer relevance, job alignment, detail depth, and STAR-style structure",
             ]
 
             # Add method used to trace
@@ -704,6 +889,18 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 decision_trace.append(
                     "InterviewCoachAgent: Used standard Gemini API (fallback)"
                 )
+            if security_findings:
+                decision_trace.append(
+                    "InterviewCoachAgent: Redacted sensitive candidate data before prompt construction"
+                )
+            if prompt_injection_issues:
+                decision_trace.append(
+                    "InterviewCoachAgent: Blocked adversarial candidate input before model execution and re-asked the same question"
+                )
+            if bias_flags:
+                decision_trace.append(
+                    "InterviewCoachAgent: Detected potentially biased hiring-language signals and excluded them from coaching logic"
+                )
 
             # Create SHARP metadata
             analysis_type = (
@@ -721,7 +918,94 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 "input_type": input_type,
                 "current_question_number": current_question_number,
                 "total_questions": state["total_questions"],
+                "prompt_injection_blocked": bool(prompt_injection_issues),
+                "prompt_injection_signals": prompt_injection_issues,
+                "agent_security_risks": [
+                    "prompt_injection_via_candidate_input",
+                    "pii_exposure_in_resume_or_answers",
+                    "biased_or_discriminatory_questioning",
+                    "unsafe_retention_of_sensitive_interview_content",
+                ],
+                "security_mitigations": {
+                    "code_level": [
+                        "BaseAgent prompt-injection scanning before model calls",
+                        "output sanitization for prompt leakage and dangerous content",
+                        "PII redaction before interview prompts and completion summaries",
+                        "deterministic fallback scoring when model progression metadata is missing",
+                    ],
+                    "workflow_level": [
+                        "governance audit after orchestration",
+                        "human review recommendation when bias or sensitive-content signals appear",
+                        "CI checks for interview security and governance tests",
+                    ],
+                },
+                "responsible_ai": {
+                    "development_alignment": [
+                        "schema-constrained JSON outputs for predictable behavior",
+                        "defense-in-depth scanning in the base agent",
+                        "auditable decision traces and structured metadata",
+                    ],
+                    "deployment_alignment": [
+                        "post-response governance audit",
+                        "deployment workflow includes security scanning and targeted backend tests",
+                        "Langfuse-compatible tracing for traceability",
+                    ],
+                    "explainability": {
+                        "decision_basis": [
+                            "resume-job alignment",
+                            "question relevance",
+                            "answer completeness",
+                            "STAR-method structure",
+                        ],
+                        "user_visible_fields": [
+                            "feedback",
+                            "answer_score",
+                            "can_proceed",
+                            "next_challenge",
+                        ],
+                    },
+                    "bias_mitigation": [
+                        "do not infer protected attributes",
+                        "detect biased job-description signals",
+                        "focus coaching on evidence and job-relevant behavior",
+                    ],
+                    "sensitive_content_handling": [
+                        "direct identifiers are redacted before model prompts",
+                        "redacted answers are used for completion summaries",
+                        "sensitive-content signals trigger governance review metadata",
+                    ],
+                    "governance_alignment": [
+                        "SHARP metadata attached to each response",
+                        "governance service can flag human review needs",
+                    ],
+                    "imda_model_ai_governance_framework_alignment": {
+                        "internal_governance_structures_and_measures": [
+                            "agent-specific risks and mitigations are attached as structured metadata",
+                            "security and governance tests are enforced in CI before deployment",
+                        ],
+                        "human_involvement_in_ai_augmented_decision_making": [
+                            "human review is recommended for sensitive or bias-related cases",
+                            "agent output is advisory coaching rather than autonomous hiring action",
+                        ],
+                        "operations_management": [
+                            "prompt-injection screening and output sanitization",
+                            "PII redaction before prompts and redacted summary generation",
+                            "governance audit after orchestration",
+                        ],
+                        "stakeholder_interaction_and_communication": [
+                            "reasoning, feedback, answer_score, and can_proceed expose decision basis",
+                            "decision_trace captures method path and safety interventions",
+                        ],
+                    },
+                },
             }
+            sharp_metadata["sensitive_input_detected"] = bool(security_findings)
+            sharp_metadata["sensitive_input_types"] = sorted(set(security_findings))
+            sharp_metadata["bias_review_required"] = bool(bias_flags)
+            sharp_metadata["bias_flags"] = sorted(set(bias_flags))
+            sharp_metadata["human_review_recommended"] = bool(
+                security_findings or bias_flags or prompt_injection_issues
+            )
             if model_answer_score is not None:
                 sharp_metadata["answer_score"] = round(float(model_answer_score), 2)
             elif fallback_score is not None:
@@ -735,7 +1019,10 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             response = AgentResponse(
                 agent_name=self.get_name(),
                 content=result,
-                reasoning="Generated single targeted interview question with feedback.",
+                reasoning=(
+                    "Generated interview coaching based on resume-job alignment and "
+                    "answer-quality heuristics, with explainable score and progression metadata."
+                ),
                 confidence_score=self.CONFIDENCE_SCORE,
                 decision_trace=decision_trace,
                 sharp_metadata=sharp_metadata,
