@@ -316,12 +316,21 @@ export const InterviewStep: React.FC<{
     const socket = new WebSocket(wsUrl);
     socketRef.current = socket;
 
-    socket.onopen = () => {
+    socket.onopen = async () => {
       console.log('Voice WebSocket connected');
-      // Proactively ensure audio context is ready
-      if (!audioContext) {
-        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        setAudioContext(ctx);
+      // Proactively ensure audio context is ready AND resumed
+      try {
+        let currentCtx = audioContext;
+        if (!currentCtx) {
+          currentCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          setAudioContext(currentCtx);
+        }
+        if (currentCtx.state === 'suspended') {
+          await currentCtx.resume();
+        }
+        console.log('AudioContext ready:', currentCtx.state);
+      } catch (e) {
+        console.error('Failed to initialize AudioContext on open:', e);
       }
       startRecording();
     };
@@ -346,10 +355,17 @@ export const InterviewStep: React.FC<{
 
     socket.onerror = (error) => {
       console.error('WebSocket Error:', error);
+      setIsSpeaking(false);
+      setIsRecording(false);
     };
 
     socket.onclose = (event) => {
-      console.log('WebSocket closed:', event.code, event.reason);
+      console.log('WebSocket closed:', event.code, event.reason || 'No reason provided');
+      setIsSpeaking(false);
+      setIsRecording(false);
+      if (event.code !== 1000 && mode === 'VOICE') {
+        alert(`Voice connection closed (Code ${event.code}). Please check your internet and API key.`);
+      }
     };
 
     // Heartbeat to keep connection alive
@@ -375,6 +391,7 @@ export const InterviewStep: React.FC<{
       
       if (currentCtx.state === 'suspended') {
         await currentCtx.resume();
+        console.log('AudioContext resumed on-demand:', currentCtx.state);
       }
 
       setIsSpeaking(true);
@@ -559,8 +576,11 @@ export const InterviewStep: React.FC<{
       const audioBytes = new Uint8Array(pcmData.buffer);
 
       // In Voice mode, we send directly to the websocket if it's open
-      if (mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(audioBytes);
+      if (mode === 'VOICE') {
+        if (socketRef.current?.readyState === WebSocket.OPEN) {
+          socketRef.current.send(audioBytes);
+        }
+        // NEVER call onSendAudio in VOICE mode, it's for CHAT mode only (legacy)
       } else {
         onSendAudio(audioBytes);
       }
@@ -568,15 +588,21 @@ export const InterviewStep: React.FC<{
       setIsRecording(false);
       
       // In VOICE mode, we immediately start the next capture cycle for "hands-free" feel
-      if (mode === 'VOICE' && !isSpeaking) {
-        setTimeout(() => startRecording(), 100);
-      }
+      // UNLESS we are explicitly pausing (this function was called manually)
+      // or the session is speaking.
+      // For now, let's only auto-restart if we're not explicitly stopping.
+      // But stopRecording is used by both VAD and the Mic button.
     }
   };
 
   const handleMicClick = () => {
     if (mode !== 'VOICE') return; // Double safety
     if (isRecording) {
+      // Manual pause - don't let VAD restart it
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
       stopRecording();
     } else {
       startRecording();
@@ -603,8 +629,10 @@ export const InterviewStep: React.FC<{
                 <div className="w-2 h-2 rounded-full bg-slate-400 animate-spin"></div>
                 Processing...
               </>
-            ) : (
+            ) : socketRef.current?.readyState === WebSocket.OPEN ? (
               <span className="text-emerald-600">Live & Connected</span>
+            ) : (
+              <span className="text-amber-500">Connecting...</span>
             )}
           </div>
           <h3 className="text-xl font-medium text-slate-800 max-w-md mx-auto leading-relaxed h-8">

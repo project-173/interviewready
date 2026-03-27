@@ -10,6 +10,7 @@ from google.genai import types
 from app.api.v1.services import get_session_context
 from app.core.config import settings
 from app.core.logging import logger
+from app.utils.audio_utils import pcm_to_wav
 
 router = APIRouter()
 
@@ -90,8 +91,9 @@ async def interview_live_websocket(
                                 parts = message.server_content.model_turn.parts
                                 for part in parts:
                                     if part.inline_data:
-                                        # Send raw audio bytes to frontend
-                                        await websocket.send_bytes(part.inline_data.data)
+                                        # Wrap raw PCM in WAV header for browser compatibility
+                                        wav_data = pcm_to_wav(part.inline_data.data, sample_rate=24000)
+                                        await websocket.send_bytes(wav_data)
                                     elif part.text:
                                         # Send text transcription if available
                                         await websocket.send_json({"text": part.text})
