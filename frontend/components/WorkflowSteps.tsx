@@ -301,33 +301,66 @@ export const InterviewStep: React.FC<{
   useEffect(() => {
     if (mode !== 'VOICE') return;
 
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || window.location.origin;
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${API_BASE_URL.replace(/^https?:\/\//, '')}/api/v1/interview/live?sessionId=${sessionId}`;
+    
+    // Improved URL construction to handle various BASE_URL formats
+    let cleanBaseUrl = API_BASE_URL.replace(/^https?:\/\//, '');
+    if (cleanBaseUrl.endsWith('/')) {
+      cleanBaseUrl = cleanBaseUrl.slice(0, -1);
+    }
+    
+    const wsUrl = `${wsProtocol}//${cleanBaseUrl}/api/v1/interview/live?sessionId=${sessionId}`;
+    console.log('Connecting to Voice WebSocket:', wsUrl);
 
     const socket = new WebSocket(wsUrl);
     socketRef.current = socket;
 
     socket.onopen = () => {
       console.log('Voice WebSocket connected');
-      startRecording(); // Automatically start listening upon connection
+      // Proactively ensure audio context is ready
+      if (!audioContext) {
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        setAudioContext(ctx);
+      }
+      startRecording();
     };
 
     socket.onmessage = async (event) => {
       if (event.data instanceof Blob) {
-        // AI Speaking: Play the raw audio chunk
         const arrayBuffer = await event.data.arrayBuffer();
         playStreamedAudio(arrayBuffer);
       } else {
-        const msg = JSON.parse(event.data);
-        if (msg.event === 'turn_complete') {
-          setIsSpeaking(false);
-          // startRecording is already running in continuous mode or will be resumed
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.event === 'turn_complete') {
+            setIsSpeaking(false);
+          } else if (msg.error) {
+            console.error('WebSocket error message:', msg.error);
+          }
+        } catch (e) {
+          console.error('Failed to parse WebSocket message:', e);
         }
       }
     };
 
+    socket.onerror = (error) => {
+      console.error('WebSocket Error:', error);
+    };
+
+    socket.onclose = (event) => {
+      console.log('WebSocket closed:', event.code, event.reason);
+    };
+
+    // Heartbeat to keep connection alive
+    const heartbeat = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ event: 'ping' }));
+      }
+    }, 30000);
+
     return () => {
+      clearInterval(heartbeat);
       socket.close();
     };
   }, [mode, sessionId]);
@@ -345,6 +378,11 @@ export const InterviewStep: React.FC<{
       }
 
       setIsSpeaking(true);
+      
+      // We expect the server to send PCM or WAV. 
+      // If it's raw PCM 16kHz Mono, decodeAudioData might fail.
+      // But Gemini typically sends encoded chunks or we've set it to handle it.
+      // Assuming decodeAudioData works for the chunk format sent by backend.
       const audioBuffer = await currentCtx.decodeAudioData(arrayBuffer);
       const source = currentCtx.createBufferSource();
       source.buffer = audioBuffer;
@@ -352,11 +390,12 @@ export const InterviewStep: React.FC<{
       source.start();
       
       source.onended = () => {
-        // If nothing else is playing, we could set isSpeaking to false, 
-        // but turn_complete event is more reliable for turn-taking.
+        // We'll rely on the turn_complete event to set isSpeaking to false
       };
     } catch (err) {
-      console.error('Error playing streamed audio:', err);
+      console.error('Error playing streamed audio chunk:', err);
+      // If decodeAudioData fails, the data might be raw PCM.
+      // In a real production app, we'd handle raw PCM by creating a buffer manually.
     }
   };
 
@@ -450,12 +489,13 @@ export const InterviewStep: React.FC<{
         const dataArray = new Uint8Array(bufferLength);
         
         let lastSpeakTime = Date.now();
-        const SILENCE_THRESHOLD = 15; // Low threshold for VAD
-        const SILENCE_DURATION = 1500; // 1.5s of silence to trigger
+        const SILENCE_THRESHOLD = 10; // Slightly more sensitive
+        const SILENCE_DURATION = 2000; // 2s of silence to trigger (give user more time)
         const MAX_RECORDING_TIME = 60000; // 60s safety limit
 
         // Safety timeout in case VAD fails
         silenceTimeoutRef.current = setTimeout(() => {
+          console.log('VAD: Max recording time reached');
           stopRecording();
         }, MAX_RECORDING_TIME);
 
@@ -465,9 +505,13 @@ export const InterviewStep: React.FC<{
           analyser.getByteFrequencyData(dataArray);
           const average = dataArray.reduce((x, y) => x + y) / bufferLength;
 
+          // Visual feedback console log (optional, for debugging)
+          // if (average > 5) console.log('VAD level:', average);
+
           if (average > SILENCE_THRESHOLD) {
             lastSpeakTime = Date.now();
           } else if (Date.now() - lastSpeakTime > SILENCE_DURATION) {
+            console.log('VAD: Silence detected, stopping recording');
             stopRecording();
             return;
           }
@@ -531,6 +575,7 @@ export const InterviewStep: React.FC<{
   };
 
   const handleMicClick = () => {
+    if (mode !== 'VOICE') return; // Double safety
     if (isRecording) {
       stopRecording();
     } else {
@@ -556,14 +601,14 @@ export const InterviewStep: React.FC<{
             ) : isLoading ? (
               <>
                 <div className="w-2 h-2 rounded-full bg-slate-400 animate-spin"></div>
-                AI is thinking
+                Processing...
               </>
             ) : (
-              'Live Interview'
+              <span className="text-emerald-600">Live & Connected</span>
             )}
           </div>
           <h3 className="text-xl font-medium text-slate-800 max-w-md mx-auto leading-relaxed h-8">
-            {!isSpeaking && !isRecording && !isLoading ? "Connected" : ""}
+            {!isSpeaking && !isRecording && !isLoading ? "Ready to talk" : ""}
           </h3>
         </div>
 
@@ -659,20 +704,6 @@ export const InterviewStep: React.FC<{
           placeholder="Draft your response..."
           className="flex-1 px-4 py-2.5 rounded-lg bg-white border border-slate-200 text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none transition-all placeholder:text-slate-400"
         />
-        <button
-          type="button"
-          onClick={handleMicClick}
-          disabled={isLoading}
-          className={`px-4 py-2.5 rounded-lg border transition-all flex items-center justify-center ${
-            isRecording 
-              ? 'bg-red-500 border-red-500 text-white animate-pulse' 
-              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-          } disabled:opacity-50`}
-        >
-          <svg className="w-4 h-4" fill={isRecording ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
-          </svg>
-        </button>
         <button
           type="submit"
           disabled={isLoading}

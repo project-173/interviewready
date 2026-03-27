@@ -39,13 +39,16 @@ async def interview_live_websocket(
     # Get initial interview instructions from the agent logic
     # (Simplified for the WebSocket version)
     system_instruction = (
-        "You are an expert Interview Coach. This is a LIVE voice interview. "
-        "Speak naturally. Be encouraging. Ask one question at a time. "
-        "Your goal is to simulate a real interview based on the user's resume and job description.\n\n"
-        "PROACTIVE GREETING RULE:\n"
-        "Immediately greet the candidate, reference the specific role they are applying for, "
-        "and ask the FIRST targeted interview question. Do NOT wait for the user to speak first. "
-        "Start the conversation yourself NOW."
+        "You are an expert Interview Coach conducting a LIVE VOICE mock interview. "
+        "IMPORTANT: You must speak naturally, warmly, and concisely. "
+        "Your goal is to simulate a professional interview based on the user's resume and the job description provided.\n\n"
+        "MANDATORY STARTUP RULE:\n"
+        "1. Immediately start the conversation yourself. Do NOT wait for a 'hello' from the user.\n"
+        "2. Begin with a professional greeting (e.g., 'Hello! Thanks for joining today.').\n"
+        "3. Explicitly state the role you are interviewing them for.\n"
+        "4. Ask the FIRST targeted interview question right away.\n"
+        "5. Keep your responses short to allow for a back-and-forth flow.\n\n"
+        "Focus on one question at a time. If the user stops talking, wait briefly but be ready to guide the conversation if needed."
     )
 
     if context.resume_data:
@@ -71,8 +74,10 @@ async def interview_live_websocket(
             )
         ) as session:
             # Send an initial message formatted properly to trigger the proactive greeting
+            # Using a more explicit command and ensuring end_of_turn=True
+            logger.info(f"Starting Gemini Live session for {session_id}")
             await session.send(
-                input=types.LiveClientContent(parts=[types.Part.from_text(text="START_INTERVIEW_NOW")]),
+                input=types.LiveClientContent(parts=[types.Part.from_text(text="START_INTERVIEW_SESSION: Greet me and ask the first question.")]),
                 end_of_turn=True
             )
             
@@ -80,21 +85,23 @@ async def interview_live_websocket(
                 """Relay audio from Gemini to Frontend."""
                 try:
                     async for message in session.receive():
-                        if message.server_content and message.server_content.model_turn:
-                            parts = message.server_content.model_turn.parts
-                            for part in parts:
-                                if part.inline_data:
-                                    # Send raw audio bytes to frontend
-                                    await websocket.send_bytes(part.inline_data.data)
-                                elif part.text:
-                                    # Send text transcription if available
-                                    await websocket.send_json({"text": part.text})
-                        
-                        if message.server_content and message.server_content.turn_complete:
-                            await websocket.send_json({"event": "turn_complete"})
+                        if message.server_content:
+                            if message.server_content.model_turn:
+                                parts = message.server_content.model_turn.parts
+                                for part in parts:
+                                    if part.inline_data:
+                                        # Send raw audio bytes to frontend
+                                        await websocket.send_bytes(part.inline_data.data)
+                                    elif part.text:
+                                        # Send text transcription if available
+                                        await websocket.send_json({"text": part.text})
+                            
+                            if message.server_content.turn_complete:
+                                await websocket.send_json({"event": "turn_complete"})
                             
                 except Exception as e:
                     logger.error(f"Error receiving from Gemini: {e}")
+                    await websocket.send_json({"error": f"Gemini connection error: {str(e)}"})
 
             async def receive_from_client():
                 """Relay audio/text from Frontend to Gemini."""
@@ -110,19 +117,27 @@ async def interview_live_websocket(
                                 end_of_turn=False # VAD handled by Gemini or Frontend
                             )
                         elif "text" in data:
-                            # Send text command to Gemini
-                            msg = json.loads(data["text"])
-                            if msg.get("event") == "end_of_turn":
-                                await session.send(input=types.LiveClientContent(parts=[]), end_of_turn=True)
-                            elif msg.get("text"):
-                                await session.send(
-                                    input=types.LiveClientContent(parts=[types.Part.from_text(text=msg["text"])]),
-                                    end_of_turn=True
-                                )
+                            # Send text command or heartbeat to Gemini
+                            try:
+                                msg = json.loads(data["text"])
+                                if msg.get("event") == "ping":
+                                    # Just a heartbeat, no need to forward to Gemini unless we want to keep IT alive too
+                                    continue
+                                elif msg.get("event") == "end_of_turn":
+                                    await session.send(input=types.LiveClientContent(parts=[]), end_of_turn=True)
+                                elif msg.get("text"):
+                                    await session.send(
+                                        input=types.LiveClientContent(parts=[types.Part.from_text(text=msg["text"])]),
+                                        end_of_turn=True
+                                    )
+                            except json.JSONDecodeError:
+                                logger.warning(f"Received non-JSON text from client: {data['text']}")
                 except WebSocketDisconnect:
+                    logger.info(f"Client disconnected for session {session_id}")
                     raise
                 except Exception as e:
                     logger.error(f"Error receiving from Client: {e}")
+                    await websocket.send_json({"error": f"Client communication error: {str(e)}"})
 
             # Run both relay loops
             await asyncio.gather(send_to_client(), receive_from_client())

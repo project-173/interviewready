@@ -409,11 +409,13 @@ const WorkflowController: React.FC<{
   };
 
   const handleInterviewAudioMessage = async (audio: Uint8Array) => {
-    const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: '[Audio response]' }];
+    const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: '[Analyzing audio...]' }];
     setState(prev => ({ ...prev, interviewHistory: updatedHistory }));
-    startLoading('Processing audio...', ['Transcribing speech', 'Analyzing content', 'Generating response']);
+    
+    // Non-blocking loading for audio to prevent stuck "analyzing" overlays
+    // startLoading('Processing audio...', ['Transcribing speech', 'Analyzing content', 'Generating response']);
+    
     try {
-      updateProgress(33, 0);
       const request: ChatRequest = {
         intent: 'INTERVIEW_COACH',
         resumeData: state.currentResume,
@@ -421,15 +423,28 @@ const WorkflowController: React.FC<{
         messageHistory: updatedHistory,
         audioData: audio,
       };
-      updateProgress(66, 1);
+      
       const response = await backendService.callChatEndpoint(request);
       const responseText = backendService.formatInterviewCoachPayload(response.payload ?? response.content);
-      updateProgress(100, 2);
-      setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
+      
+      setState(prev => {
+        // Replace the placeholder text with the actual transcription if available
+        const newHistory = prev.interviewHistory.map((msg, i) => 
+          i === prev.interviewHistory.length - 1 && msg.text === '[Analyzing audio...]' 
+            ? { ...msg, text: (response as any).transcription || '[Audio response]' } 
+            : msg
+        );
+        return { ...prev, interviewHistory: [...newHistory, { role: 'agent', text: responseText }] };
+      });
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Failed to process audio');
+      // Revert the placeholder
+      setState(prev => ({
+        ...prev,
+        interviewHistory: prev.interviewHistory.filter(msg => msg.text !== '[Analyzing audio...]')
+      }));
     } finally {
-      stopLoading();
+      // stopLoading();
     }
   };
 
