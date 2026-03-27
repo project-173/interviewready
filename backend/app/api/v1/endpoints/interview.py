@@ -140,11 +140,6 @@ async def interview_live_websocket(
             async def receive_from_client():
                 """Relay audio/text from Frontend to Gemini using send_realtime_input."""
                 try:
-                    # Initial prompt as per SKILL.md best practice (text-based trigger)
-                    await session.send_realtime_input(
-                        text="Hello! Please introduce yourself as the Interview Coach and ask the first question."
-                    )
-
                     while True:
                         data = await websocket.receive()
                         

@@ -319,28 +319,14 @@ export const InterviewStep: React.FC<{
     const socket = new WebSocket(wsUrl);
     socketRef.current = socket;
 
-    socket.onopen = async () => {
+    socket.onopen = () => {
       console.log('Voice WebSocket connected');
-      // Proactively ensure audio context is ready AND resumed
-      try {
-        let currentCtx = audioContext;
-        if (!currentCtx) {
-          currentCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-          setAudioContext(currentCtx);
-        }
-        if (currentCtx.state === 'suspended') {
-          await currentCtx.resume();
-        }
-        console.log('AudioContext ready:', currentCtx.state);
-      } catch (e) {
-        console.error('Failed to initialize AudioContext on open:', e);
-      }
-      // DELAY MIC: Give the AI airtime to greet us first before we start listening/detecting silence
+      // MIC DELAY: Give the AI time to greet before VAD starts
       setTimeout(() => {
-        if (socketRef.current?.readyState === WebSocket.OPEN) {
+        if (socketRef.current?.readyState === WebSocket.OPEN && !isSpeaking) {
           startRecording();
         }
-      }, 4000);
+      }, 5000);
     };
 
     socket.onmessage = async (event) => {
@@ -423,13 +409,13 @@ export const InterviewStep: React.FC<{
     
     let currentCtx = audioContext;
     if (!currentCtx || currentCtx.state === 'closed') {
-      currentCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      currentCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       setAudioContext(currentCtx);
-      nextStartTimeRef.current = currentCtx.currentTime;
+      nextStartTimeRef.current = 0;
     }
 
     if (currentCtx.state === 'suspended') {
-      await currentCtx.resume();
+      try { await currentCtx.resume(); } catch (e) { console.warn("Context resume failed", e); }
     }
 
     isQueueProcessingRef.current = true;
@@ -437,7 +423,6 @@ export const InterviewStep: React.FC<{
 
     while (playbackQueueRef.current.length > 0) {
       const audioChunks = playbackQueueRef.current.shift()!;
-      // Gemini Live typically uses 24000Hz Mono
       const audioBuffer = currentCtx.createBuffer(1, audioChunks.length, 24000);
       audioBuffer.copyToChannel(audioChunks, 0);
 
@@ -445,20 +430,17 @@ export const InterviewStep: React.FC<{
       source.buffer = audioBuffer;
       source.connect(currentCtx.destination);
 
-      // Precise scheduling to prevent gaps
       const now = currentCtx.currentTime;
       if (nextStartTimeRef.current < now) {
-        nextStartTimeRef.current = now + 0.05; // 50ms buffer for stability
+        nextStartTimeRef.current = now + 0.02; // Reduced buffer for lower latency
       }
       
       source.start(nextStartTimeRef.current);
-      console.log(`Playing audio chunk at ${nextStartTimeRef.current.toFixed(3)}s`);
       nextStartTimeRef.current += audioBuffer.duration;
 
-      // Clean up reference when done
       source.onended = () => {
-        if (playbackQueueRef.current.length === 0 && !isQueueProcessingRef.current) {
-          // Optional: set setIsSpeaking(false) if we want to know exact end
+        if (playbackQueueRef.current.length === 0) {
+          setIsSpeaking(false);
         }
       };
     }
@@ -535,14 +517,24 @@ export const InterviewStep: React.FC<{
   }, [history.length, mode]);
 
   const startRecording = async () => {
+    if (isRecording || isSpeaking) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
       });
-      const context = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      
+      let context = audioContext;
+      if (!context || context.state === 'closed') {
+        context = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+        setAudioContext(context);
+      }
+      
+      if (context.state === 'suspended') {
+        await context.resume();
+      }
+
       const source = context.createMediaStreamSource(stream);
 
-      // AudioWorklet for low-latency Int16 conversion (from sample code)
       const workletCode = `
         class AudioProcessor extends AudioWorkletProcessor {
           constructor() { 
@@ -554,7 +546,8 @@ export const InterviewStep: React.FC<{
             const input = inputs[0][0];
             if (input) {
               for (let i = 0; i < input.length; i++) {
-                this.buffer[this.index++] = input[i] * 32768;
+                let s = Math.max(-1, Math.min(1, input[i]));
+                this.buffer[this.index++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                 if (this.index >= this.buffer.length) {
                   this.port.postMessage({ event: 'chunk', data: this.buffer.slice().buffer });
                   this.index = 0;
@@ -581,9 +574,6 @@ export const InterviewStep: React.FC<{
       };
 
       source.connect(workletNode);
-      // We don't connect to destination to avoid hearing ourselves
-
-      setAudioContext(context);
       setMediaStream(stream);
       setProcessor(workletNode);
       setIsRecording(true);
@@ -599,11 +589,10 @@ export const InterviewStep: React.FC<{
         const dataArray = new Uint8Array(bufferLength);
         
         let lastSpeakTime = Date.now();
-        const SILENCE_THRESHOLD = 10; // Slightly more sensitive
-        const SILENCE_DURATION = 2000; // 2s of silence to trigger (give user more time)
-        const MAX_RECORDING_TIME = 60000; // 60s safety limit
+        const SILENCE_THRESHOLD = 10;
+        const SILENCE_DURATION = 2000;
+        const MAX_RECORDING_TIME = 60000;
 
-        // Safety timeout in case VAD fails
         silenceTimeoutRef.current = setTimeout(() => {
           console.log('VAD: Max recording time reached');
           stopRecording();
@@ -615,7 +604,6 @@ export const InterviewStep: React.FC<{
           analyser.getByteFrequencyData(dataArray);
           const average = dataArray.reduce((x, y) => x + y) / bufferLength;
 
-          // SILENCE SUPPRESSION: Ignore VAD for the first 5 seconds to let the AI greet us
           if (Date.now() - connectionTime < 5000) {
             animationFrameRef.current = requestAnimationFrame(checkSilence);
             return;
@@ -640,8 +628,7 @@ export const InterviewStep: React.FC<{
     }
   };
 
-  const stopRecording = () => {
-    // Cleanup first to prevent multiple triggers
+  const stopRecording = (manual = false) => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
@@ -651,55 +638,34 @@ export const InterviewStep: React.FC<{
       silenceTimeoutRef.current = null;
     }
 
-    if (audioContext && mediaStream && processor) {
+    if (mediaStream && processor) {
       processor.disconnect();
-      // Don't close context here for continuous mode unless explicitly exiting
-      // audioContext.close(); 
       mediaStream.getTracks().forEach(track => track.stop());
 
-      // Convert Float32Array chunks to Int16Array PCM
-      const sampleRate = 16000; // Resample to 16kHz
-      const allSamples: number[] = [];
-      
-      audioChunksRef.current.forEach(chunk => {
-        const ratio = audioContext.sampleRate / sampleRate;
-        for (let i = 0; i < chunk.length; i += ratio) {
-          allSamples.push(chunk[Math.floor(i)] * 32767);
-        }
-      });
-
-      const pcmData = new Int16Array(allSamples);
-      const audioBytes = new Uint8Array(pcmData.buffer);
-
-      // In Voice mode, we send directly to the websocket if it's open
-      if (mode === 'VOICE') {
-        if (socketRef.current?.readyState === WebSocket.OPEN) {
-          socketRef.current.send(audioBytes);
-        }
-        // NEVER call onSendAudio in VOICE mode, it's for CHAT mode only (legacy)
-      } else {
-        onSendAudio(audioBytes);
+      if (mode !== 'VOICE') {
+        // Handle legacy buffer only for CHAT mode audio capture
+        const sampleRate = 16000;
+        const allSamples: number[] = [];
+        audioChunksRef.current.forEach(chunk => {
+          const ratio = (audioContext?.sampleRate || 16000) / sampleRate;
+          for (let i = 0; i < chunk.length; i += ratio) {
+            allSamples.push(chunk[Math.floor(i)] * 32767);
+          }
+        });
+        const pcmData = new Int16Array(allSamples);
+        onSendAudio(new Uint8Array(pcmData.buffer));
       }
 
+      setMediaStream(null);
+      setProcessor(null);
       setIsRecording(false);
-      
-      // In VOICE mode, we immediately start the next capture cycle for "hands-free" feel
-      // UNLESS we are explicitly pausing (this function was called manually)
-      // or the session is speaking.
-      // For now, let's only auto-restart if we're not explicitly stopping.
-      // But stopRecording is used by both VAD and the Mic button.
     }
   };
 
   const handleMicClick = () => {
-    if (mode !== 'VOICE') return; // Double safety
+    if (mode !== 'VOICE' || isSpeaking) return;
     if (isRecording) {
-      // Manual pause - don't let VAD restart it
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
-      stopRecording();
+      stopRecording(true);
     } else {
       startRecording();
     }
