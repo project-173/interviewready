@@ -66,79 +66,79 @@ async def interview_live_websocket(
         system_instruction += f"\n\nTarget Job Description:\n{context.job_description}"
 
     try:
-        # Wrap system instruction correctly for LiveConnectConfig
-        system_content = types.Content(parts=[types.Part.from_text(text=system_instruction)])
+        # SKILL.md compliant config
+        system_instruction_content = types.Content(
+            parts=[types.Part(text=system_instruction)]
+        )
 
-        # Connect to Gemini Multimodal Live
-        # Use gemini-3.1-flash-live-preview as requested for voice
+        # Connect to Gemini Multimodal Live (using gemini-3.1-flash-live-preview)
         async with client.aio.live.connect(
             model="gemini-3.1-flash-live-preview",
             config=types.LiveConnectConfig(
-                system_instruction=system_content,
+                system_instruction=system_instruction_content,
                 response_modalities=[types.Modality.AUDIO],
-                # Enable transcription for better UX
-                output_audio_transcription=types.LiveConnectConfigOutputAudioTranscription(
-                    enabled=True
-                )
+                # As per SKILL.md: use minimal thinkingLevel for latency
+                thinking_config=types.LiveConnectConfigThinkingConfig(
+                    include_thoughts=True
+                ) if hasattr(types, "LiveConnectConfigThinkingConfig") else None,
             )
         ) as session:
-            # Send initial "ready" signal to frontend
-            await websocket.send_json({"type": "textStream", "data": "\nSession Established. Waking up the coach..."})
+            # Immediate feedback to frontend
+            await websocket.send_json({"type": "textStream", "data": "Voice session active. AI is initializing..."})
 
-            # WARM-UP DELAY: Give Gemini a moment to fully initialize its stream
-            logger.info(f"Connected to Gemini 3.1 Live for {session_id}. Waiting for warm-up...")
-            await asyncio.sleep(1.5) 
-            
-            # Use send_realtime_input as per SKILL.md best practices
-            logger.info(f"Sending initial greeting trigger for {session_id}")
-            await session.send_realtime_input(
-                text="Please start the interview session now. Introduce yourself briefly, mention the specific role from the job description, and ask your first question."
-            )
-            
             async def send_to_client():
-                """Relay audio from Gemini to Frontend."""
+                """Relay ALL parts of Gemini messages as per SKILL.md 'IMPORTANT' note."""
                 try:
-                    async for message in session.receive():
-                        # Handle audio output transcription
-                        if message.server_content and message.server_content.output_audio_transcription:
-                            transcription = message.server_content.output_audio_transcription.text
-                            if transcription:
-                                await websocket.send_json({"type": "textStream", "data": transcription})
+                    async for response in session.receive():
+                        content = response.server_content
+                        if not content:
+                            continue
 
-                        # Handle audio data
-                        if message.server_content and message.server_content.model_turn:
-                            parts = message.server_content.model_turn.parts
-                            for part in parts:
+                        # 1. Handle Interruption (Critical for smooth voice UX)
+                        if content.interrupted:
+                            await websocket.send_json({"interrupted": True})
+                        
+                        # 2. Handle Audio Data (Multiple parts possible)
+                        if content.model_turn:
+                            for part in content.model_turn.parts:
                                 if part.inline_data:
-                                    # Send as structured JSON with base64 data to match sample code pattern
-                                    # This is more reliable for handling multiple streams
                                     encoded_audio = base64.b64encode(part.inline_data.data).decode('utf-8')
                                     await websocket.send_json({"type": "audioStream", "data": encoded_audio})
+
+                        # 3. Handle Transcription (Input and Output)
+                        if content.input_audio_transcription:
+                            await websocket.send_json({"type": "inputTranscription", "data": content.input_audio_transcription.text})
                         
-                        if message.server_content and message.server_content.turn_complete:
+                        if content.output_audio_transcription:
+                            await websocket.send_json({"type": "textStream", "data": content.output_audio_transcription.text})
+                        
+                        # 4. Handle Turn Complete
+                        if content.turn_complete:
                             await websocket.send_json({"event": "turn_complete"})
                             
                 except Exception as e:
-                    logger.error(f"Error receiving from Gemini: {e}")
-                    await websocket.send_json({"error": f"Gemini connection error: {str(e)}"})
+                    logger.error(f"Gemini receive error: {e}")
+                    await websocket.send_json({"error": str(e)})
 
             async def receive_from_client():
-                """Relay audio/text from Frontend to Gemini."""
+                """Relay audio/text from Frontend to Gemini using send_realtime_input."""
                 try:
+                    # Initial prompt as per SKILL.md best practice (text-based trigger)
+                    await session.send_realtime_input(
+                        text="Hello! Please introduce yourself as the Interview Coach and ask the first question."
+                    )
+
                     while True:
                         data = await websocket.receive()
                         
-                        # Support both binary and JSON text formats
-                        # Using session.send_realtime_input as recommended in SKILL.md
                         if "bytes" in data:
-                            # Direct binary PCM
+                            # SKILL.md: Send audio using the 'audio' key in send_realtime_input
                             await session.send_realtime_input(
                                 audio=types.Blob(data=data["bytes"], mime_type="audio/pcm;rate=16000")
                             )
                         elif "text" in data:
                             try:
                                 msg = json.loads(data["text"])
-                                # Handle sample-code style input
                                 if msg.get("type") == "realtimeInput" and msg.get("audioData"):
                                     audio_bytes = base64.b64decode(msg["audioData"])
                                     await session.send_realtime_input(
@@ -146,14 +146,12 @@ async def interview_live_websocket(
                                     )
                                 elif msg.get("type") == "contentUpdateText" and msg.get("text"):
                                     await session.send_realtime_input(text=msg["text"])
-                                # Handle heartbeat
                                 elif msg.get("event") == "ping":
                                     continue
-                                # Legacy support
                                 elif msg.get("text"):
                                     await session.send_realtime_input(text=msg["text"])
                             except json.JSONDecodeError:
-                                logger.warning(f"Received non-JSON text from client: {data['text']}")
+                                pass
                 except WebSocketDisconnect:
                     logger.info(f"Client disconnected for session {session_id}")
                     raise
