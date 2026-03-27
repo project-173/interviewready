@@ -81,10 +81,6 @@ async def interview_live_websocket(
                 context_window_compression=types.ContextWindowCompressionConfig(
                     sliding_window=types.SlidingWindow(),
                 ),
-                # As per SKILL.md: use minimal thinkingLevel for latency
-                thinking_config=types.LiveConnectConfigThinkingConfig(
-                    include_thoughts=True
-                ) if hasattr(types, "LiveConnectConfigThinkingConfig") else None,
             )
         ) as session:
             # Immediate feedback to frontend
@@ -105,7 +101,9 @@ async def interview_live_websocket(
                                 if hasattr(content, 'model_turn') and content.model_turn:
                                     for part in content.model_turn.parts:
                                         if part.inline_data:
-                                            encoded_audio = base64.b64encode(part.inline_data.data).decode('utf-8')
+                                            audio_data = part.inline_data.data
+                                            logger.debug(f"Received audio chunk from Gemini: {len(audio_data)} bytes")
+                                            encoded_audio = base64.b64encode(audio_data).decode('utf-8')
                                             await websocket.send_json({"type": "audioStream", "data": encoded_audio})
 
                                 # 3. Handle Transcription (Using correct SDK attribute names)

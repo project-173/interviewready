@@ -285,7 +285,8 @@ export const InterviewStep: React.FC<{
   chatEndRef: React.RefObject<HTMLDivElement>;
   mode: 'CHAT' | 'VOICE';
   sessionId: string;
-}> = ({ history, onSend, onSendAudio, isLoading, chatEndRef, mode, sessionId }) => {
+  onExit?: () => void;
+}> = ({ history, onSend, onSendAudio, isLoading, chatEndRef, mode, sessionId, onExit }) => {
   const [isRecording, setIsRecording] = React.useState(false);
   const [isSpeaking, setIsSpeaking] = React.useState(false);
   const [mediaStream, setMediaStream] = React.useState<MediaStream | null>(null);
@@ -305,6 +306,8 @@ export const InterviewStep: React.FC<{
   const playbackContextRef = React.useRef<AudioContext | null>(null);
   // Separate AudioContext for microphone capture
   const recordingContextRef = React.useRef<AudioContext | null>(null);
+  // Tracks if the worklet module is registered for the recording context
+  const workletRegisteredRef = React.useRef<boolean>(false);
 
   // Keep refs in sync with state so closures always have fresh values
   React.useEffect(() => {
@@ -435,6 +438,12 @@ export const InterviewStep: React.FC<{
     if (currentCtx.state === 'suspended') {
       try { await currentCtx.resume(); } catch (e) { console.warn('Context resume failed', e); }
     }
+    // Also check if context is closed or interrupted
+    if (currentCtx.state === 'closed') {
+       currentCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+       playbackContextRef.current = currentCtx;
+       nextStartTimeRef.current = 0;
+    }
 
     isQueueProcessingRef.current = true;
     isSpeakingRef.current = true;
@@ -558,43 +567,50 @@ export const InterviewStep: React.FC<{
       if (!context || context.state === 'closed') {
         context = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
         recordingContextRef.current = context;
+        workletRegisteredRef.current = false;
       }
       
       if (context.state === 'suspended') {
         await context.resume();
       }
 
-      const source = context.createMediaStreamSource(stream);
-
-      const workletCode = `
-        class AudioProcessor extends AudioWorkletProcessor {
-          constructor() { 
-            super();
-            this.buffer = new Int16Array(512);
-            this.index = 0;
-          }
-          process(inputs) {
-            const input = inputs[0][0];
-            if (input) {
-              for (let i = 0; i < input.length; i++) {
-                let s = Math.max(-1, Math.min(1, input[i]));
-                this.buffer[this.index++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-                if (this.index >= this.buffer.length) {
-                  this.port.postMessage({ event: 'chunk', data: this.buffer.slice().buffer });
-                  this.index = 0;
+      if (!workletRegisteredRef.current) {
+        const workletCode = `
+          class AudioProcessor extends AudioWorkletProcessor {
+            constructor() { 
+              super();
+              this.buffer = new Int16Array(512);
+              this.index = 0;
+            }
+            process(inputs) {
+              const input = inputs[0][0];
+              if (input) {
+                for (let i = 0; i < input.length; i++) {
+                  let s = Math.max(-1, Math.min(1, input[i]));
+                  this.buffer[this.index++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                  if (this.index >= this.buffer.length) {
+                    this.port.postMessage({ event: 'chunk', data: this.buffer.slice().buffer });
+                    this.index = 0;
+                  }
                 }
               }
+              return true;
             }
-            return true;
           }
-        }
-        registerProcessor('audio-recorder-worklet', AudioProcessor);
-      `;
+          registerProcessor('audio-recorder-worklet', AudioProcessor);
+        `;
 
-      const blob = new Blob([workletCode], { type: 'application/javascript' });
-      const url = URL.createObjectURL(blob);
-      await context.audioWorklet.addModule(url);
+        const blob = new Blob([workletCode], { type: 'application/javascript' });
+        const url = URL.createObjectURL(blob);
+        try {
+          await context.audioWorklet.addModule(url);
+          workletRegisteredRef.current = true;
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      }
       
+      const source = context.createMediaStreamSource(stream);
       const workletNode = new AudioWorkletNode(context, 'audio-recorder-worklet');
       
       workletNode.port.onmessage = (ev) => {
@@ -777,7 +793,7 @@ export const InterviewStep: React.FC<{
 
         <div className="flex gap-4">
            <button 
-             onClick={() => window.location.reload()}
+             onClick={onExit ? onExit : () => window.location.reload()}
              className="text-[10px] font-bold text-slate-400 hover:text-slate-600 uppercase tracking-widest transition-colors"
            >
              Exit Interview
