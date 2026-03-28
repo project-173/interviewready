@@ -300,6 +300,7 @@ export const InterviewStep: React.FC<{
   const animationFrameRef = React.useRef<number | null>(null);
   const silenceTimeoutRef = React.useRef<any | null>(null);
   const socketRef = React.useRef<WebSocket | null>(null);
+  const [liveTranscription, setLiveTranscription] = React.useState<string>("");
 
   // Refs to track current state inside stale closures (WebSocket handlers, timers, VAD)
   const isSpeakingRef = React.useRef(false);
@@ -340,8 +341,8 @@ export const InterviewStep: React.FC<{
     socketRef.current = socket;
 
     socket.onopen = async () => {
-      console.log('Voice WebSocket connected');
-      // Eagerly resume/create contexts if possible
+      console.log('[VOICE_FRONTEND] Voice WebSocket connected');
+      // Try to resume contexts — often fails without a user gesture, but worth a try
       try {
         if (playbackContextRef.current && playbackContextRef.current.state === 'suspended') {
           await playbackContextRef.current.resume();
@@ -350,7 +351,7 @@ export const InterviewStep: React.FC<{
           await recordingContextRef.current.resume();
         }
       } catch (e) {
-        console.warn('Eager context resume failed', e);
+        console.warn('[VOICE_FRONTEND] Eager context resume failed (expected if no gesture)', e);
       }
     };
 
@@ -371,16 +372,20 @@ export const InterviewStep: React.FC<{
           // Heartbeat received
           return;
         }
+        
+        console.log('[VOICE_FRONTEND] Received WebSocket message:', msg.type || msg.event || 'unknown');
+
         if (msg.type === 'audioStream') {
-          console.log('Audio chunk received, size:', msg.data.length);
           const float32Data = base64ToFloat32(msg.data);
           playbackQueueRef.current.push(float32Data);
           
           // Mark as speaking as soon as we get audio chunks
           if (!isSpeakingRef.current) {
+            console.log('[VOICE_FRONTEND] AI started speaking (audioStream)');
             isSpeakingRef.current = true;
             setIsSpeaking(true);
             if (isRecordingRef.current) {
+              console.log('[VOICE_FRONTEND] Stopping recording due to AI speech');
               stopRecording();
             }
           }
@@ -390,28 +395,38 @@ export const InterviewStep: React.FC<{
           }
         } else if (msg.type === 'textStream') {
           // Update history with live transcription if needed
-          console.log('AI Transcription:', msg.data);
+          console.log('[VOICE_FRONTEND] AI Transcription:', msg.data);
+          setLiveTranscription(msg.data);
           
           // Eagerly resume playback context if we receive text but context is suspended
           if (playbackContextRef.current && playbackContextRef.current.state === 'suspended') {
             playbackContextRef.current.resume().catch(console.error);
           }
+        } else if (msg.type === 'inputTranscription') {
+          console.log('[VOICE_FRONTEND] User Input Transcription:', msg.data);
+          setLiveTranscription(msg.data);
         } else if (msg.interrupted) {
           // Clear playback queue if user interrupts AI
-          console.log('AI Interrupted, clearing playback queue');
+          console.log('[VOICE_FRONTEND] AI Interrupted, clearing playback queue');
           playbackQueueRef.current = [];
           isSpeakingRef.current = false;
           setIsSpeaking(false);
         } else if (msg.event === 'turn_complete' || msg.event === 'generation_complete') {
           // AI finished its turn — safe to open the microphone now
-          console.log(`Event received: ${msg.event} — opening mic`);
+          console.log(`[VOICE_FRONTEND] AI Turn Finished: ${msg.event} — opening mic`);
           
           // Small delay to ensure last audio chunk is finished playing
           setTimeout(() => {
             if (!isRecordingRef.current && !isSpeakingRef.current) {
+              console.log('[VOICE_FRONTEND] Automatically starting recording');
               startRecording();
+            } else {
+              console.log('[VOICE_FRONTEND] Automatic recording blocked:', { 
+                isRecording: isRecordingRef.current, 
+                isSpeaking: isSpeakingRef.current 
+              });
             }
-          }, 500);
+          }, 1000); // Increased delay slightly for safety
         } else if (msg.type === 'warning') {
           console.warn('AI Session Warning:', msg.data);
         } else if (msg.error) {
@@ -522,20 +537,33 @@ export const InterviewStep: React.FC<{
       source.connect(currentCtx.destination);
 
       const now = currentCtx.currentTime;
+      // Use a larger look-ahead buffer (0.1s) to prevent audio underrun/silence
       if (nextStartTimeRef.current < now) {
-        nextStartTimeRef.current = now + 0.02; // Small buffer for lower latency
+        nextStartTimeRef.current = now + 0.1;
       }
       
       source.start(nextStartTimeRef.current);
       nextStartTimeRef.current += audioBuffer.duration;
 
       source.onended = () => {
+        // Only reset speaking status if no more audio chunks are queued
         if (playbackQueueRef.current.length === 0) {
-          console.log('Playback queue empty, AI finished speaking');
+          console.log('[VOICE_FRONTEND] Playback queue empty, AI finished speaking');
           isSpeakingRef.current = false;
           setIsSpeaking(false);
         }
       };
+      
+      // Fallback: If onended never fires (can happen in some browsers if context is suspended)
+      // we'll still reset state based on the calculated duration
+      const timeoutMs = (audioBuffer.duration * 1000) + 100;
+      setTimeout(() => {
+        if (playbackQueueRef.current.length === 0 && isSpeakingRef.current) {
+           console.log('[VOICE_FRONTEND] Playback fallback timeout reached');
+           isSpeakingRef.current = false;
+           setIsSpeaking(false);
+        }
+      }, timeoutMs);
     }
 
     isQueueProcessingRef.current = false;
@@ -622,6 +650,7 @@ export const InterviewStep: React.FC<{
   }, [history.length, mode]);
 
   const startRecording = async () => {
+    setLiveTranscription(""); // Reset for new turn
     // Use refs for the guard to avoid stale closure issues
     if (isRecordingRef.current || isSpeakingRef.current) {
       console.log('[VOICE_DEBUG] startRecording blocked:', { isRecording: isRecordingRef.current, isSpeaking: isSpeakingRef.current });
@@ -661,7 +690,8 @@ export const InterviewStep: React.FC<{
           class AudioProcessor extends AudioWorkletProcessor {
             constructor() { 
               super();
-              this.buffer = new Int16Array(512);
+              // Increased buffer size to 4096 samples for network stability
+              this.buffer = new Int16Array(4096);
               this.index = 0;
             }
             process(inputs) {
@@ -810,12 +840,28 @@ export const InterviewStep: React.FC<{
   };
 
   const handleMicClick = async () => {
-    if (mode !== 'VOICE' || isSpeakingRef.current) return;
-    
-    // Ensure playback context is resumed on user interaction
-    if (playbackContextRef.current && playbackContextRef.current.state === 'suspended') {
-      await playbackContextRef.current.resume().catch(console.error);
+    // Crucial: AudioContext must be resumed from a user gesture
+    try {
+      if (!playbackContextRef.current) {
+        playbackContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      }
+      if (playbackContextRef.current.state === 'suspended') {
+        console.log('[VOICE_FRONTEND] Resuming playback context from mic click');
+        await playbackContextRef.current.resume();
+      }
+      
+      if (!recordingContextRef.current) {
+        recordingContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      }
+      if (recordingContextRef.current.state === 'suspended') {
+        console.log('[VOICE_FRONTEND] Resuming recording context from mic click');
+        await recordingContextRef.current.resume();
+      }
+    } catch (e) {
+      console.error('[VOICE_FRONTEND] Failed to resume contexts:', e);
     }
+
+    if (mode !== 'VOICE' || isSpeakingRef.current) return;
 
     if (isRecordingRef.current) {
       stopRecording(true);
@@ -832,26 +878,36 @@ export const InterviewStep: React.FC<{
             {isSpeaking ? (
               <>
                 <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
-                AI is Speaking
+                AI Coach is Speaking
               </>
             ) : isRecording ? (
               <>
                 <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-                Listening to you
+                Listening... (Your turn)
               </>
             ) : isLoading ? (
               <>
                 <div className="w-2 h-2 rounded-full bg-slate-400 animate-spin"></div>
-                Processing...
+                Thinking...
               </>
             ) : socketRef.current?.readyState === WebSocket.OPEN ? (
-              <span className="text-emerald-600">Live & Connected</span>
+              <span className="text-emerald-600">Coach is Ready</span>
             ) : (
-              <span className="text-amber-500">Connecting...</span>
+              <span className="text-amber-500">Initializing Voice Link...</span>
             )}
           </div>
-          <h3 className="text-xl font-medium text-slate-800 max-w-md mx-auto leading-relaxed h-8">
-            {!isSpeaking && !isRecording && !isLoading ? "Ready to talk" : ""}
+          <h3 className="text-xl font-medium text-slate-800 max-w-md mx-auto leading-relaxed h-8 text-center px-4">
+            {liveTranscription ? (
+              <span className="italic text-slate-600 animate-in fade-in duration-300">
+                "{liveTranscription}"
+              </span>
+            ) : isSpeaking ? (
+              "Analyzing your profile..."
+            ) : isRecording ? (
+              "I'm listening to your response"
+            ) : socketRef.current?.readyState === WebSocket.OPEN ? (
+              "Waiting for conversation..."
+            ) : ""}
           </h3>
         </div>
 

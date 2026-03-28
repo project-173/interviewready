@@ -91,40 +91,46 @@ async def interview_live_websocket(
             async def send_to_client():
                 """Relay ALL parts of Gemini messages safely."""
                 try:
-                    async for response in session.receive():
-                        try:
-                            content = response.server_content
-                            if content:
-                                # 1. Handle Interruption
-                                if hasattr(content, 'interrupted') and content.interrupted:
-                                    await websocket.send_json({"interrupted": True})
-                                
-                                # 2. Handle Audio Data
-                                if hasattr(content, 'model_turn') and content.model_turn:
-                                    for part in content.model_turn.parts:
-                                        if part.inline_data:
-                                            audio_data = part.inline_data.data
-                                            logger.debug(f"Received audio chunk from Gemini: {len(audio_data)} bytes")
-                                            encoded_audio = base64.b64encode(audio_data).decode('utf-8')
-                                            await websocket.send_json({"type": "audioStream", "data": encoded_audio})
-                                        if part.text:
-                                            # Some model turns might include text parts (rare in audio mode but possible)
-                                            await websocket.send_json({"type": "textStream", "data": part.text})
+                async for response in session.receive():
+                    try:
+                        content = response.server_content
+                        if content:
+                            # 1. Handle Interruption
+                            if hasattr(content, 'interrupted') and content.interrupted:
+                                logger.info(f"[VOICE_BACKEND] AI interrupted by user")
+                                await websocket.send_json({"interrupted": True})
+                            
+                            # 2. Handle Audio Data
+                            if hasattr(content, 'model_turn') and content.model_turn:
+                                for part in content.model_turn.parts:
+                                    if part.inline_data:
+                                        audio_data = part.inline_data.data
+                                        logger.debug(f"Received audio chunk from Gemini: {len(audio_data)} bytes")
+                                        encoded_audio = base64.b64encode(audio_data).decode('utf-8')
+                                        await websocket.send_json({"type": "audioStream", "data": encoded_audio})
+                                    if part.text:
+                                        # Some model turns might include text parts (rare in audio mode but possible)
+                                        logger.info(f"[VOICE_BACKEND] AI Text Part: {part.text}")
+                                        await websocket.send_json({"type": "textStream", "data": part.text})
 
-                                # 3. Handle Transcription (Using correct SDK attribute names)
-                                # The SDK uses 'input_transcription' and 'output_transcription'
-                                if hasattr(content, 'input_transcription') and content.input_transcription:
-                                    await websocket.send_json({"type": "inputTranscription", "data": content.input_transcription.text})
-                                
-                                if hasattr(content, 'output_transcription') and content.output_transcription:
-                                    await websocket.send_json({"type": "textStream", "data": content.output_transcription.text})
-                                
-                                # 4. Handle Turn Complete / Generation Complete
-                                if hasattr(content, 'turn_complete') and content.turn_complete:
-                                    await websocket.send_json({"event": "turn_complete"})
-                                
-                                if hasattr(content, 'generation_complete') and content.generation_complete:
-                                    await websocket.send_json({"event": "generation_complete"})
+                            # 3. Handle Transcription (Using correct SDK attribute names)
+                            # The SDK uses 'input_transcription' and 'output_transcription'
+                            if hasattr(content, 'input_transcription') and content.input_transcription:
+                                logger.info(f"[VOICE_BACKEND] User Input Transcription: {content.input_transcription.text}")
+                                await websocket.send_json({"type": "inputTranscription", "data": content.input_transcription.text})
+                            
+                            if hasattr(content, 'output_transcription') and content.output_transcription:
+                                logger.info(f"[VOICE_BACKEND] AI Output Transcription: {content.output_transcription.text}")
+                                await websocket.send_json({"type": "textStream", "data": content.output_transcription.text})
+                            
+                            # 4. Handle Turn Complete / Generation Complete
+                            if hasattr(content, 'turn_complete') and content.turn_complete:
+                                logger.info(f"[VOICE_BACKEND] Turn Complete signal received from Gemini")
+                                await websocket.send_json({"event": "turn_complete"})
+                            
+                            if hasattr(content, 'generation_complete') and content.generation_complete:
+                                logger.info(f"[VOICE_BACKEND] Generation Complete signal received from Gemini")
+                                await websocket.send_json({"event": "generation_complete"})
 
                             # 5. Handle GoAway Signal (Session about to end)
                             if response.go_away:
