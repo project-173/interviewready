@@ -728,9 +728,9 @@ export const InterviewStep: React.FC<{
       workletNode.port.onmessage = (ev) => {
         if (ev.data.event === 'chunk') {
           if (mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN) {
-            const base64 = btoa(String.fromCharCode(...new Uint8Array(ev.data.data)));
-            if (Math.random() < 0.05) console.log('[VOICE_DEBUG] Sending audio chunk to server');
-            socketRef.current.send(JSON.stringify({ type: 'realtimeInput', audioData: base64 }));
+            if (Math.random() < 0.05) console.log('[VOICE_DEBUG] Sending binary audio chunk to server');
+            // Send raw binary for performance and to match backend expectation
+            socketRef.current.send(ev.data.data);
           } else if (mode === 'CHAT') {
             // Only collect chunks for legacy buffer in CHAT mode
             audioChunksRef.current.push(new Float32Array(ev.data.data));
