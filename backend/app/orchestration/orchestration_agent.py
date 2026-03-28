@@ -67,6 +67,8 @@ class OrchestrationAgent:
             with propagate_attributes(user_id=user_id, session_id=session_id):
 
                 intent = self._parse_intent(request.intent)
+                if request.jobDescription:
+                    context.job_description = request.jobDescription
                 normalized = self._normalize_or_fail(request, context)
                 if isinstance(normalized, AgentResponse):
                     return normalized

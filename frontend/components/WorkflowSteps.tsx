@@ -660,10 +660,6 @@ export const InterviewStep: React.FC<{
 
           if (average > SILENCE_THRESHOLD) {
             lastSpeakTime = Date.now();
-          } else if (Date.now() - lastSpeakTime > SILENCE_DURATION) {
-            console.log('VAD: Silence detected, stopping recording');
-            stopRecording();
-            return;
           }
           
           animationFrameRef.current = requestAnimationFrame(checkSilence);

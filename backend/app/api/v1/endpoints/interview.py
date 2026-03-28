@@ -65,6 +65,8 @@ async def interview_live_websocket(
     if context.job_description:
         system_instruction += f"\n\nTarget Job Description:\n{context.job_description}"
 
+    logger.info(f"Starting Live Interview for session {session_id}. System instruction length: {len(system_instruction)}")
+
     try:
         # SKILL.md compliant config
         system_instruction_content = types.Content(
@@ -143,6 +145,7 @@ async def interview_live_websocket(
                         
                         if "bytes" in data:
                             # SKILL.md: Send audio using the 'audio' key in send_realtime_input
+                            logger.debug(f"Relaying raw bytes from client: {len(data['bytes'])} bytes")
                             await session.send_realtime_input(
                                 audio=types.Blob(data=data["bytes"], mime_type="audio/pcm;rate=16000")
                             )
@@ -151,6 +154,7 @@ async def interview_live_websocket(
                                 msg = json.loads(data["text"])
                                 if msg.get("type") == "realtimeInput" and msg.get("audioData"):
                                     audio_bytes = base64.b64decode(msg["audioData"])
+                                    logger.debug(f"Relaying base64 audio from client: {len(audio_bytes)} bytes")
                                     await session.send_realtime_input(
                                         audio=types.Blob(data=audio_bytes, mime_type="audio/pcm;rate=16000")
                                     )
