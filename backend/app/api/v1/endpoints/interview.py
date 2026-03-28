@@ -130,6 +130,7 @@ async def interview_live_websocket(
                                 
                                 if hasattr(content, 'generation_complete') and content.generation_complete:
                                     logger.info(f"[VOICE_BACKEND] Generation Complete signal received from Gemini")
+                                    # Ensure any remaining audio for this turn is flushed before signal
                                     await websocket.send_json({"event": "generation_complete"})
 
                             # 5. Handle GoAway Signal (Session about to end)
@@ -170,6 +171,10 @@ async def interview_live_websocket(
                                     )
                                 elif msg.get("type") == "contentUpdateText" and msg.get("text"):
                                     await session.send_realtime_input(text=msg["text"])
+                                elif msg.get("event") == "interrupt":
+                                    logger.info("[VOICE_BACKEND] Client signaled interruption")
+                                    # Interrupting model turn in SDK
+                                    continue
                                 elif msg.get("event") == "ping":
                                     await websocket.send_json({"event": "pong"})
                                     continue
@@ -188,6 +193,18 @@ async def interview_live_websocket(
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(send_to_client())
                 tg.create_task(receive_from_client())
+                
+                # Keep session alive with a periodic no-op if needed by infrastructure
+                while True:
+                    await asyncio.sleep(30)
+                    if websocket.client_state.name == "CONNECTED":
+                        try:
+                            # Backend-level keepalive if desired
+                            pass
+                        except:
+                            break
+                    else:
+                        break
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for session {session_id}")

@@ -345,16 +345,30 @@ export const InterviewStep: React.FC<{
     socket.onopen = async () => {
       console.log('[VOICE_FRONTEND] Voice WebSocket connected');
       setConnectionStatus('connected');
-      // Try to resume contexts — often fails without a user gesture, but worth a try
+      
+      // ENSURE AudioContexts are initialized and running immediately on connect
+      // Since this is triggered by a user gesture (Launch Mock Interview button)
+      // we can reliably resume/create them here.
       try {
-        if (playbackContextRef.current && playbackContextRef.current.state === 'suspended') {
+        if (!playbackContextRef.current || playbackContextRef.current.state === 'closed') {
+          playbackContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+        }
+        if (playbackContextRef.current.state === 'suspended') {
           await playbackContextRef.current.resume();
         }
-        if (recordingContextRef.current && recordingContextRef.current.state === 'suspended') {
+        
+        if (!recordingContextRef.current || recordingContextRef.current.state === 'closed') {
+          recordingContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+        }
+        if (recordingContextRef.current.state === 'suspended') {
           await recordingContextRef.current.resume();
         }
+        console.log('[VOICE_FRONTEND] Audio contexts initialized:', {
+          playback: playbackContextRef.current.state,
+          recording: recordingContextRef.current.state
+        });
       } catch (e) {
-        console.warn('[VOICE_FRONTEND] Eager context resume failed (expected if no gesture)', e);
+        console.error('[VOICE_FRONTEND] Failed to initialize audio contexts:', e);
       }
     };
 
@@ -382,7 +396,7 @@ export const InterviewStep: React.FC<{
           const float32Data = base64ToFloat32(msg.data);
           playbackQueueRef.current.push(float32Data);
           
-          // Documentation Match: Model turn is active until turn_complete
+          // Mark as active model turn
           aiTurnActiveRef.current = true;
           
           // Mark as speaking as soon as we get audio chunks
@@ -390,8 +404,10 @@ export const InterviewStep: React.FC<{
             console.log('[VOICE_FRONTEND] AI started speaking (audioStream)');
             isSpeakingRef.current = true;
             setIsSpeaking(true);
+            
+            // If we were recording, stop it immediately as AI has priority
             if (isRecordingRef.current) {
-              console.log('[VOICE_FRONTEND] Stopping recording due to AI speech');
+              console.log('[VOICE_FRONTEND] Stopping recording due to AI incoming stream');
               stopRecording();
             }
           }
@@ -419,23 +435,25 @@ export const InterviewStep: React.FC<{
           aiTurnActiveRef.current = false;
           setIsSpeaking(false);
         } else if (msg.event === 'turn_complete' || msg.event === 'generation_complete') {
-          // AI finished its turn — safe to open the microphone now
-          console.log(`[VOICE_FRONTEND] AI Turn Finished: ${msg.event}`);
+          // AI finished its generation turn
+          console.log(`[VOICE_FRONTEND] AI Generation Finished: ${msg.event}`);
           aiTurnActiveRef.current = false;
           
-          // Small delay to ensure last audio chunk is finished playing
-          setTimeout(() => {
-            if (!isRecordingRef.current && !isSpeakingRef.current && !aiTurnActiveRef.current) {
-              console.log('[VOICE_FRONTEND] Automatically starting recording');
+          // Logic to check if we should start recording after audio finishes
+          const checkAndStartRecording = () => {
+            // Wait until both generation is done AND audio playback is finished
+            if (!aiTurnActiveRef.current && !isSpeakingRef.current && !isRecordingRef.current) {
+              console.log('[VOICE_FRONTEND] AI turn truly finished, starting recording');
               startRecording();
-            } else {
-              console.log('[VOICE_FRONTEND] Automatic recording blocked:', { 
-                isRecording: isRecordingRef.current, 
-                isSpeaking: isSpeakingRef.current,
-                aiTurnActive: aiTurnActiveRef.current
-              });
+            } else if (isSpeakingRef.current || playbackQueueRef.current.length > 0) {
+              // Still playing audio, check again shortly
+              console.log('[VOICE_FRONTEND] Waiting for playback to finish before recording...');
+              setTimeout(checkAndStartRecording, 200);
             }
-          }, 1500); // Documentation Match: Allow room for model turn finalization
+          };
+
+          // Start the check loop with a small buffer for the final chunk processing
+          setTimeout(checkAndStartRecording, 500);
         } else if (msg.type === 'warning') {
           console.warn('AI Session Warning:', msg.data);
         } else if (msg.error) {
@@ -464,6 +482,7 @@ export const InterviewStep: React.FC<{
       setConnectionStatus('closed');
       isSpeakingRef.current = false;
       isRecordingRef.current = false;
+      aiTurnActiveRef.current = false;
       setIsSpeaking(false);
       setIsRecording(false);
       
@@ -477,7 +496,8 @@ export const InterviewStep: React.FC<{
         recordingContextRef.current = null;
       }
 
-      if (event.code !== 1000 && mode === 'VOICE') {
+      if (event.code !== 1000 && event.code !== 1001 && mode === 'VOICE') {
+        // Only alert if it's an actual error (1001 is going away, e.g. reload)
         alert(`Voice connection closed (Code ${event.code}). Please check your internet and API key.`);
       }
     };
@@ -530,11 +550,16 @@ export const InterviewStep: React.FC<{
     }
 
     isQueueProcessingRef.current = true;
-    isSpeakingRef.current = true;
-    setIsSpeaking(true);
+    
+    // Crucial: Only set speaking to true if we're not already marked as speaking
+    if (!isSpeakingRef.current) {
+        isSpeakingRef.current = true;
+        setIsSpeaking(true);
+    }
 
     // Stop the microphone while the AI is speaking to prevent audio feedback
     if (isRecordingRef.current) {
+      console.log('[VOICE_FRONTEND] AI speaking priority: stopping recording');
       stopRecording();
     }
 
@@ -557,11 +582,14 @@ export const InterviewStep: React.FC<{
       nextStartTimeRef.current += audioBuffer.duration;
 
       source.onended = () => {
-        // Only reset speaking status if no more audio chunks are queued
+        // Only reset speaking status if no more audio chunks are queued AND AI is not currently generating more
         if (playbackQueueRef.current.length === 0) {
           console.log('[VOICE_FRONTEND] Playback queue empty');
-          isSpeakingRef.current = false;
-          setIsSpeaking(false);
+          // Important: We only mark speaking as false if turn is not active or we're waiting for user
+          if (!aiTurnActiveRef.current) {
+            isSpeakingRef.current = false;
+            setIsSpeaking(false);
+          }
         }
       };
     }
@@ -779,6 +807,16 @@ export const InterviewStep: React.FC<{
 
           if (average > SILENCE_THRESHOLD) {
             lastSpeakTime = Date.now();
+            // User is speaking! Check if we should interrupt the AI
+            if (isSpeakingRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
+              console.log('[VOICE_DEBUG] VAD: User speaking over AI, sending interrupt signal');
+              // Clear local playback immediately
+              playbackQueueRef.current = [];
+              isSpeakingRef.current = false;
+              setIsSpeaking(false);
+              // Notify backend to stop model generation
+              socketRef.current.send(JSON.stringify({ type: 'realtimeInput', event: 'interrupt' }));
+            }
           } else {
             // If silent for too long during a VOICE session, we could auto-stop
             // but for a live interview, we usually keep it open unless AI interrupts.
@@ -970,13 +1008,21 @@ export const InterviewStep: React.FC<{
           </button>
         </div>
 
-        <div className="flex gap-4">
+        <div className="flex gap-6">
            <button 
              onClick={onExit ? onExit : () => window.location.reload()}
              className="text-[10px] font-bold text-slate-400 hover:text-slate-600 uppercase tracking-widest transition-colors"
            >
              Exit Interview
            </button>
+           {connectionStatus !== 'connected' && (
+             <button 
+               onClick={() => window.location.reload()}
+               className="text-[10px] font-bold text-blue-500 hover:text-blue-700 uppercase tracking-widest transition-colors"
+             >
+               Reconnect
+             </button>
+           )}
         </div>
       </div>
     );
