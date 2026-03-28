@@ -304,6 +304,7 @@ export const InterviewStep: React.FC<{
   const [liveTranscription, setLiveTranscription] = React.useState<string>("");
 
   // Refs to track current state inside stale closures (WebSocket handlers, timers, VAD)
+  const aiTurnActiveRef = React.useRef(false);
   const isSpeakingRef = React.useRef(false);
   const isRecordingRef = React.useRef(false);
   // Single shared AudioContext for playback — avoids creating a new one per audio chunk
@@ -381,6 +382,9 @@ export const InterviewStep: React.FC<{
           const float32Data = base64ToFloat32(msg.data);
           playbackQueueRef.current.push(float32Data);
           
+          // Documentation Match: Model turn is active until turn_complete
+          aiTurnActiveRef.current = true;
+          
           // Mark as speaking as soon as we get audio chunks
           if (!isSpeakingRef.current) {
             console.log('[VOICE_FRONTEND] AI started speaking (audioStream)');
@@ -412,23 +416,26 @@ export const InterviewStep: React.FC<{
           console.log('[VOICE_FRONTEND] AI Interrupted, clearing playback queue');
           playbackQueueRef.current = [];
           isSpeakingRef.current = false;
+          aiTurnActiveRef.current = false;
           setIsSpeaking(false);
         } else if (msg.event === 'turn_complete' || msg.event === 'generation_complete') {
           // AI finished its turn — safe to open the microphone now
-          console.log(`[VOICE_FRONTEND] AI Turn Finished: ${msg.event} — opening mic`);
+          console.log(`[VOICE_FRONTEND] AI Turn Finished: ${msg.event}`);
+          aiTurnActiveRef.current = false;
           
           // Small delay to ensure last audio chunk is finished playing
           setTimeout(() => {
-            if (!isRecordingRef.current && !isSpeakingRef.current) {
+            if (!isRecordingRef.current && !isSpeakingRef.current && !aiTurnActiveRef.current) {
               console.log('[VOICE_FRONTEND] Automatically starting recording');
               startRecording();
             } else {
               console.log('[VOICE_FRONTEND] Automatic recording blocked:', { 
                 isRecording: isRecordingRef.current, 
-                isSpeaking: isSpeakingRef.current 
+                isSpeaking: isSpeakingRef.current,
+                aiTurnActive: aiTurnActiveRef.current
               });
             }
-          }, 1000); // Increased delay slightly for safety
+          }, 1500); // Documentation Match: Allow room for model turn finalization
         } else if (msg.type === 'warning') {
           console.warn('AI Session Warning:', msg.data);
         } else if (msg.error) {
@@ -552,22 +559,11 @@ export const InterviewStep: React.FC<{
       source.onended = () => {
         // Only reset speaking status if no more audio chunks are queued
         if (playbackQueueRef.current.length === 0) {
-          console.log('[VOICE_FRONTEND] Playback queue empty, AI finished speaking');
+          console.log('[VOICE_FRONTEND] Playback queue empty');
           isSpeakingRef.current = false;
           setIsSpeaking(false);
         }
       };
-      
-      // Fallback: If onended never fires (can happen in some browsers if context is suspended)
-      // we'll still reset state based on the calculated duration
-      const timeoutMs = (audioBuffer.duration * 1000) + 100;
-      setTimeout(() => {
-        if (playbackQueueRef.current.length === 0 && isSpeakingRef.current) {
-           console.log('[VOICE_FRONTEND] Playback fallback timeout reached');
-           isSpeakingRef.current = false;
-           setIsSpeaking(false);
-        }
-      }, timeoutMs);
     }
 
     isQueueProcessingRef.current = false;
@@ -758,7 +754,8 @@ export const InterviewStep: React.FC<{
         const dataArray = new Uint8Array(bufferLength);
         
         let lastSpeakTime = Date.now();
-        const SILENCE_THRESHOLD = 5;
+        // Documentation Match: Increase threshold to avoid background-noise interruptions
+        const SILENCE_THRESHOLD = 15; 
         const SILENCE_DURATION = 4000;
         const MAX_RECORDING_TIME = 120000;
 
@@ -868,10 +865,11 @@ export const InterviewStep: React.FC<{
     if (mode !== 'VOICE') return;
     
     // Manual fallback: If AI is stuck in speaking mode, allow force-stop/start
-    if (isSpeakingRef.current) {
+    if (isSpeakingRef.current || aiTurnActiveRef.current) {
       console.log('[VOICE_FRONTEND] Manual Override: Forcing AI to stop and opening mic');
       playbackQueueRef.current = [];
       isSpeakingRef.current = false;
+      aiTurnActiveRef.current = false;
       setIsSpeaking(false);
       startRecording();
       return;
