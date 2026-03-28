@@ -348,7 +348,10 @@ const WorkflowController: React.FC<{
       interviewHistory: [],
     }));
 
-    if (mode === 'VOICE') return; // Handled by WebSocket auto-start
+    if (mode === 'VOICE') {
+      setError(null);
+      return; // Handled by WebSocket auto-start
+    }
 
     startLoading('Starting interview...', ['Preparing first question', 'Personalizing coach guidance']);
     setError(null);
@@ -398,6 +401,7 @@ const WorkflowController: React.FC<{
   };
 
   const handleInterviewAudioMessage = async (audio: Uint8Array) => {
+    // This is the legacy audio path used only in CHAT mode for voice-to-text
     const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: '[Analyzing audio...]' }];
     setState(prev => ({ ...prev, interviewHistory: updatedHistory }));
     

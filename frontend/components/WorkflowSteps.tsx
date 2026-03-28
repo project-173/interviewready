@@ -239,7 +239,7 @@ export const AlignmentReportStep: React.FC<{ report: AlignmentReport; onStartInt
 );
 
 export const InterviewModeSelectionStep: React.FC<{
-  onSelect: (mode: 'CHAT' | 'VOICE') => void;
+  onSelect: (mode: InterviewMode) => void;
 }> = ({ onSelect }) => (
   <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 space-y-8">
     <div className="text-center">
@@ -277,13 +277,15 @@ export const InterviewModeSelectionStep: React.FC<{
   </div>
 );
 
+import { InterviewMessage, InterviewMode } from '../types';
+
 export const InterviewStep: React.FC<{ 
-  history: { role: 'user' | 'agent'; text: string }[]; 
+  history: InterviewMessage[]; 
   onSend: (msg: string) => void;
   onSendAudio: (audio: Uint8Array) => void;
   isLoading: boolean;
   chatEndRef: React.RefObject<HTMLDivElement>;
-  mode: 'CHAT' | 'VOICE';
+  mode: InterviewMode;
   sessionId: string;
   onExit?: () => void;
 }> = ({ history, onSend, onSendAudio, isLoading, chatEndRef, mode, sessionId, onExit }) => {
@@ -296,7 +298,7 @@ export const InterviewStep: React.FC<{
   const isQueueProcessingRef = React.useRef(false);
   const nextStartTimeRef = React.useRef(0);
   const animationFrameRef = React.useRef<number | null>(null);
-  const silenceTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const silenceTimeoutRef = React.useRef<any | null>(null);
   const socketRef = React.useRef<WebSocket | null>(null);
 
   // Refs to track current state inside stale closures (WebSocket handlers, timers, VAD)
@@ -360,6 +362,16 @@ export const InterviewStep: React.FC<{
           console.log('Audio chunk received, size:', msg.data.length);
           const float32Data = base64ToFloat32(msg.data);
           playbackQueueRef.current.push(float32Data);
+          
+          // Mark as speaking as soon as we get audio chunks
+          if (!isSpeakingRef.current) {
+            isSpeakingRef.current = true;
+            setIsSpeaking(true);
+            if (isRecordingRef.current) {
+              stopRecording();
+            }
+          }
+
           if (!isQueueProcessingRef.current) {
             processPlaybackQueue();
           }
@@ -375,9 +387,13 @@ export const InterviewStep: React.FC<{
         } else if (msg.event === 'turn_complete' || msg.event === 'generation_complete') {
           // AI finished its turn — safe to open the microphone now
           console.log(`Event received: ${msg.event} — opening mic`);
-          if (!isRecordingRef.current) {
-            startRecording();
-          }
+          
+          // Small delay to ensure last audio chunk is finished playing
+          setTimeout(() => {
+            if (!isRecordingRef.current && !isSpeakingRef.current) {
+              startRecording();
+            }
+          }, 500);
         } else if (msg.type === 'warning') {
           console.warn('AI Session Warning:', msg.data);
         } else if (msg.error) {
@@ -421,6 +437,14 @@ export const InterviewStep: React.FC<{
     return () => {
       clearInterval(heartbeat);
       socket.close();
+      if (playbackContextRef.current) {
+        playbackContextRef.current.close().catch(console.error);
+        playbackContextRef.current = null;
+      }
+      if (recordingContextRef.current) {
+        recordingContextRef.current.close().catch(console.error);
+        recordingContextRef.current = null;
+      }
     };
   }, [mode, sessionId]);
 
@@ -430,12 +454,14 @@ export const InterviewStep: React.FC<{
     // Use the shared ref-based AudioContext to avoid creating a new one per audio chunk
     let currentCtx = playbackContextRef.current;
     if (!currentCtx || currentCtx.state === 'closed') {
+      console.log('Creating new playback AudioContext');
       currentCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       playbackContextRef.current = currentCtx;
       nextStartTimeRef.current = 0;
     }
 
     if (currentCtx.state === 'suspended') {
+      console.log('Resuming playback AudioContext');
       try { await currentCtx.resume(); } catch (e) { console.warn('Context resume failed', e); }
     }
     // Also check if context is closed or interrupted
@@ -473,6 +499,7 @@ export const InterviewStep: React.FC<{
 
       source.onended = () => {
         if (playbackQueueRef.current.length === 0) {
+          console.log('Playback queue empty, AI finished speaking');
           isSpeakingRef.current = false;
           setIsSpeaking(false);
         }
@@ -527,20 +554,22 @@ export const InterviewStep: React.FC<{
       setIsSpeaking(true);
     };
     utterance.onend = () => {
-      isSpeakingRef.current = false;
-      setIsSpeaking(false);
-      if (mode === 'VOICE' && !isRecordingRef.current) {
-        // Delay slightly to avoid catching the end of the AI's own voice
-        setTimeout(() => startRecording(), 500);
-      }
-    };
+          isSpeakingRef.current = false;
+          setIsSpeaking(false);
+          if (mode === 'VOICE' && !isRecordingRef.current) {
+            // Delay slightly to avoid catching the end of the AI's own voice
+            setTimeout(() => {
+               if (!isSpeakingRef.current) startRecording();
+            }, 500);
+          }
+        };
 
     window.speechSynthesis.speak(utterance);
   };
 
   useEffect(() => {
     // Browser TTS fallback only if socket isn't active
-    if (mode === 'VOICE' && history.length > 0 && !socketRef.current) {
+    if (mode === 'VOICE' && history.length > 0 && (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN)) {
       const lastMessage = history[history.length - 1];
       if (lastMessage.role === 'agent') {
         speakText(lastMessage.text);
@@ -549,28 +578,49 @@ export const InterviewStep: React.FC<{
     
     return () => {
       window.speechSynthesis.cancel();
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-      if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      if (silenceTimeoutRef.current) {
+        clearTimeout(silenceTimeoutRef.current);
+        silenceTimeoutRef.current = null;
+      }
     };
   }, [history.length, mode]);
 
   const startRecording = async () => {
     // Use refs for the guard to avoid stale closure issues
-    if (isRecordingRef.current || isSpeakingRef.current) return;
+    if (isRecordingRef.current || isSpeakingRef.current) {
+      console.log('[VOICE_DEBUG] startRecording blocked:', { isRecording: isRecordingRef.current, isSpeaking: isSpeakingRef.current });
+      return;
+    }
     try {
+      console.log('[VOICE_DEBUG] Requesting microphone access');
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
       });
       
+      const track = stream.getAudioTracks()[0];
+      const settings = track.getSettings();
+      console.log('[VOICE_DEBUG] Mic Hardware Settings:', { 
+        sampleRate: settings.sampleRate, 
+        channelCount: settings.channelCount,
+        deviceId: settings.deviceId
+      });
+
       // Use a dedicated AudioContext for microphone capture (separate from playback)
       let context = recordingContextRef.current;
       if (!context || context.state === 'closed') {
+        console.log('[VOICE_DEBUG] Creating new recording AudioContext');
         context = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
         recordingContextRef.current = context;
+        context.onstatechange = () => console.log('[VOICE_DEBUG] RecordingContext state:', context?.state);
         workletRegisteredRef.current = false;
       }
-      
+
       if (context.state === 'suspended') {
+        console.log('[VOICE_DEBUG] Resuming recording AudioContext');
         await context.resume();
       }
 
@@ -614,9 +664,14 @@ export const InterviewStep: React.FC<{
       const workletNode = new AudioWorkletNode(context, 'audio-recorder-worklet');
       
       workletNode.port.onmessage = (ev) => {
-        if (ev.data.event === 'chunk' && socketRef.current?.readyState === WebSocket.OPEN) {
-          const base64 = btoa(String.fromCharCode(...new Uint8Array(ev.data.data)));
-          socketRef.current.send(JSON.stringify({ type: 'realtimeInput', audioData: base64 }));
+        if (ev.data.event === 'chunk') {
+          if (mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN) {
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(ev.data.data)));
+            socketRef.current.send(JSON.stringify({ type: 'realtimeInput', audioData: base64 }));
+          } else if (mode === 'CHAT') {
+            // Only collect chunks for legacy buffer in CHAT mode
+            audioChunksRef.current.push(new Float32Array(ev.data.data));
+          }
         }
       };
 
@@ -660,6 +715,15 @@ export const InterviewStep: React.FC<{
 
           if (average > SILENCE_THRESHOLD) {
             lastSpeakTime = Date.now();
+          } else {
+            // If silent for too long during a VOICE session, we could auto-stop
+            // but for a live interview, we usually keep it open unless AI interrupts.
+            const silentDuration = Date.now() - lastSpeakTime;
+            if (silentDuration > SILENCE_DURATION) {
+               // We could trigger a "still there?" prompt or just keep listening
+               // For now, let's just log it to avoid aggressive cutting
+               // console.log('VAD: User silent for:', silentDuration);
+            }
           }
           
           animationFrameRef.current = requestAnimationFrame(checkSilence);
@@ -691,8 +755,9 @@ export const InterviewStep: React.FC<{
       processor.disconnect();
       mediaStream.getTracks().forEach(track => track.stop());
 
-      if (mode !== 'VOICE') {
+      if (mode === 'CHAT' && audioChunksRef.current.length > 0) {
         // Handle legacy buffer only for CHAT mode audio capture
+        console.log('Processing legacy audio buffer for CHAT mode');
         const sampleRate = 16000;
         const allSamples: number[] = [];
         audioChunksRef.current.forEach(chunk => {
@@ -703,6 +768,7 @@ export const InterviewStep: React.FC<{
         });
         const pcmData = new Int16Array(allSamples);
         onSendAudio(new Uint8Array(pcmData.buffer));
+        audioChunksRef.current = []; // Clear for next time
       }
 
       setMediaStream(null);

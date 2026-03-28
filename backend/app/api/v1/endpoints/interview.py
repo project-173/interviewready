@@ -107,6 +107,9 @@ async def interview_live_websocket(
                                             logger.debug(f"Received audio chunk from Gemini: {len(audio_data)} bytes")
                                             encoded_audio = base64.b64encode(audio_data).decode('utf-8')
                                             await websocket.send_json({"type": "audioStream", "data": encoded_audio})
+                                        if part.text:
+                                            # Some model turns might include text parts (rare in audio mode but possible)
+                                            await websocket.send_json({"type": "textStream", "data": part.text})
 
                                 # 3. Handle Transcription (Using correct SDK attribute names)
                                 # The SDK uses 'input_transcription' and 'output_transcription'
