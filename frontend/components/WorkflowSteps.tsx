@@ -347,8 +347,6 @@ export const InterviewStep: React.FC<{
       setConnectionStatus('connected');
       
       // ENSURE AudioContexts are initialized and running immediately on connect
-      // Since this is triggered by a user gesture (Launch Mock Interview button)
-      // we can reliably resume/create them here.
       try {
         if (!playbackContextRef.current || playbackContextRef.current.state === 'closed') {
           playbackContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
@@ -363,10 +361,10 @@ export const InterviewStep: React.FC<{
         if (recordingContextRef.current.state === 'suspended') {
           await recordingContextRef.current.resume();
         }
-        console.log('[VOICE_FRONTEND] Audio contexts initialized:', {
-          playback: playbackContextRef.current.state,
-          recording: recordingContextRef.current.state
-        });
+        
+        // AUTO-START microphone as soon as we connect to the voice session
+        console.log('[VOICE_FRONTEND] Starting microphone for live session...');
+        await startRecording();
       } catch (e) {
         console.error('[VOICE_FRONTEND] Failed to initialize audio contexts:', e);
       }
@@ -374,11 +372,17 @@ export const InterviewStep: React.FC<{
 
     const base64ToFloat32 = (base64: string) => {
       const binary = atob(base64);
-      const bytes = new Uint8Array(binary.length);
+      const buffer = new ArrayBuffer(binary.length);
+      const bytes = new Uint8Array(buffer);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const int16 = new Int16Array(bytes.buffer);
-      const float32 = new Float32Array(int16.length);
-      for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
+      
+      // Multimodal Live API returns 16-bit PCM Little-Endian
+      const dataView = new DataView(buffer);
+      const float32 = new Float32Array(binary.length / 2);
+      for (let i = 0; i < float32.length; i++) {
+        // Read as Int16 Little-Endian (true) and normalize to [-1, 1]
+        float32[i] = dataView.getInt16(i * 2, true) / 32768;
+      }
       return float32;
     };
 
@@ -439,21 +443,9 @@ export const InterviewStep: React.FC<{
           console.log(`[VOICE_FRONTEND] AI Generation Finished: ${msg.event}`);
           aiTurnActiveRef.current = false;
           
-          // Logic to check if we should start recording after audio finishes
-          const checkAndStartRecording = () => {
-            // Wait until both generation is done AND audio playback is finished
-            if (!aiTurnActiveRef.current && !isSpeakingRef.current && !isRecordingRef.current) {
-              console.log('[VOICE_FRONTEND] AI turn truly finished, starting recording');
-              startRecording();
-            } else if (isSpeakingRef.current || playbackQueueRef.current.length > 0) {
-              // Still playing audio, check again shortly
-              console.log('[VOICE_FRONTEND] Waiting for playback to finish before recording...');
-              setTimeout(checkAndStartRecording, 200);
-            }
-          };
-
-          // Start the check loop with a small buffer for the final chunk processing
-          setTimeout(checkAndStartRecording, 500);
+          // No-op: We rely on server-side VAD and continuous microphone stream.
+          // The microphone remains open as long as the AI is not speaking.
+          // Handled via the checkSilence loop in startRecording.
         } else if (msg.type === 'warning') {
           console.warn('AI Session Warning:', msg.data);
         } else if (msg.error) {
@@ -718,8 +710,10 @@ export const InterviewStep: React.FC<{
           class AudioProcessor extends AudioWorkletProcessor {
             constructor() { 
               super();
-              // Increased buffer size to 4096 samples for network stability
-              this.buffer = new Int16Array(4096);
+              // Standard buffer size for 16kHz audio chunks
+              this.bufferSize = 2048;
+              this.buffer = new ArrayBuffer(this.bufferSize * 2);
+              this.view = new DataView(this.buffer);
               this.index = 0;
             }
             process(inputs) {
@@ -727,9 +721,13 @@ export const InterviewStep: React.FC<{
               if (input) {
                 for (let i = 0; i < input.length; i++) {
                   let s = Math.max(-1, Math.min(1, input[i]));
-                  this.buffer[this.index++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-                  if (this.index >= this.buffer.length) {
-                    this.port.postMessage({ event: 'chunk', data: this.buffer.slice().buffer });
+                  // Convert Float32 to Int16 Little-Endian for Gemini
+                  const pcm = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                  this.view.setInt16(this.index * 2, pcm, true);
+                  this.index++;
+                  
+                  if (this.index >= this.bufferSize) {
+                    this.port.postMessage({ event: 'chunk', data: this.buffer.slice(0) });
                     this.index = 0;
                   }
                 }
@@ -795,12 +793,9 @@ export const InterviewStep: React.FC<{
         const checkSilence = () => {
           if (!stream.active) return;
           
-          // If AI started speaking, stop the mic immediately to prevent feedback
-          if (isSpeakingRef.current) {
-            console.log('[VOICE_DEBUG] VAD: AI is speaking, stopping mic to prevent feedback');
-            stopRecording();
-            return;
-          }
+          // If AI started speaking, we keep the mic open for "Organic" feel
+          // but we can dampen it or ignore VAD events locally.
+          // Gemini server-side VAD handles the turn taking.
 
           analyser.getByteFrequencyData(dataArray);
           const average = dataArray.reduce((x, y) => x + y) / bufferLength;
@@ -816,14 +811,6 @@ export const InterviewStep: React.FC<{
               setIsSpeaking(false);
               // Notify backend to stop model generation
               socketRef.current.send(JSON.stringify({ type: 'realtimeInput', event: 'interrupt' }));
-            }
-          } else {
-            // If silent for too long during a VOICE session, we could auto-stop
-            // but for a live interview, we usually keep it open unless AI interrupts.
-            const silentDuration = Date.now() - lastSpeakTime;
-            if (silentDuration > SILENCE_DURATION && isRecordingRef.current) {
-               console.log('[VOICE_DEBUG] VAD: Silence duration met, stopping recording to hand off turn');
-               stopRecording();
             }
           }
           

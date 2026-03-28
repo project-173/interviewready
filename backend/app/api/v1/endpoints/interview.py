@@ -90,6 +90,7 @@ async def interview_live_websocket(
 
             async def send_to_client():
                 """Relay ALL parts of Gemini messages safely."""
+                chunk_count = 0
                 try:
                     async for response in session.receive():
                         try:
@@ -105,7 +106,9 @@ async def interview_live_websocket(
                                     for part in content.model_turn.parts:
                                         if part.inline_data:
                                             audio_data = part.inline_data.data
-                                            logger.debug(f"Received audio chunk from Gemini: {len(audio_data)} bytes")
+                                            chunk_count += 1
+                                            if chunk_count % 20 == 0:
+                                                logger.info(f"[VOICE_TELEMETRY] Relaying AI audio chunk #{chunk_count}: {len(audio_data)} bytes")
                                             encoded_audio = base64.b64encode(audio_data).decode('utf-8')
                                             await websocket.send_json({"type": "audioStream", "data": encoded_audio})
                                         if part.text:
@@ -153,53 +156,54 @@ async def interview_live_websocket(
                     while True:
                         data = await websocket.receive()
                         
+                        # Handle binary audio chunks (PCM16 Little-Endian)
                         if "bytes" in data and data["bytes"]:
-                            # Standard binary audio path
                             audio_bytes = data["bytes"]
-                            logger.debug(f"[VOICE_BACKEND] Relaying binary audio: {len(audio_bytes)} bytes")
+                            # Log every ~50th chunk to avoid spamming
+                            if logger.isEnabledFor(10): # DEBUG
+                                logger.debug(f"[VOICE_BACKEND] Relaying {len(audio_bytes)} bytes of binary audio to Gemini")
+                            
                             await session.send_realtime_input(
                                 audio=types.Blob(data=audio_bytes, mime_type="audio/pcm;rate=16000")
                             )
+                        
+                        # Handle JSON control messages or base64 audio fallback
                         elif "text" in data and data["text"]:
                             try:
                                 msg = json.loads(data["text"])
+                                event_type = msg.get("event") or msg.get("type")
+                                
                                 if msg.get("type") == "realtimeInput" and msg.get("audioData"):
                                     audio_bytes = base64.b64decode(msg["audioData"])
-                                    logger.info(f"[VOICE_BACKEND] Relaying base64 audio from client: {len(audio_bytes)} bytes")
                                     await session.send_realtime_input(
                                         audio=types.Blob(data=audio_bytes, mime_type="audio/pcm;rate=16000")
                                     )
-                                elif msg.get("type") == "contentUpdateText" and msg.get("text"):
-                                    await session.send_realtime_input(text=msg["text"])
-                                elif msg.get("event") == "interrupt":
+                                elif event_type == "interrupt":
                                     logger.info("[VOICE_BACKEND] Client signaled interruption. Clearing Gemini session...")
-                                    # The Multimodal Live SDK session has a specific 'clear' method 
-                                    # to stop current model generation and clear the output queue.
-                                    try:
-                                        # This is the standard way to interrupt in genai SDK
-                                        await session.send(types.LiveClientContent(
-                                            data=types.ClientContent(
-                                                turns=[],
-                                                turn_complete=True
-                                            )
-                                        ))
-                                    except Exception as clear_e:
-                                        logger.warning(f"Failed to send explicit clear to Gemini: {clear_e}")
+                                    # Clear current model generation turns
+                                    await session.send(types.LiveClientMessage(
+                                        realtime_input=types.LiveClientRealtimeInput(
+                                            media_chunks=[],
+                                        )
+                                    ))
+                                    # Also send an explicit turn_complete to reset the turn state
+                                    await session.send(types.LiveClientMessage(
+                                        client_content=types.LiveClientContent(
+                                            turn_complete=True,
+                                            turns=[]
+                                        )
+                                    ))
                                     continue
-                                elif msg.get("event") == "user_turn_complete":
+                                elif event_type == "user_turn_complete":
                                     logger.info("[VOICE_BACKEND] Client signaled user turn complete. Triggering AI response...")
-                                    # Explicitly signal Gemini that the user's turn is done
-                                    try:
-                                        await session.send(types.LiveClientContent(
-                                            data=types.ClientContent(
-                                                turns=[],
-                                                turn_complete=True
-                                            )
-                                        ))
-                                    except Exception as turn_e:
-                                        logger.warning(f"Failed to send turn_complete to Gemini: {turn_e}")
+                                    await session.send(types.LiveClientMessage(
+                                        client_content=types.LiveClientContent(
+                                            turn_complete=True,
+                                            turns=[]
+                                        )
+                                    ))
                                     continue
-                                elif msg.get("event") == "ping":
+                                elif event_type == "ping":
                                     await websocket.send_json({"event": "pong"})
                                     continue
                                 elif msg.get("text"):
