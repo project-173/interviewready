@@ -1,30 +1,52 @@
 import asyncio
-import json
 import base64
-from typing import Annotated
+import json
 import time
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
+from typing import Annotated
+
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 from google import genai
 from google.genai import types
 
 from app.api.v1.services import get_session_context
 from app.core.config import settings
 from app.core.logging import logger
-from app.utils.audio_utils import pcm_to_wav
 
 router = APIRouter()
+
+
+def _should_auto_close_turn(
+    *,
+    now: float,
+    last_audio_time: float,
+    last_turn_close_time: float,
+    user_audio_seen: bool,
+    awaiting_model_response: bool,
+    idle_seconds: float = 2.0,
+    cooldown_seconds: float = 3.0,
+) -> bool:
+    """Return whether the backend should force-close the user's turn."""
+
+    return (
+        user_audio_seen
+        and not awaiting_model_response
+        and now - last_audio_time > idle_seconds
+        and now - last_turn_close_time > cooldown_seconds
+    )
+
 
 @router.websocket("/live")
 async def interview_live_websocket(
     websocket: WebSocket,
     session_id: Annotated[str, Query(alias="sessionId")],
 ):
-    """Handle real-time Multimodal Live session with Gemini."""
+    """Handle a real-time Multimodal Live interview session with Gemini."""
+
     user_id = "dev-user"
 
     try:
         context = get_session_context(session_id=session_id, user_id=user_id)
-    except Exception as e:
+    except Exception:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
@@ -33,15 +55,15 @@ async def interview_live_websocket(
         return
 
     await websocket.accept()
-    
-    # IMMEDIATE ACK: Tell the frontend we're initializing to prevent timeout
-    await websocket.send_json({"type": "textStream", "data": "Connecting to AI Coach... Please wait a moment."})
-    
-    # Initialize Gemini client
+    await websocket.send_json(
+        {
+            "type": "textStream",
+            "data": "Connecting to AI Coach... Please wait a moment.",
+        }
+    )
+
     client = genai.Client(api_key=settings.GEMINI_API_KEY)
-    
-    # Get initial interview instructions from the agent logic
-    # (Simplified for the WebSocket version)
+
     system_instruction = (
         "You are an expert Interview Coach conducting a LIVE VOICE mock interview. "
         "IMPORTANT: You must speak naturally, warmly, and concisely. "
@@ -56,7 +78,6 @@ async def interview_live_websocket(
     )
 
     if context.resume_data:
-        # resume_data might be a string (raw text) or a dict (parsed resume)
         resume_context = context.resume_data
         if isinstance(resume_context, dict):
             resume_context = json.dumps(resume_context, indent=2)
@@ -65,193 +86,299 @@ async def interview_live_websocket(
     if context.job_description:
         system_instruction += f"\n\nTarget Job Description:\n{context.job_description}"
 
-    logger.info(f"Starting Live Interview for session {session_id}. System instruction length: {len(system_instruction)}")
+    logger.info(
+        f"Starting Live Interview for session {session_id}. "
+        f"System instruction length: {len(system_instruction)}"
+    )
 
     try:
-        # SKILL.md compliant config
         system_instruction_content = types.Content(
             parts=[types.Part(text=system_instruction)]
         )
 
-        # Connect to Gemini Multimodal Live (using gemini-3.1-flash-live-preview)
         async with client.aio.live.connect(
             model="gemini-3.1-flash-live-preview",
             config=types.LiveConnectConfig(
                 system_instruction=system_instruction_content,
                 response_modalities=[types.Modality.AUDIO],
-                # Enable context window compression for long interviews (>15m)
                 context_window_compression=types.ContextWindowCompressionConfig(
                     sliding_window=types.SlidingWindow(),
                 ),
-            )
+            ),
         ) as session:
-            # Immediate feedback to frontend
-            await websocket.send_json({"type": "textStream", "data": "Voice session active. AI is initializing..."})
-            await session.send(types.LiveClientMessage(
-                client_content=types.LiveClientContent(
-                    turn_complete=True,
-                    turns=[]
+            await websocket.send_json(
+                {
+                    "type": "textStream",
+                    "data": "Voice session active. AI is initializing...",
+                }
+            )
+
+            last_audio_time = time.time()
+            last_turn_close_time = 0.0
+            user_audio_seen = False
+            awaiting_model_response = True
+
+            async def send_turn_close(reason: str) -> None:
+                """Tell Gemini the user turn is complete at most once per turn."""
+
+                nonlocal last_turn_close_time, user_audio_seen, awaiting_model_response
+
+                if awaiting_model_response or not user_audio_seen:
+                    logger.debug(
+                        "[VOICE_BACKEND] Skipping turn close",
+                        extra={
+                            "reason": reason,
+                            "awaiting_model_response": awaiting_model_response,
+                            "user_audio_seen": user_audio_seen,
+                        },
+                    )
+                    return
+
+                await session.send(
+                    types.LiveClientMessage(
+                        client_content=types.LiveClientContent(
+                            turn_complete=True,
+                            turns=[],
+                        )
+                    )
                 )
-            ))
-            async def send_to_client():
-                """Relay ALL parts of Gemini messages safely."""
+                last_turn_close_time = time.time()
+                user_audio_seen = False
+                awaiting_model_response = True
+                logger.info(f"[VOICE_BACKEND] Sent turn complete to Gemini ({reason})")
+
+            await session.send(
+                types.LiveClientMessage(
+                    client_content=types.LiveClientContent(
+                        turn_complete=True,
+                        turns=[],
+                    )
+                )
+            )
+
+            async def send_to_client() -> None:
+                """Relay Gemini events back to the browser websocket."""
+
                 chunk_count = 0
+                nonlocal awaiting_model_response
+
                 try:
                     async for response in session.receive():
                         try:
                             content = response.server_content
                             if content:
-                                # 1. Handle Interruption
-                                if hasattr(content, 'interrupted') and content.interrupted:
-                                    logger.info(f"[VOICE_BACKEND] AI interrupted by user")
+                                if getattr(content, "interrupted", False):
+                                    logger.info("[VOICE_BACKEND] AI interrupted by user")
+                                    awaiting_model_response = False
                                     await websocket.send_json({"interrupted": True})
-                                
-                                # 2. Handle Audio Data
-                                if hasattr(content, 'model_turn') and content.model_turn:
+
+                                if getattr(content, "model_turn", None):
+                                    awaiting_model_response = True
                                     for part in content.model_turn.parts:
-                                        if part.inline_data:
+                                        if getattr(part, "inline_data", None):
                                             audio_data = part.inline_data.data
                                             chunk_count += 1
                                             if chunk_count % 20 == 0:
-                                                logger.info(f"[VOICE_TELEMETRY] Relaying AI audio chunk #{chunk_count}: {len(audio_data)} bytes")
-                                            encoded_audio = base64.b64encode(audio_data).decode('utf-8')
-                                            await websocket.send_json({"type": "audioStream", "data": encoded_audio})
-                                        if part.text:
-                                            # Some model turns might include text parts (rare in audio mode but possible)
-                                            logger.info(f"[VOICE_BACKEND] AI Text Part: {part.text}")
-                                            await websocket.send_json({"type": "textStream", "data": part.text})
+                                                logger.info(
+                                                    "[VOICE_TELEMETRY] Relaying AI audio "
+                                                    f"chunk #{chunk_count}: {len(audio_data)} bytes"
+                                                )
+                                            encoded_audio = base64.b64encode(
+                                                audio_data
+                                            ).decode("utf-8")
+                                            await websocket.send_json(
+                                                {
+                                                    "type": "audioStream",
+                                                    "data": encoded_audio,
+                                                }
+                                            )
+                                        if getattr(part, "text", None):
+                                            logger.info(
+                                                f"[VOICE_BACKEND] AI Text Part: {part.text}"
+                                            )
+                                            await websocket.send_json(
+                                                {
+                                                    "type": "textStream",
+                                                    "data": part.text,
+                                                }
+                                            )
 
-                                # 3. Handle Transcription (Using correct SDK attribute names)
-                                # The SDK uses 'input_transcription' and 'output_transcription'
-                                if hasattr(content, 'input_transcription') and content.input_transcription:
-                                    logger.info(f"[VOICE_BACKEND] User Input Transcription: {content.input_transcription.text}")
-                                    await websocket.send_json({"type": "inputTranscription", "data": content.input_transcription.text})
-                                
-                                if hasattr(content, 'output_transcription') and content.output_transcription:
-                                    logger.info(f"[VOICE_BACKEND] AI Output Transcription: {content.output_transcription.text}")
-                                    await websocket.send_json({"type": "textStream", "data": content.output_transcription.text})
-                                
-                                # 4. Handle Turn Complete / Generation Complete
-                                if hasattr(content, 'turn_complete') and content.turn_complete:
-                                    logger.info(f"[VOICE_BACKEND] Turn Complete signal received from Gemini")
-                                    await websocket.send_json({"event": "turn_complete"})
-                                
-                                if hasattr(content, 'generation_complete') and content.generation_complete:
-                                    logger.info(f"[VOICE_BACKEND] Generation Complete signal received from Gemini")
-                                    # Ensure any remaining audio for this turn is flushed before signal
-                                    await websocket.send_json({"event": "generation_complete"})
+                                if getattr(content, "input_transcription", None):
+                                    text = content.input_transcription.text
+                                    logger.info(
+                                        f"[VOICE_BACKEND] User Input Transcription: {text}"
+                                    )
+                                    await websocket.send_json(
+                                        {
+                                            "type": "inputTranscription",
+                                            "data": text,
+                                        }
+                                    )
 
-                            # 5. Handle GoAway Signal (Session about to end)
+                                if getattr(content, "output_transcription", None):
+                                    text = content.output_transcription.text
+                                    logger.info(
+                                        f"[VOICE_BACKEND] AI Output Transcription: {text}"
+                                    )
+                                    await websocket.send_json(
+                                        {"type": "textStream", "data": text}
+                                    )
+
+                                if getattr(content, "turn_complete", False):
+                                    logger.info(
+                                        "[VOICE_BACKEND] Turn Complete signal received from Gemini"
+                                    )
+                                    awaiting_model_response = False
+                                    await websocket.send_json(
+                                        {"event": "turn_complete"}
+                                    )
+
+                                if getattr(content, "generation_complete", False):
+                                    logger.info(
+                                        "[VOICE_BACKEND] Generation Complete signal received from Gemini"
+                                    )
+                                    awaiting_model_response = False
+                                    await websocket.send_json(
+                                        {"event": "generation_complete"}
+                                    )
+
                             if response.go_away:
-                                await websocket.send_json({
-                                    "type": "warning", 
-                                    "data": f"Session will terminate in {response.go_away.time_left} due to connection limits."
-                                })
+                                await websocket.send_json(
+                                    {
+                                        "type": "warning",
+                                        "data": (
+                                            "Session will terminate in "
+                                            f"{response.go_away.time_left} due to connection limits."
+                                        ),
+                                    }
+                                )
                         except Exception as inner_e:
-                            logger.error(f"Error processing Gemini message part: {inner_e}")
-                            # Don't crash the whole session if one part fails
-                            
+                            logger.error(
+                                f"Error processing Gemini message part: {inner_e}"
+                            )
                 except Exception as e:
                     logger.error(f"Gemini receive error: {e}")
                     await websocket.send_json({"error": str(e)})
 
-            async def receive_from_client():
-                """Relay audio/text from Frontend to Gemini using send_realtime_input."""
+            async def receive_from_client() -> None:
+                """Relay browser audio/control messages to Gemini."""
+
                 chunk_in_count = 0
+                nonlocal last_audio_time, user_audio_seen, awaiting_model_response
+
                 try:
                     while True:
                         data = await websocket.receive()
-                        
-                        # Handle binary audio chunks (PCM16 Little-Endian)
-                        if "bytes" in data and data["bytes"]:
+
+                        if data.get("bytes"):
                             last_audio_time = time.time()
+                            user_audio_seen = True
+                            awaiting_model_response = False
                             audio_bytes = data["bytes"]
                             chunk_in_count += 1
-                            # Log every 50th chunk to avoid spamming
                             if chunk_in_count % 50 == 0:
-                                logger.debug(f"[VOICE_BACKEND] Relaying chunk #{chunk_in_count} ({len(audio_bytes)} bytes) to Gemini")
-                            
+                                logger.debug(
+                                    "[VOICE_BACKEND] Relaying chunk "
+                                    f"#{chunk_in_count} ({len(audio_bytes)} bytes) to Gemini"
+                                )
+
                             await session.send_realtime_input(
-                                audio=types.Blob(data=audio_bytes, mime_type="audio/pcm;rate=16000")
+                                audio=types.Blob(
+                                    data=audio_bytes,
+                                    mime_type="audio/pcm;rate=16000",
+                                )
                             )
-                        
-                        # Handle JSON control messages or base64 audio fallback
-                        elif "text" in data and data["text"]:
-                            try:
-                                msg = json.loads(data["text"])
-                                event_type = msg.get("event") or msg.get("type")
-                                
-                                if msg.get("type") == "realtimeInput" and msg.get("audioData"):
-                                    audio_bytes = base64.b64decode(msg["audioData"])
-                                    await session.send_realtime_input(
-                                        audio=types.Blob(data=audio_bytes, mime_type="audio/pcm;rate=16000")
+                            continue
+
+                        if not data.get("text"):
+                            continue
+
+                        try:
+                            msg = json.loads(data["text"])
+                        except json.JSONDecodeError:
+                            continue
+
+                        event_type = msg.get("event") or msg.get("type")
+
+                        if msg.get("type") == "realtimeInput" and msg.get("audioData"):
+                            audio_bytes = base64.b64decode(msg["audioData"])
+                            last_audio_time = time.time()
+                            user_audio_seen = True
+                            awaiting_model_response = False
+                            await session.send_realtime_input(
+                                audio=types.Blob(
+                                    data=audio_bytes,
+                                    mime_type="audio/pcm;rate=16000",
+                                )
+                            )
+                            continue
+
+                        if event_type == "interrupt":
+                            logger.info("[VOICE_BACKEND] Interrupt received")
+                            awaiting_model_response = False
+                            await session.send(
+                                types.LiveClientMessage(
+                                    client_content=types.LiveClientContent(
+                                        turn_complete=True,
+                                        turns=[],
                                     )
-                                elif event_type == "interrupt":
-                                    logger.info("[VOICE_BACKEND] Interrupt received")
-                                    await session.send(types.LiveClientMessage(
-                                        client_content=types.LiveClientContent(
-                                            turn_complete=True,
-                                            turns=[]
-                                        )
-                                    ))
-                                    continue
-                                elif event_type == "user_turn_complete":
-                                    logger.info("[VOICE_BACKEND] Client signaled user turn complete. Triggering AI response...")
-                                    await session.send(types.LiveClientMessage(
-                                        client_content=types.LiveClientContent(
-                                            turn_complete=True,
-                                            turns=[]
-                                        )
-                                    ))
-                                    continue
-                                elif event_type == "ping":
-                                    await websocket.send_json({"event": "pong"})
-                                    continue
-                                elif msg.get("text"):
-                                    await session.send_realtime_input(text=msg["text"])
-                            except json.JSONDecodeError:
-                                pass
+                                )
+                            )
+                            continue
+
+                        if event_type == "user_turn_complete":
+                            logger.info(
+                                "[VOICE_BACKEND] Client signaled user turn complete. "
+                                "Triggering AI response..."
+                            )
+                            await send_turn_close("frontend_signal")
+                            continue
+
+                        if event_type == "ping":
+                            await websocket.send_json({"event": "pong"})
+                            continue
+
+                        if msg.get("text"):
+                            awaiting_model_response = False
+                            await session.send_realtime_input(text=msg["text"])
                 except WebSocketDisconnect:
                     logger.info(f"Client disconnected for session {session_id}")
                     raise
                 except Exception as e:
                     logger.error(f"Error receiving from Client: {e}")
-                    await websocket.send_json({"error": f"Client communication error: {str(e)}"})
-            last_sent_time = 0
+                    await websocket.send_json(
+                        {"error": f"Client communication error: {str(e)}"}
+                    )
 
-            async def auto_turn_close():
-                nonlocal last_audio_time, last_sent_time
+            async def auto_turn_close() -> None:
+                """Fallback turn close when the frontend misses silence detection."""
+
+                nonlocal last_audio_time, last_turn_close_time, user_audio_seen, awaiting_model_response
 
                 while True:
                     await asyncio.sleep(1)
-
                     now = time.time()
 
-                    if (
-                        now - last_audio_time > 2.0 and
-                        now - last_sent_time > 3.0  # 🔥 cooldown
+                    if _should_auto_close_turn(
+                        now=now,
+                        last_audio_time=last_audio_time,
+                        last_turn_close_time=last_turn_close_time,
+                        user_audio_seen=user_audio_seen,
+                        awaiting_model_response=awaiting_model_response,
                     ):
                         try:
-                            logger.debug("[VOICE_BACKEND] Auto turn complete fallback triggered")
-
-                            await session.send(types.LiveClientMessage(
-                                client_content=types.LiveClientContent(
-                                    turn_complete=True,
-                                    turns=[]
-                                )
-                            ))
-
-                            last_sent_time = now
-
+                            logger.debug(
+                                "[VOICE_BACKEND] Auto turn complete fallback triggered"
+                            )
+                            await send_turn_close("backend_fallback")
                         except Exception as e:
                             logger.error(f"Auto turn close error: {e}")
 
-            # Run both relay loops using TaskGroup for robustness
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(send_to_client())
                 tg.create_task(receive_from_client())
                 tg.create_task(auto_turn_close())
-                
+
             logger.info(f"WebSocket disconnected for session {session_id}")
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for session {session_id}")

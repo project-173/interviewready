@@ -292,14 +292,13 @@ export const InterviewStep: React.FC<{
   const [isRecording, setIsRecording] = React.useState(false);
   const [isSpeaking, setIsSpeaking] = React.useState(false);
   const [connectionStatus, setConnectionStatus] = React.useState<'connecting' | 'connected' | 'error' | 'closed'>('connecting');
-  const [mediaStream, setMediaStream] = React.useState<MediaStream | null>(null);
-  const [processor, setProcessor] = React.useState<AudioWorkletNode | null>(null);
   const audioChunksRef = React.useRef<Float32Array[]>([]);
   const playbackQueueRef = React.useRef<Float32Array[]>([]);
   const isQueueProcessingRef = React.useRef(false);
   const nextStartTimeRef = React.useRef(0);
   const animationFrameRef = React.useRef<number | null>(null);
   const silenceTimeoutRef = React.useRef<any | null>(null);
+  const resumeListeningTimeoutRef = React.useRef<number | null>(null);
   const socketRef = React.useRef<WebSocket | null>(null);
   const [liveTranscription, setLiveTranscription] = React.useState<string>("");
   const isSendingAudioRef = React.useRef(true);
@@ -308,6 +307,8 @@ export const InterviewStep: React.FC<{
   const aiTurnActiveRef = React.useRef(false);
   const isSpeakingRef = React.useRef(false);
   const isRecordingRef = React.useRef(false);
+  const mediaStreamRef = React.useRef<MediaStream | null>(null);
+  const processorRef = React.useRef<AudioWorkletNode | null>(null);
   // Single shared AudioContext for playback — avoids creating a new one per audio chunk
   const playbackContextRef = React.useRef<AudioContext | null>(null);
   // Separate AudioContext for microphone capture
@@ -323,6 +324,74 @@ export const InterviewStep: React.FC<{
   React.useEffect(() => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
+
+  const queueResumeListening = (delayMs = 250) => {
+    if (resumeListeningTimeoutRef.current) {
+      window.clearTimeout(resumeListeningTimeoutRef.current);
+      resumeListeningTimeoutRef.current = null;
+    }
+
+    resumeListeningTimeoutRef.current = window.setTimeout(() => {
+      resumeListeningTimeoutRef.current = null;
+      if (
+        mode === 'VOICE' &&
+        socketRef.current?.readyState === WebSocket.OPEN &&
+        !isSpeakingRef.current &&
+        !isRecordingRef.current &&
+        !aiTurnActiveRef.current
+      ) {
+        startRecording().catch((error) => {
+          console.error('[VOICE_FRONTEND] Failed to resume listening:', error);
+        });
+      }
+    }, delayMs);
+  };
+
+  const teardownRecording = (notifyBackend: boolean) => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (silenceTimeoutRef.current) {
+      clearTimeout(silenceTimeoutRef.current);
+      silenceTimeoutRef.current = null;
+    }
+
+    const currentProcessor = processorRef.current;
+    const currentStream = mediaStreamRef.current;
+
+    processorRef.current = null;
+    mediaStreamRef.current = null;
+    isRecordingRef.current = false;
+    setIsRecording(false);
+
+    if (currentProcessor) {
+      currentProcessor.disconnect();
+    }
+    if (currentStream) {
+      currentStream.getTracks().forEach(track => track.stop());
+    }
+
+    if (notifyBackend && mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN) {
+      console.log('[VOICE_FRONTEND] Signaling user turn complete to backend');
+      socketRef.current.send(JSON.stringify({ type: 'realtimeInput', event: 'user_turn_complete' }));
+    }
+
+    if (mode === 'CHAT' && audioChunksRef.current.length > 0) {
+      console.log('Processing legacy audio buffer for CHAT mode');
+      const sampleRate = 16000;
+      const allSamples: number[] = [];
+      audioChunksRef.current.forEach(chunk => {
+        const ratio = (recordingContextRef.current?.sampleRate || 16000) / sampleRate;
+        for (let i = 0; i < chunk.length; i += ratio) {
+          allSamples.push(chunk[Math.floor(i)] * 32767);
+        }
+      });
+      const pcmData = new Int16Array(allSamples);
+      onSendAudio(new Uint8Array(pcmData.buffer));
+      audioChunksRef.current = [];
+    }
+  };
 
   // For Live Streaming Voice
   useEffect(() => {
@@ -412,7 +481,8 @@ export const InterviewStep: React.FC<{
             // If we were recording, stop it immediately as AI has priority
             if (isRecordingRef.current) {
               console.log('[VOICE_FRONTEND] Stopping recording due to AI incoming stream');
-                isSendingAudioRef.current = false;
+              isSendingAudioRef.current = false;
+              teardownRecording(false);
             }
           }
 
@@ -443,6 +513,11 @@ export const InterviewStep: React.FC<{
           console.log(`[VOICE_FRONTEND] AI Generation Finished: ${msg.event}`);
           aiTurnActiveRef.current = false;
           isSendingAudioRef.current = true;
+          if (playbackQueueRef.current.length === 0) {
+            isSpeakingRef.current = false;
+            setIsSpeaking(false);
+            queueResumeListening();
+          }
         } else if (msg.type === 'warning') {
           console.warn('AI Session Warning:', msg.data);
         } else if (msg.error) {
@@ -460,20 +535,18 @@ export const InterviewStep: React.FC<{
     socket.onerror = (error) => {
       console.error('WebSocket Error:', error);
       setConnectionStatus('error');
+      teardownRecording(false);
       isSpeakingRef.current = false;
-      isRecordingRef.current = false;
       setIsSpeaking(false);
-      setIsRecording(false);
     };
 
     socket.onclose = (event) => {
       console.log('WebSocket closed:', event.code, event.reason || 'No reason provided');
       setConnectionStatus('closed');
+      teardownRecording(false);
       isSpeakingRef.current = false;
-      isRecordingRef.current = false;
       aiTurnActiveRef.current = false;
       setIsSpeaking(false);
-      setIsRecording(false);
       
       // Cleanup contexts on close to prevent leaked resources/stuck states
       if (playbackContextRef.current) {
@@ -500,7 +573,12 @@ export const InterviewStep: React.FC<{
 
     return () => {
       clearInterval(heartbeat);
+      teardownRecording(false);
       socket.close();
+      if (resumeListeningTimeoutRef.current) {
+        window.clearTimeout(resumeListeningTimeoutRef.current);
+        resumeListeningTimeoutRef.current = null;
+      }
       if (playbackContextRef.current) {
         playbackContextRef.current.close().catch(console.error);
         playbackContextRef.current = null;
@@ -572,6 +650,7 @@ export const InterviewStep: React.FC<{
           if (!aiTurnActiveRef.current) {
             isSpeakingRef.current = false;
             setIsSpeaking(false);
+            queueResumeListening();
           }
         }
       };
@@ -657,11 +736,19 @@ export const InterviewStep: React.FC<{
         clearTimeout(silenceTimeoutRef.current);
         silenceTimeoutRef.current = null;
       }
+      if (resumeListeningTimeoutRef.current) {
+        window.clearTimeout(resumeListeningTimeoutRef.current);
+        resumeListeningTimeoutRef.current = null;
+      }
     };
   }, [history.length, mode]);
 
   const startRecording = async () => {
     setLiveTranscription(""); // Reset for new turn
+    if (resumeListeningTimeoutRef.current) {
+      window.clearTimeout(resumeListeningTimeoutRef.current);
+      resumeListeningTimeoutRef.current = null;
+    }
     // Use refs for the guard to avoid stale closure issues
     if (isRecordingRef.current || isSpeakingRef.current) {
       console.log('[VOICE_DEBUG] startRecording blocked:', { isRecording: isRecordingRef.current, isSpeaking: isSpeakingRef.current });
@@ -755,9 +842,10 @@ export const InterviewStep: React.FC<{
       };
 
       source.connect(workletNode);
-      setMediaStream(stream);
-      setProcessor(workletNode);
+      mediaStreamRef.current = stream;
+      processorRef.current = workletNode;
       isRecordingRef.current = true;
+      isSendingAudioRef.current = true;
       setIsRecording(true);
 
       // Organic VAD Logic
@@ -772,8 +860,6 @@ export const InterviewStep: React.FC<{
         let lastSpeakTime = Date.now();
         // Documentation Match: Increase threshold to avoid background-noise interruptions
         const SILENCE_THRESHOLD = 15; 
-        // Documentation Match: Increase duration threshold to avoid overly eager turn-taking during organic pauses
-        const SILENCE_DURATION = 2000; // Increased from 1200ms based on testing
         const MAX_RECORDING_TIME = 120000;
 
         silenceTimeoutRef.current = setTimeout(() => {
@@ -844,49 +930,7 @@ export const InterviewStep: React.FC<{
   };
 
   const stopRecording = (manual = false) => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-    if (silenceTimeoutRef.current) {
-      clearTimeout(silenceTimeoutRef.current);
-      silenceTimeoutRef.current = null;
-    }
-
-    // Update the ref immediately so other closures see the change right away
-    isRecordingRef.current = false;
-
-    if (mediaStream && processor) {
-      processor.disconnect();
-      mediaStream.getTracks().forEach(track => track.stop());
-
-      // Notify backend that user turn is complete ONLY if not a manual stop (which implies user might speak again)
-      // and if we are in VOICE mode.
-      if (mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN && !manual) {
-        console.log("[VOICE_FRONTEND] User turn complete (manual stop not triggered), signaling backend");
-        socketRef.current.send(JSON.stringify({ type: 'realtimeInput', event: 'user_turn_complete' }));
-      }
-
-      if (mode === 'CHAT' && audioChunksRef.current.length > 0) {
-        // Handle legacy buffer only for CHAT mode audio capture
-        console.log('Processing legacy audio buffer for CHAT mode');
-        const sampleRate = 16000;
-        const allSamples: number[] = [];
-        audioChunksRef.current.forEach(chunk => {
-          const ratio = (recordingContextRef.current?.sampleRate || 16000) / sampleRate;
-          for (let i = 0; i < chunk.length; i += ratio) {
-            allSamples.push(chunk[Math.floor(i)] * 32767);
-          }
-        });
-        const pcmData = new Int16Array(allSamples);
-        onSendAudio(new Uint8Array(pcmData.buffer));
-        audioChunksRef.current = []; // Clear for next time
-      }
-
-      setMediaStream(null);
-      setProcessor(null);
-      setIsRecording(false);
-    }
+    teardownRecording(!manual);
   };
 
   const handleMicClick = async () => {
@@ -920,6 +964,7 @@ export const InterviewStep: React.FC<{
       isSpeakingRef.current = false;
       aiTurnActiveRef.current = false;
       setIsSpeaking(false);
+      socketRef.current?.send(JSON.stringify({ type: 'realtimeInput', event: 'interrupt' }));
       startRecording();
       return;
     }
@@ -994,7 +1039,7 @@ export const InterviewStep: React.FC<{
           
           <button
             onClick={handleMicClick}
-            disabled={isLoading || isSpeaking}
+            disabled={isLoading}
             className={`relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-500 shadow-xl ${
               isRecording 
                 ? 'bg-red-500 text-white scale-110 shadow-red-200' 
