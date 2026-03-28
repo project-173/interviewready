@@ -856,6 +856,12 @@ export const InterviewStep: React.FC<{
       processor.disconnect();
       mediaStream.getTracks().forEach(track => track.stop());
 
+      // Notify backend that user turn is complete
+      if (mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN) {
+        console.log('[VOICE_FRONTEND] User turn complete, signaling backend');
+        socketRef.current.send(JSON.stringify({ type: 'realtimeInput', event: 'user_turn_complete' }));
+      }
+
       if (mode === 'CHAT' && audioChunksRef.current.length > 0) {
         // Handle legacy buffer only for CHAT mode audio capture
         console.log('Processing legacy audio buffer for CHAT mode');

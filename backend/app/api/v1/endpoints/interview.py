@@ -186,6 +186,19 @@ async def interview_live_websocket(
                                     except Exception as clear_e:
                                         logger.warning(f"Failed to send explicit clear to Gemini: {clear_e}")
                                     continue
+                                elif msg.get("event") == "user_turn_complete":
+                                    logger.info("[VOICE_BACKEND] Client signaled user turn complete. Triggering AI response...")
+                                    # Explicitly signal Gemini that the user's turn is done
+                                    try:
+                                        await session.send(types.LiveClientContent(
+                                            data=types.ClientContent(
+                                                turns=[],
+                                                turn_complete=True
+                                            )
+                                        ))
+                                    except Exception as turn_e:
+                                        logger.warning(f"Failed to send turn_complete to Gemini: {turn_e}")
+                                    continue
                                 elif msg.get("event") == "ping":
                                     await websocket.send_json({"event": "pong"})
                                     continue
