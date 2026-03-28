@@ -3,7 +3,7 @@
 import os
 import json
 import re
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from google import genai
 from google.genai import types
 from ..models.session import SessionContext
@@ -69,31 +69,113 @@ class GeminiService:
         Returns:
             Generated response text
         """
+        response, _ = self.generate_response_with_usage(
+            system_prompt=system_prompt,
+            user_input=user_input,
+            context=context,
+            temperature=temperature,
+        )
+        return response
+
+    def generate_response_with_usage(
+        self,
+        system_prompt: str,
+        user_input: str,
+        context: Optional[SessionContext] = None,
+        temperature: Optional[float] = None,
+    ) -> Tuple[str, Optional[Dict[str, int]]]:
+        """Generate response from Gemini and return usage if available.
+
+        Args:
+            system_prompt: System prompt for the model
+            user_input: User input text
+            context: Optional session context
+            temperature: Optional generation temperature
+
+        Returns:
+            Tuple of (response text, usage details) where usage details may be None.
+        """
         # Return mock response if in mock mode
         if self.mock_mode:
-            return self._generate_mock_response(system_prompt, user_input)
-
-        # Construct the full prompt
-        user_message = self._construct_user_message(user_input, context)
+            return self._generate_mock_response(system_prompt, user_input), None
 
         try:
-            config_kwargs = {
-                "system_instruction": system_prompt,
-                "max_output_tokens": MAX_OUTPUT_TOKENS,
-            }
-            if temperature is not None:
-                config_kwargs["temperature"] = temperature
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=user_message,
-                config=types.GenerateContentConfig(**config_kwargs),
+            response = self._generate_content(
+                system_prompt=system_prompt,
+                user_input=user_input,
+                context=context,
+                temperature=temperature,
             )
-            return response.text
+            usage = self._extract_usage(response)
+            return response.text, usage
         except Exception as e:
             from ..core.logging import logger
 
             logger.error(f"Gemini API call failed: {str(e)}")
-            return f"Error calling Gemini API: {str(e)}"
+            return f"Error calling Gemini API: {str(e)}", None
+
+    def _generate_content(
+        self,
+        system_prompt: str,
+        user_input: str,
+        context: Optional[SessionContext] = None,
+        temperature: Optional[float] = None,
+    ) -> Any:
+        user_message = self._construct_user_message(user_input, context)
+        config_kwargs = {
+            "system_instruction": system_prompt,
+            "max_output_tokens": MAX_OUTPUT_TOKENS,
+        }
+        if temperature is not None:
+            config_kwargs["temperature"] = temperature
+        return self.client.models.generate_content(
+            model=self.model_name,
+            contents=user_message,
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+
+    def _extract_usage(self, response: Any) -> Optional[Dict[str, int]]:
+        usage = getattr(response, "usage_metadata", None) or getattr(
+            response, "usage", None
+        )
+        if usage is None:
+            return None
+
+        def _get_value(keys: List[str]) -> Optional[int]:
+            for key in keys:
+                if isinstance(usage, dict) and key in usage:
+                    return _to_int(usage.get(key))
+                if hasattr(usage, key):
+                    return _to_int(getattr(usage, key))
+            return None
+
+        def _to_int(value: Any) -> Optional[int]:
+            if value is None:
+                return None
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        prompt_tokens = _get_value(
+            ["prompt_token_count", "prompt_tokens", "input_tokens"]
+        )
+        completion_tokens = _get_value(
+            ["candidates_token_count", "completion_tokens", "output_tokens"]
+        )
+        total_tokens = _get_value(["total_token_count", "total_tokens"])
+        if total_tokens is None and prompt_tokens is not None and completion_tokens is not None:
+            total_tokens = prompt_tokens + completion_tokens
+
+        usage_details: Dict[str, int] = {}
+        if prompt_tokens is not None:
+            usage_details["prompt_tokens"] = prompt_tokens
+        if completion_tokens is not None:
+            usage_details["completion_tokens"] = completion_tokens
+        if total_tokens is not None:
+            usage_details["total_tokens"] = total_tokens
+
+        return usage_details or None
 
     def _generate_mock_response(self, system_prompt: str, user_input: str) -> str:
         """Generate a mock response based on the system prompt.

@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
 from langfuse import get_client
 
+from app.core.config import settings
 from app.core.logging import logger
 from app.agents.eval_rubrics import JUDGE_TEMPERATURE, get_rubric
 
@@ -92,12 +93,21 @@ Provide a JSON response with:
         system_prompt = self._build_system_prompt(agent_name)
 
         try:
-            response = self.gemini_service.generate_response(
-                system_prompt=system_prompt,
-                user_input=judge_input,
-                context=None,
-                temperature=self.temperature,
-            )
+            usage_details: Optional[Dict[str, int]] = None
+            if hasattr(self.gemini_service, "generate_response_with_usage"):
+                response, usage_details = self.gemini_service.generate_response_with_usage(
+                    system_prompt=system_prompt,
+                    user_input=judge_input,
+                    context=None,
+                    temperature=self.temperature,
+                )
+            else:
+                response = self.gemini_service.generate_response(
+                    system_prompt=system_prompt,
+                    user_input=judge_input,
+                    context=None,
+                    temperature=self.temperature,
+                )
 
             evaluation = self._parse_judge_response(response)
 
@@ -110,6 +120,18 @@ Provide a JSON response with:
                     session_id=session_id,
                     run_name=run_name,
                 )
+                if usage_details:
+                    self._log_usage_to_langfuse(
+                        trace_id=trace_id,
+                        agent_name=agent_name,
+                        usage_details=usage_details,
+                        system_prompt=system_prompt,
+                        judge_input=judge_input,
+                        response_text=response,
+                        intent=intent,
+                        session_id=session_id,
+                        run_name=run_name,
+                    )
 
             logger.info(
                 "LLM-as-a-judge completed",
@@ -199,6 +221,119 @@ Provide your evaluation as valid JSON."""
             reasoning=parsed.get("reasoning", "No reasoning provided"),
             concerns=parsed.get("concerns", []),
         )
+
+    def _build_cost_details(
+        self, usage_details: Dict[str, int]
+    ) -> Optional[Dict[str, float]]:
+        prompt_rate = settings.JUDGE_PROMPT_COST_PER_1K_USD
+        completion_rate = settings.JUDGE_COMPLETION_COST_PER_1K_USD
+        if prompt_rate is None and completion_rate is None:
+            return None
+
+        cost_details: Dict[str, float] = {}
+        total_cost = 0.0
+
+        prompt_tokens = usage_details.get("prompt_tokens")
+        completion_tokens = usage_details.get("completion_tokens")
+
+        if prompt_rate is not None and prompt_tokens is not None:
+            cost_details["prompt"] = (prompt_tokens / 1000.0) * prompt_rate
+            total_cost += cost_details["prompt"]
+        if completion_rate is not None and completion_tokens is not None:
+            cost_details["completion"] = (completion_tokens / 1000.0) * completion_rate
+            total_cost += cost_details["completion"]
+
+        cost_details["total"] = total_cost
+        return cost_details
+
+    def _log_usage_to_langfuse(
+        self,
+        trace_id: str,
+        agent_name: str,
+        usage_details: Dict[str, int],
+        system_prompt: str,
+        judge_input: str,
+        response_text: str,
+        intent: Optional[str] = None,
+        session_id: Optional[str] = None,
+        run_name: Optional[str] = None,
+    ) -> None:
+        if not usage_details:
+            return
+
+        metadata = {
+            "agent": agent_name,
+            "evaluator": "llm-as-a-judge",
+        }
+        if intent:
+            metadata["intent"] = intent
+        if session_id:
+            metadata["session_id"] = session_id
+        if run_name:
+            metadata["run_name"] = run_name
+
+        model_name = getattr(self.gemini_service, "model_name", None)
+        cost_details = self._build_cost_details(usage_details)
+        input_payload = {
+            "system_prompt": system_prompt[:2000],
+            "user_prompt": judge_input[:4000],
+        }
+        output_payload = (response_text or "")[:4000]
+
+        try:
+            current_trace_id = self.langfuse.get_current_trace_id()
+        except Exception:
+            current_trace_id = None
+
+        if current_trace_id == trace_id:
+            try:
+                generation_metadata = {
+                    **metadata,
+                    "usage_details": usage_details,
+                }
+                if cost_details is not None:
+                    generation_metadata["cost_details"] = cost_details
+
+                self.langfuse.update_current_generation(
+                    name="llm_judge",
+                    input=input_payload,
+                    output=output_payload,
+                    metadata=generation_metadata,
+                    model=model_name,
+                    usage_details=usage_details,
+                    cost_details=cost_details,
+                )
+                return
+            except Exception as e:
+                logger.warning(
+                    "Failed to update judge generation usage in Langfuse",
+                    error=str(e),
+                    trace_id=trace_id,
+                )
+
+        try:
+            event_metadata: Dict[str, Any] = {
+                **metadata,
+                "usage_details": usage_details,
+            }
+            if cost_details is not None:
+                event_metadata["cost_details"] = cost_details
+            if model_name:
+                event_metadata["model"] = model_name
+
+            self.langfuse.create_event(
+                trace_context={"trace_id": trace_id},
+                name="llm_judge_generation",
+                input=input_payload,
+                output=output_payload,
+                metadata=event_metadata,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to log judge usage to Langfuse",
+                error=str(e),
+                trace_id=trace_id,
+            )
 
     def _log_scores_to_langfuse(
         self,

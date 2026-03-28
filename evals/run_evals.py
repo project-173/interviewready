@@ -197,70 +197,30 @@ def _run_manual(
     return results
 
 
-def _run_experiment(
-    *,
-    cases,
-    langfuse,
-    judge,
-    gemini_service,
-    run_name: str,
-) -> Any:
-    from langfuse.experiment import Evaluation
-
-    case_map = {case.id: case for case in cases}
-    data = []
-    for case in cases:
-        data.append(
-            {
-                "input": {
-                    "case_id": case.id,
-                    "agent": case.agent,
-                    "intent": case.intent,
-                    "input_summary": build_input_summary(case),
-                },
-                "metadata": {
-                    "case_id": case.id,
-                    "agent": case.agent,
-                    "intent": case.intent,
-                    "tags": case.tags,
-                    "edge_case": case.edge_case,
-                    "fixture_ids": case.fixture_ids,
-                },
-            }
-        )
-
+def _make_task(case_map: Dict[str, ResolvedEvalCase], gemini_service):
     def task(*, item, **kwargs):
-        metadata = item.get("metadata") if isinstance(item, dict) else None
-        case_id = None
-        if metadata:
-            case_id = metadata.get("case_id")
-        if not case_id and isinstance(item, dict):
-            case_id = item.get("input", {}).get("case_id")
-        if not case_id or case_id not in case_map:
-            raise ValueError("Missing case_id for experiment item")
-
-        case = case_map[case_id]
-        agent_class = AGENT_CLASSES[case.agent]
-        agent = agent_class(gemini_service)
-        input_data = build_agent_input(case)
-        context = build_session_context(case)
-
-        response = agent.process(input_data, context)
+        case = _resolve_case_from_item(item, case_map)
+        ctx = build_session_context(case)
+        agent = AGENT_CLASSES[case.agent](gemini_service)
+        response = agent.process(build_agent_input(case), ctx)
         return {
             "case_id": case.id,
             "agent": case.agent,
             "intent": case.intent,
-            "session_id": context.session_id,
+            "session_id": ctx.session_id,
             "message_history": case.message_history,
             "input_summary": build_input_summary(case),
             "output": response.content or "",
         }
 
-    def evaluator(*, input, output, expected_output=None, metadata=None, **kwargs):
+    return task
+
+
+def _make_evaluator(judge, run_name: str):
+    from langfuse.experiment import Evaluation
+
+    def evaluator(*, input, output, **kwargs):
         try:
-            per_agent_run_name = _build_run_name(
-                output.get("agent", "unknown"), None
-            )
             evaluation = judge.evaluate(
                 agent_name=output.get("agent", "unknown"),
                 input_data=output.get("input_summary", ""),
@@ -269,32 +229,18 @@ def _run_experiment(
                 intent=output.get("intent"),
                 session_id=output.get("session_id"),
                 message_history=output.get("message_history"),
-                run_name=per_agent_run_name,
+                run_name=_build_run_name(output.get("agent", "unknown"), None),
             )
             reason = (evaluation.reasoning or "")[:200]
             meta = {
                 "case_id": output.get("case_id"),
                 "agent": output.get("agent"),
+                "batch_run_name": run_name,
             }
             return [
-                Evaluation(
-                    name="judge_quality_score",
-                    value=evaluation.quality_score,
-                    comment=reason,
-                    metadata={**meta, "batch_run_name": run_name},
-                ),
-                Evaluation(
-                    name="judge_accuracy_score",
-                    value=evaluation.accuracy_score,
-                    comment=reason,
-                    metadata={**meta, "batch_run_name": run_name},
-                ),
-                Evaluation(
-                    name="judge_helpfulness_score",
-                    value=evaluation.helpfulness_score,
-                    comment=reason,
-                    metadata={**meta, "batch_run_name": run_name},
-                ),
+                Evaluation(name="judge_quality_score", value=evaluation.quality_score, comment=reason, metadata=meta),
+                Evaluation(name="judge_accuracy_score", value=evaluation.accuracy_score, comment=reason, metadata=meta),
+                Evaluation(name="judge_helpfulness_score", value=evaluation.helpfulness_score, comment=reason, metadata=meta),
             ]
         except Exception as exc:
             return Evaluation(
@@ -304,11 +250,25 @@ def _run_experiment(
                 metadata={"case_id": output.get("case_id")},
             )
 
-    return langfuse.run_experiment(
+    return evaluator
+
+
+def _run_experiment(
+    *,
+    cases,
+    langfuse,
+    judge,
+    gemini_service,
+    run_name: str,
+    dataset=None,
+) -> Any:
+    case_map = {case.id: case for case in cases}
+    task = _make_task(case_map, gemini_service)
+    evaluator = _make_evaluator(judge, run_name)
+    common_kwargs = dict(
         name="LLM Judge Eval",
         run_name=run_name,
         description="Offline LLM-as-judge batch evaluation run",
-        data=data,
         task=task,
         evaluators=[evaluator],
         max_concurrency=1,
@@ -318,102 +278,34 @@ def _run_experiment(
         },
     )
 
+    if dataset:
+        # No --max-cases: let Langfuse control which items run
+        return dataset.run_experiment(**common_kwargs)
 
-def _run_experiment_dataset(
-    *,
-    dataset,
-    case_map: Dict[str, ResolvedEvalCase],
-    langfuse,
-    judge,
-    gemini_service,
-    run_name: str,
-) -> Any:
-    from langfuse.experiment import Evaluation
-
-    def task(*, item, **kwargs):
-        case = _resolve_case_from_item(item, case_map)
-        agent_class = AGENT_CLASSES[case.agent]
-        agent = agent_class(gemini_service)
-        input_data = build_agent_input(case)
-        context = build_session_context(case)
-
-        response = agent.process(input_data, context)
-        return {
-            "case_id": case.id,
-            "agent": case.agent,
-            "intent": case.intent,
-            "session_id": context.session_id,
-            "message_history": case.message_history,
-            "input_summary": build_input_summary(case),
-            "output": response.content or "",
+    # --max-cases or no dataset: build inline data from local cases
+    data = [
+        {
+            "input": {
+                "case_id": case.id,
+                "agent": case.agent,
+                "intent": case.intent,
+                "input_summary": build_input_summary(case),
+            },
+            "metadata": {
+                "case_id": case.id,
+                "agent": case.agent,
+                "intent": case.intent,
+                "tags": case.tags,
+                "edge_case": case.edge_case,
+                "fixture_ids": case.fixture_ids,
+            },
         }
-
-    def evaluator(*, input, output, expected_output=None, metadata=None, **kwargs):
-        try:
-            per_agent_run_name = _build_run_name(output.get("agent", "unknown"), None)
-            evaluation = judge.evaluate(
-                agent_name=output.get("agent", "unknown"),
-                input_data=output.get("input_summary", ""),
-                output=output.get("output", ""),
-                trace_id=None,
-                intent=output.get("intent"),
-                session_id=output.get("session_id"),
-                message_history=output.get("message_history"),
-                run_name=per_agent_run_name,
-            )
-            reason = (evaluation.reasoning or "")[:200]
-            meta = {
-                "case_id": output.get("case_id"),
-                "agent": output.get("agent"),
-                "batch_run_name": run_name,
-            }
-            return [
-                Evaluation(
-                    name="judge_quality_score",
-                    value=evaluation.quality_score,
-                    comment=reason,
-                    metadata=meta,
-                ),
-                Evaluation(
-                    name="judge_accuracy_score",
-                    value=evaluation.accuracy_score,
-                    comment=reason,
-                    metadata=meta,
-                ),
-                Evaluation(
-                    name="judge_helpfulness_score",
-                    value=evaluation.helpfulness_score,
-                    comment=reason,
-                    metadata=meta,
-                ),
-            ]
-        except Exception as exc:
-            return Evaluation(
-                name="judge_eval_error",
-                value=0,
-                comment=str(exc),
-                metadata={"case_id": output.get("case_id")},
-            )
-
-    return dataset.run_experiment(
-        name="LLM Judge Eval",
-        run_name=run_name,
-        description="Offline LLM-as-judge batch evaluation run",
-        task=task,
-        evaluators=[evaluator],
-        max_concurrency=1,
-        metadata={
-            "dataset_version": _read_dataset_version(),
-        },
-    )
+        for case in cases
+    ]
+    return langfuse.run_experiment(data=data, **common_kwargs)
 
 
-def _sync_langfuse_dataset(
-    *,
-    langfuse,
-    dataset_name: str,
-    cases,
-) -> None:
+def _sync_langfuse_dataset(*, langfuse, dataset_name: str, cases) -> None:
     try:
         langfuse.create_dataset(
             name=dataset_name,
@@ -439,12 +331,11 @@ def _sync_langfuse_dataset(
             "context_shared_memory": case.context_shared_memory,
             "fixture_ids": case.fixture_ids,
         }
-        dataset_item_id = f"{dataset_name}:{case.id}"
         langfuse.create_dataset_item(
             dataset_name=dataset_name,
             input={"case_id": case.id, "case": payload},
             metadata={"case_id": case.id, "agent": case.agent},
-            id=dataset_item_id,
+            id=f"{dataset_name}:{case.id}",
         )
     print(f"Uploaded {len(cases)} items to Langfuse dataset '{dataset_name}'")
 
@@ -457,6 +348,7 @@ def main() -> None:
     parser.add_argument("--trace-id", help="Optional Langfuse trace ID")
     parser.add_argument("--warn-stale-days", type=int, default=60)
     parser.add_argument("--langfuse-dataset", help="Langfuse dataset name")
+    parser.add_argument("--sync-langfuse-dataset", help="Upload local cases to Langfuse dataset")
     args = parser.parse_args()
 
     agents_filter = _parse_agents(args.agent)
@@ -504,35 +396,33 @@ def main() -> None:
 
             langfuse = Langfuse()
             batch_run_name = _build_batch_run_name(args.run_name)
-            case_map = {case.id: case for case in cases}
-            if args.langfuse_dataset:
-                dataset = langfuse.get_dataset(args.langfuse_dataset)
-                result = _run_experiment_dataset(
-                    dataset=dataset,
-                    case_map=case_map,
+
+            if args.sync_langfuse_dataset:
+                _sync_langfuse_dataset(
                     langfuse=langfuse,
-                    judge=judge,
-                    gemini_service=gemini_service,
-                    run_name=batch_run_name,
-                )
-            else:
-                result = _run_experiment(
+                    dataset_name=args.sync_langfuse_dataset,
                     cases=cases,
-                    langfuse=langfuse,
-                    judge=judge,
-                    gemini_service=gemini_service,
-                    run_name=batch_run_name,
                 )
+
+            dataset_name = args.langfuse_dataset or args.sync_langfuse_dataset
+            use_dataset = dataset_name and not args.max_cases
+            dataset = langfuse.get_dataset(dataset_name) if use_dataset else None
+
+            result = _run_experiment(
+                cases=cases,
+                langfuse=langfuse,
+                judge=judge,
+                gemini_service=gemini_service,
+                run_name=batch_run_name,
+                dataset=dataset,
+            )
 
             print("\nSummary")
             print(f"Cases run: {len(result.item_results)}")
-            failures = [
-                r for r in result.item_results if not r.evaluations
-            ]
+            failures = [r for r in result.item_results if not r.evaluations]
             print(f"Failures: {len(failures)}")
             for item_result in result.item_results:
-                item = item_result.item
-                case_id = _case_id_from_item(item)
+                case_id = _case_id_from_item(item_result.item)
                 evals = {e.name: e.value for e in item_result.evaluations}
                 if evals:
                     print(
@@ -544,7 +434,10 @@ def main() -> None:
                 else:
                     print(f"[FAIL] {case_id} no evaluations")
 
-            # Backfill trace-level scores using experiment evaluations
+            # Backfill trace-level scores
+            backfilled_count = 0
+            backfilled_traces: set = set()
+            backfill_failures = 0
             for item_result in result.item_results:
                 if not item_result.trace_id:
                     continue
@@ -556,11 +449,25 @@ def main() -> None:
                             trace_id=item_result.trace_id,
                             metadata=evaluation.metadata,
                         )
-                    except Exception as exc:
+                        backfilled_count += 1
+                        backfilled_traces.add(item_result.trace_id)
                         print(
-                            "Failed to attach score to trace "
-                            f"{item_result.trace_id}: {exc}"
+                            f"[BACKFILL] trace={item_result.trace_id} "
+                            f"score={evaluation.name} value={evaluation.value}"
                         )
+                    except Exception as exc:
+                        backfill_failures += 1
+                        print(f"Failed to attach score to trace {item_result.trace_id}: {exc}")
+
+            print(f"Scores backfilled: {backfilled_count} across {len(backfilled_traces)} trace(s)")
+            if backfill_failures:
+                print(f"Backfill failures: {backfill_failures}")
+
+            try:
+                langfuse.flush()
+                print("Langfuse flush complete")
+            except Exception as exc:
+                print(f"Langfuse flush failed: {exc}")
 
             if result.dataset_run_url:
                 print(f"Langfuse experiment: {result.dataset_run_url}")
