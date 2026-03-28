@@ -8,7 +8,6 @@ os.environ["DEBUG"] = "false"
 os.environ.setdefault("GEMINI_API_KEY", "test-gemini-api-key")
 
 from app.main import app
-from app.api.v1.endpoints.interview import _should_auto_close_turn
 from app.models import AgentResponse, ChatRequest
 
 
@@ -167,37 +166,3 @@ def test_chat_rejects_invalid_intent():
     )
 
     assert response.status_code == 422
-
-
-def test_auto_turn_close_only_triggers_for_real_idle_user_turns():
-    assert _should_auto_close_turn(
-        now=10.0,
-        last_audio_time=7.0,
-        last_turn_close_time=0.0,
-        user_audio_seen=True,
-        awaiting_model_response=False,
-    ) is True
-
-    assert _should_auto_close_turn(
-        now=10.0,
-        last_audio_time=7.0,
-        last_turn_close_time=8.0,
-        user_audio_seen=True,
-        awaiting_model_response=False,
-    ) is False
-
-    assert _should_auto_close_turn(
-        now=10.0,
-        last_audio_time=7.0,
-        last_turn_close_time=0.0,
-        user_audio_seen=False,
-        awaiting_model_response=False,
-    ) is False
-
-    assert _should_auto_close_turn(
-        now=10.0,
-        last_audio_time=7.0,
-        last_turn_close_time=0.0,
-        user_audio_seen=True,
-        awaiting_model_response=True,
-    ) is False

@@ -373,8 +373,8 @@ export const InterviewStep: React.FC<{
     }
 
     if (notifyBackend && mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN) {
-      console.log('[VOICE_FRONTEND] Signaling user turn complete to backend');
-      socketRef.current.send(JSON.stringify({ type: 'realtimeInput', event: 'user_turn_complete' }));
+      console.log('[VOICE_FRONTEND] Signaling audio stream end to backend');
+      socketRef.current.send(JSON.stringify({ type: 'realtimeInput', event: 'audio_stream_end' }));
     }
 
     if (mode === 'CHAT' && audioChunksRef.current.length > 0) {
@@ -869,6 +869,11 @@ export const InterviewStep: React.FC<{
 
         const checkSilence = () => {
           if (!stream.active) return;
+          if (socketRef.current?.readyState !== WebSocket.OPEN) {
+            console.log('[VOICE_FRONTEND] Stopping VAD because websocket is no longer open');
+            teardownRecording(false);
+            return;
+          }
           
           // If AI started speaking, we keep the mic open for "Organic" feel
           // but we can dampen it or ignore VAD events locally.
@@ -908,12 +913,8 @@ export const InterviewStep: React.FC<{
                 ) {
                     console.log("[VOICE] Silence → turn complete");
 
-                    socketRef.current?.send(JSON.stringify({
-                        type: "realtimeInput",
-                        event: "user_turn_complete"
-                    }));
-
-                    lastSpeakTime = Date.now() + 999999; // Effectively disable further turn_complete for this silence period
+                    stopRecording();
+                    return;
                 }
             }
           

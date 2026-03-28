@@ -1,7 +1,6 @@
 import asyncio
 import base64
 import json
-import time
 from typing import Annotated
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
@@ -13,26 +12,7 @@ from app.core.config import settings
 from app.core.logging import logger
 
 router = APIRouter()
-
-
-def _should_auto_close_turn(
-    *,
-    now: float,
-    last_audio_time: float,
-    last_turn_close_time: float,
-    user_audio_seen: bool,
-    awaiting_model_response: bool,
-    idle_seconds: float = 2.0,
-    cooldown_seconds: float = 3.0,
-) -> bool:
-    """Return whether the backend should force-close the user's turn."""
-
-    return (
-        user_audio_seen
-        and not awaiting_model_response
-        and now - last_audio_time > idle_seconds
-        and now - last_turn_close_time > cooldown_seconds
-    )
+LIVE_MODEL = "gemini-3.1-flash-live-preview"
 
 
 @router.websocket("/live")
@@ -97,10 +77,23 @@ async def interview_live_websocket(
         )
 
         async with client.aio.live.connect(
-            model="gemini-3.1-flash-live-preview",
+            model=LIVE_MODEL,
             config=types.LiveConnectConfig(
                 system_instruction=system_instruction_content,
                 response_modalities=[types.Modality.AUDIO],
+                input_audio_transcription=types.AudioTranscriptionConfig(),
+                output_audio_transcription=types.AudioTranscriptionConfig(),
+                speech_config=types.SpeechConfig(
+                    language_code="en-US",
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name="Aoede"
+                        )
+                    ),
+                ),
+                thinking_config=types.ThinkingConfig(
+                    thinking_level=types.ThinkingLevel.MINIMAL
+                ),
                 context_window_compression=types.ContextWindowCompressionConfig(
                     sliding_window=types.SlidingWindow(),
                 ),
@@ -113,46 +106,11 @@ async def interview_live_websocket(
                 }
             )
 
-            last_audio_time = time.time()
-            last_turn_close_time = 0.0
-            user_audio_seen = False
             awaiting_model_response = True
-
-            async def send_turn_close(reason: str) -> None:
-                """Tell Gemini the user turn is complete at most once per turn."""
-
-                nonlocal last_turn_close_time, user_audio_seen, awaiting_model_response
-
-                if awaiting_model_response or not user_audio_seen:
-                    logger.debug(
-                        "[VOICE_BACKEND] Skipping turn close",
-                        extra={
-                            "reason": reason,
-                            "awaiting_model_response": awaiting_model_response,
-                            "user_audio_seen": user_audio_seen,
-                        },
-                    )
-                    return
-
-                await session.send(
-                    types.LiveClientMessage(
-                        client_content=types.LiveClientContent(
-                            turn_complete=True,
-                            turns=[],
-                        )
-                    )
-                )
-                last_turn_close_time = time.time()
-                user_audio_seen = False
-                awaiting_model_response = True
-                logger.info(f"[VOICE_BACKEND] Sent turn complete to Gemini ({reason})")
-
-            await session.send(
-                types.LiveClientMessage(
-                    client_content=types.LiveClientContent(
-                        turn_complete=True,
-                        turns=[],
-                    )
+            await session.send_realtime_input(
+                text=(
+                    "Start the live mock interview now. "
+                    "Greet the candidate, mention the role, and ask the first question."
                 )
             )
 
@@ -264,15 +222,13 @@ async def interview_live_websocket(
                 """Relay browser audio/control messages to Gemini."""
 
                 chunk_in_count = 0
-                nonlocal last_audio_time, user_audio_seen, awaiting_model_response
+                nonlocal awaiting_model_response
 
                 try:
                     while True:
                         data = await websocket.receive()
 
                         if data.get("bytes"):
-                            last_audio_time = time.time()
-                            user_audio_seen = True
                             awaiting_model_response = False
                             audio_bytes = data["bytes"]
                             chunk_in_count += 1
@@ -302,8 +258,6 @@ async def interview_live_websocket(
 
                         if msg.get("type") == "realtimeInput" and msg.get("audioData"):
                             audio_bytes = base64.b64decode(msg["audioData"])
-                            last_audio_time = time.time()
-                            user_audio_seen = True
                             awaiting_model_response = False
                             await session.send_realtime_input(
                                 audio=types.Blob(
@@ -316,22 +270,15 @@ async def interview_live_websocket(
                         if event_type == "interrupt":
                             logger.info("[VOICE_BACKEND] Interrupt received")
                             awaiting_model_response = False
-                            await session.send(
-                                types.LiveClientMessage(
-                                    client_content=types.LiveClientContent(
-                                        turn_complete=True,
-                                        turns=[],
-                                    )
-                                )
-                            )
+                            # Gemini Live 3.1 handles interruption through incoming
+                            # realtime audio and server-side VAD. The client uses this
+                            # event only as a local synchronization signal.
                             continue
 
-                        if event_type == "user_turn_complete":
-                            logger.info(
-                                "[VOICE_BACKEND] Client signaled user turn complete. "
-                                "Triggering AI response..."
-                            )
-                            await send_turn_close("frontend_signal")
+                        if event_type == "audio_stream_end":
+                            logger.info("[VOICE_BACKEND] Audio stream end received")
+                            awaiting_model_response = True
+                            await session.send_realtime_input(audio_stream_end=True)
                             continue
 
                         if event_type == "ping":
@@ -350,34 +297,9 @@ async def interview_live_websocket(
                         {"error": f"Client communication error: {str(e)}"}
                     )
 
-            async def auto_turn_close() -> None:
-                """Fallback turn close when the frontend misses silence detection."""
-
-                nonlocal last_audio_time, last_turn_close_time, user_audio_seen, awaiting_model_response
-
-                while True:
-                    await asyncio.sleep(1)
-                    now = time.time()
-
-                    if _should_auto_close_turn(
-                        now=now,
-                        last_audio_time=last_audio_time,
-                        last_turn_close_time=last_turn_close_time,
-                        user_audio_seen=user_audio_seen,
-                        awaiting_model_response=awaiting_model_response,
-                    ):
-                        try:
-                            logger.debug(
-                                "[VOICE_BACKEND] Auto turn complete fallback triggered"
-                            )
-                            await send_turn_close("backend_fallback")
-                        except Exception as e:
-                            logger.error(f"Auto turn close error: {e}")
-
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(send_to_client())
                 tg.create_task(receive_from_client())
-                tg.create_task(auto_turn_close())
 
             logger.info(f"WebSocket disconnected for session {session_id}")
     except WebSocketDisconnect:
@@ -385,4 +307,8 @@ async def interview_live_websocket(
     except Exception as e:
         logger.error(f"WebSocket Error: {e}")
         if websocket.client_state.name != "DISCONNECTED":
-            await websocket.close()
+            try:
+                await websocket.send_json({"error": f"Voice session failed: {str(e)}"})
+            except Exception:
+                pass
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR, reason="Voice session failed")
