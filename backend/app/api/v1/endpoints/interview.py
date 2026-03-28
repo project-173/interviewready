@@ -2,7 +2,7 @@ import asyncio
 import json
 import base64
 from typing import Annotated
-
+import time
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
 from google import genai
 from google.genai import types
@@ -87,7 +87,12 @@ async def interview_live_websocket(
         ) as session:
             # Immediate feedback to frontend
             await websocket.send_json({"type": "textStream", "data": "Voice session active. AI is initializing..."})
-
+            await session.send(types.LiveClientMessage(
+                client_content=types.LiveClientContent(
+                    turn_complete=True,
+                    turns=[]
+                )
+            ))
             async def send_to_client():
                 """Relay ALL parts of Gemini messages safely."""
                 chunk_count = 0
@@ -152,16 +157,19 @@ async def interview_live_websocket(
 
             async def receive_from_client():
                 """Relay audio/text from Frontend to Gemini using send_realtime_input."""
+                chunk_in_count = 0
                 try:
                     while True:
                         data = await websocket.receive()
                         
                         # Handle binary audio chunks (PCM16 Little-Endian)
                         if "bytes" in data and data["bytes"]:
+                            last_audio_time = time.time()
                             audio_bytes = data["bytes"]
-                            # Log every ~50th chunk to avoid spamming
-                            if logger.isEnabledFor(10): # DEBUG
-                                logger.debug(f"[VOICE_BACKEND] Relaying {len(audio_bytes)} bytes of binary audio to Gemini")
+                            chunk_in_count += 1
+                            # Log every 50th chunk to avoid spamming
+                            if chunk_in_count % 50 == 0:
+                                logger.debug(f"[VOICE_BACKEND] Relaying chunk #{chunk_in_count} ({len(audio_bytes)} bytes) to Gemini")
                             
                             await session.send_realtime_input(
                                 audio=types.Blob(data=audio_bytes, mime_type="audio/pcm;rate=16000")
@@ -179,14 +187,7 @@ async def interview_live_websocket(
                                         audio=types.Blob(data=audio_bytes, mime_type="audio/pcm;rate=16000")
                                     )
                                 elif event_type == "interrupt":
-                                    logger.info("[VOICE_BACKEND] Client signaled interruption. Clearing Gemini session...")
-                                    # Clear current model generation turns
-                                    await session.send(types.LiveClientMessage(
-                                        realtime_input=types.LiveClientRealtimeInput(
-                                            media_chunks=[],
-                                        )
-                                    ))
-                                    # Also send an explicit turn_complete to reset the turn state
+                                    logger.info("[VOICE_BACKEND] Interrupt received")
                                     await session.send(types.LiveClientMessage(
                                         client_content=types.LiveClientContent(
                                             turn_complete=True,
@@ -216,24 +217,42 @@ async def interview_live_websocket(
                 except Exception as e:
                     logger.error(f"Error receiving from Client: {e}")
                     await websocket.send_json({"error": f"Client communication error: {str(e)}"})
+            last_sent_time = 0
+
+            async def auto_turn_close():
+                nonlocal last_audio_time, last_sent_time
+
+                while True:
+                    await asyncio.sleep(1)
+
+                    now = time.time()
+
+                    if (
+                        now - last_audio_time > 2.0 and
+                        now - last_sent_time > 3.0  # 🔥 cooldown
+                    ):
+                        try:
+                            logger.debug("[VOICE_BACKEND] Auto turn complete fallback triggered")
+
+                            await session.send(types.LiveClientMessage(
+                                client_content=types.LiveClientContent(
+                                    turn_complete=True,
+                                    turns=[]
+                                )
+                            ))
+
+                            last_sent_time = now
+
+                        except Exception as e:
+                            logger.error(f"Auto turn close error: {e}")
 
             # Run both relay loops using TaskGroup for robustness
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(send_to_client())
                 tg.create_task(receive_from_client())
+                tg.create_task(auto_turn_close())
                 
-                # Keep session alive with a periodic no-op if needed by infrastructure
-                while True:
-                    await asyncio.sleep(30)
-                    if websocket.client_state.name == "CONNECTED":
-                        try:
-                            # Backend-level keepalive if desired
-                            pass
-                        except:
-                            break
-                    else:
-                        break
-
+            logger.info(f"WebSocket disconnected for session {session_id}")
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for session {session_id}")
     except Exception as e:

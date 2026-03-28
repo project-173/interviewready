@@ -302,6 +302,7 @@ export const InterviewStep: React.FC<{
   const silenceTimeoutRef = React.useRef<any | null>(null);
   const socketRef = React.useRef<WebSocket | null>(null);
   const [liveTranscription, setLiveTranscription] = React.useState<string>("");
+  const isSendingAudioRef = React.useRef(true);
 
   // Refs to track current state inside stale closures (WebSocket handlers, timers, VAD)
   const aiTurnActiveRef = React.useRef(false);
@@ -395,7 +396,6 @@ export const InterviewStep: React.FC<{
         }
         
         console.log('[VOICE_FRONTEND] Received WebSocket message:', msg.type || msg.event || 'unknown');
-
         if (msg.type === 'audioStream') {
           const float32Data = base64ToFloat32(msg.data);
           playbackQueueRef.current.push(float32Data);
@@ -412,7 +412,7 @@ export const InterviewStep: React.FC<{
             // If we were recording, stop it immediately as AI has priority
             if (isRecordingRef.current) {
               console.log('[VOICE_FRONTEND] Stopping recording due to AI incoming stream');
-              stopRecording();
+                isSendingAudioRef.current = false;
             }
           }
 
@@ -442,10 +442,7 @@ export const InterviewStep: React.FC<{
           // AI finished its generation turn
           console.log(`[VOICE_FRONTEND] AI Generation Finished: ${msg.event}`);
           aiTurnActiveRef.current = false;
-          
-          // No-op: We rely on server-side VAD and continuous microphone stream.
-          // The microphone remains open as long as the AI is not speaking.
-          // Handled via the checkSilence loop in startRecording.
+          isSendingAudioRef.current = true;
         } else if (msg.type === 'warning') {
           console.warn('AI Session Warning:', msg.data);
         } else if (msg.error) {
@@ -549,12 +546,6 @@ export const InterviewStep: React.FC<{
         setIsSpeaking(true);
     }
 
-    // Stop the microphone while the AI is speaking to prevent audio feedback
-    if (isRecordingRef.current) {
-      console.log('[VOICE_FRONTEND] AI speaking priority: stopping recording');
-      stopRecording();
-    }
-
     while (playbackQueueRef.current.length > 0) {
       const audioChunks = playbackQueueRef.current.shift()!;
       const audioBuffer = currentCtx.createBuffer(1, audioChunks.length, 24000);
@@ -567,7 +558,7 @@ export const InterviewStep: React.FC<{
       const now = currentCtx.currentTime;
       // Use a larger look-ahead buffer (0.1s) to prevent audio underrun/silence
       if (nextStartTimeRef.current < now) {
-        nextStartTimeRef.current = now + 0.1;
+        nextStartTimeRef.current = now + 0.03;
       }
       
       source.start(nextStartTimeRef.current);
@@ -711,7 +702,7 @@ export const InterviewStep: React.FC<{
             constructor() { 
               super();
               // Standard buffer size for 16kHz audio chunks
-              this.bufferSize = 2048;
+              this.bufferSize = 1024;
               this.buffer = new ArrayBuffer(this.bufferSize * 2);
               this.view = new DataView(this.buffer);
               this.index = 0;
@@ -753,9 +744,8 @@ export const InterviewStep: React.FC<{
       
       workletNode.port.onmessage = (ev) => {
         if (ev.data.event === 'chunk') {
-          if (mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN) {
-            if (Math.random() < 0.05) console.log('[VOICE_DEBUG] Sending binary audio chunk to server');
-            // Send raw binary for performance and to match backend expectation
+          if (mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN &&
+              isSendingAudioRef.current) {
             socketRef.current.send(ev.data.data);
           } else if (mode === 'CHAT') {
             // Only collect chunks for legacy buffer in CHAT mode
@@ -782,11 +772,12 @@ export const InterviewStep: React.FC<{
         let lastSpeakTime = Date.now();
         // Documentation Match: Increase threshold to avoid background-noise interruptions
         const SILENCE_THRESHOLD = 15; 
-        const SILENCE_DURATION = 4000;
+        // Documentation Match: Increase duration threshold to avoid overly eager turn-taking during organic pauses
+        const SILENCE_DURATION = 2000; // Increased from 1200ms based on testing
         const MAX_RECORDING_TIME = 120000;
 
         silenceTimeoutRef.current = setTimeout(() => {
-          console.log('VAD: Max recording time reached');
+          console.log("VAD: Max recording time reached");
           stopRecording();
         }, MAX_RECORDING_TIME);
 
@@ -800,19 +791,45 @@ export const InterviewStep: React.FC<{
           analyser.getByteFrequencyData(dataArray);
           const average = dataArray.reduce((x, y) => x + y) / bufferLength;
 
-          if (average > SILENCE_THRESHOLD) {
-            lastSpeakTime = Date.now();
-            // User is speaking! Check if we should interrupt the AI
-            if (isSpeakingRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
-              console.log('[VOICE_DEBUG] VAD: User speaking over AI, sending interrupt signal');
-              // Clear local playback immediately
-              playbackQueueRef.current = [];
-              isSpeakingRef.current = false;
-              setIsSpeaking(false);
-              // Notify backend to stop model generation
-              socketRef.current.send(JSON.stringify({ type: 'realtimeInput', event: 'interrupt' }));
+            // Renamed for clarity: this is the duration after which silence triggers a turn completion
+            const USER_TURN_END_SILENCE_MS = 1200; 
+
+            if (average > SILENCE_THRESHOLD) {
+                lastSpeakTime = Date.now();
+
+                // 🔥 BARGE-IN (interrupt AI)
+                if (isSpeakingRef.current) {
+                    console.log("[VOICE] Barge-in detected");
+
+                    playbackQueueRef.current = [];
+                    // Keep AI turn active until `turn_complete` from backend
+                    // aiTurnActiveRef.current = false;
+                    isSpeakingRef.current = false;
+                    setIsSpeaking(false);
+
+                    isSendingAudioRef.current = true;
+
+                    socketRef.current?.send(JSON.stringify({
+                        type: "realtimeInput",
+                        event: "interrupt"
+                    }));
+                }
+
+            } else {
+                if (
+                    Date.now() - lastSpeakTime > USER_TURN_END_SILENCE_MS &&
+                    !aiTurnActiveRef.current
+                ) {
+                    console.log("[VOICE] Silence → turn complete");
+
+                    socketRef.current?.send(JSON.stringify({
+                        type: "realtimeInput",
+                        event: "user_turn_complete"
+                    }));
+
+                    lastSpeakTime = Date.now() + 999999; // Effectively disable further turn_complete for this silence period
+                }
             }
-          }
           
           animationFrameRef.current = requestAnimationFrame(checkSilence);
         };
@@ -820,7 +837,7 @@ export const InterviewStep: React.FC<{
         animationFrameRef.current = requestAnimationFrame(checkSilence);
       }
     } catch (error) {
-      console.error('Error starting recording:', error);
+      console.error("Error starting recording:", error);
       isRecordingRef.current = false;
       setIsRecording(false);
     }
@@ -843,9 +860,10 @@ export const InterviewStep: React.FC<{
       processor.disconnect();
       mediaStream.getTracks().forEach(track => track.stop());
 
-      // Notify backend that user turn is complete
-      if (mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN) {
-        console.log('[VOICE_FRONTEND] User turn complete, signaling backend');
+      // Notify backend that user turn is complete ONLY if not a manual stop (which implies user might speak again)
+      // and if we are in VOICE mode.
+      if (mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN && !manual) {
+        console.log("[VOICE_FRONTEND] User turn complete (manual stop not triggered), signaling backend");
         socketRef.current.send(JSON.stringify({ type: 'realtimeInput', event: 'user_turn_complete' }));
       }
 
