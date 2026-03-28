@@ -339,10 +339,19 @@ export const InterviewStep: React.FC<{
     const socket = new WebSocket(wsUrl);
     socketRef.current = socket;
 
-    socket.onopen = () => {
+    socket.onopen = async () => {
       console.log('Voice WebSocket connected');
-      // Do NOT start recording here — wait for the AI's opening turn_complete event
-      // to avoid capturing the AI's own audio output as microphone input.
+      // Eagerly resume/create contexts if possible
+      try {
+        if (playbackContextRef.current && playbackContextRef.current.state === 'suspended') {
+          await playbackContextRef.current.resume();
+        }
+        if (recordingContextRef.current && recordingContextRef.current.state === 'suspended') {
+          await recordingContextRef.current.resume();
+        }
+      } catch (e) {
+        console.warn('Eager context resume failed', e);
+      }
     };
 
     const base64ToFloat32 = (base64: string) => {
@@ -358,6 +367,10 @@ export const InterviewStep: React.FC<{
     socket.onmessage = async (event) => {
       try {
         const msg = JSON.parse(event.data);
+        if (msg.event === 'pong') {
+          // Heartbeat received
+          return;
+        }
         if (msg.type === 'audioStream') {
           console.log('Audio chunk received, size:', msg.data.length);
           const float32Data = base64ToFloat32(msg.data);
@@ -378,6 +391,11 @@ export const InterviewStep: React.FC<{
         } else if (msg.type === 'textStream') {
           // Update history with live transcription if needed
           console.log('AI Transcription:', msg.data);
+          
+          // Eagerly resume playback context if we receive text but context is suspended
+          if (playbackContextRef.current && playbackContextRef.current.state === 'suspended') {
+            playbackContextRef.current.resume().catch(console.error);
+          }
         } else if (msg.interrupted) {
           // Clear playback queue if user interrupts AI
           console.log('AI Interrupted, clearing playback queue');
@@ -422,6 +440,17 @@ export const InterviewStep: React.FC<{
       isRecordingRef.current = false;
       setIsSpeaking(false);
       setIsRecording(false);
+      
+      // Cleanup contexts on close to prevent leaked resources/stuck states
+      if (playbackContextRef.current) {
+        playbackContextRef.current.close().catch(console.error);
+        playbackContextRef.current = null;
+      }
+      if (recordingContextRef.current) {
+        recordingContextRef.current.close().catch(console.error);
+        recordingContextRef.current = null;
+      }
+
       if (event.code !== 1000 && mode === 'VOICE') {
         alert(`Voice connection closed (Code ${event.code}). Please check your internet and API key.`);
       }
@@ -430,7 +459,7 @@ export const InterviewStep: React.FC<{
     // Heartbeat to keep connection alive
     const heartbeat = setInterval(() => {
       if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ event: 'ping' }));
+        socket.send(JSON.stringify({ type: 'realtimeInput', event: 'ping' }));
       }
     }, 5000);
 
@@ -454,21 +483,24 @@ export const InterviewStep: React.FC<{
     // Use the shared ref-based AudioContext to avoid creating a new one per audio chunk
     let currentCtx = playbackContextRef.current;
     if (!currentCtx || currentCtx.state === 'closed') {
-      console.log('Creating new playback AudioContext');
+      console.log('[VOICE_DEBUG] Creating new playback AudioContext at 24000Hz');
       currentCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       playbackContextRef.current = currentCtx;
       nextStartTimeRef.current = 0;
     }
 
     if (currentCtx.state === 'suspended') {
-      console.log('Resuming playback AudioContext');
-      try { await currentCtx.resume(); } catch (e) { console.warn('Context resume failed', e); }
+      console.log('[VOICE_DEBUG] Resuming suspended playback AudioContext');
+      try { 
+        await currentCtx.resume(); 
+      } catch (e) { 
+        console.warn('Playback Context resume failed', e); 
+      }
     }
-    // Also check if context is closed or interrupted
-    if (currentCtx.state === 'closed') {
-       currentCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-       playbackContextRef.current = currentCtx;
-       nextStartTimeRef.current = 0;
+
+    // Double check state after resume attempt
+    if (currentCtx.state !== 'running') {
+      console.warn('[VOICE_DEBUG] Playback AudioContext is not running:', currentCtx.state);
     }
 
     isQueueProcessingRef.current = true;
@@ -667,6 +699,7 @@ export const InterviewStep: React.FC<{
         if (ev.data.event === 'chunk') {
           if (mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN) {
             const base64 = btoa(String.fromCharCode(...new Uint8Array(ev.data.data)));
+            if (Math.random() < 0.05) console.log('[VOICE_DEBUG] Sending audio chunk to server');
             socketRef.current.send(JSON.stringify({ type: 'realtimeInput', audioData: base64 }));
           } else if (mode === 'CHAT') {
             // Only collect chunks for legacy buffer in CHAT mode
@@ -705,7 +738,7 @@ export const InterviewStep: React.FC<{
           
           // If AI started speaking, stop the mic immediately to prevent feedback
           if (isSpeakingRef.current) {
-            console.log('VAD: AI is speaking, stopping mic to prevent feedback');
+            console.log('[VOICE_DEBUG] VAD: AI is speaking, stopping mic to prevent feedback');
             stopRecording();
             return;
           }
@@ -720,9 +753,8 @@ export const InterviewStep: React.FC<{
             // but for a live interview, we usually keep it open unless AI interrupts.
             const silentDuration = Date.now() - lastSpeakTime;
             if (silentDuration > SILENCE_DURATION) {
-               // We could trigger a "still there?" prompt or just keep listening
-               // For now, let's just log it to avoid aggressive cutting
-               // console.log('VAD: User silent for:', silentDuration);
+               // Aggressive silent logging for debugging
+               if (Math.random() < 0.1) console.log('[VOICE_DEBUG] VAD: User silent for:', silentDuration);
             }
           }
           
@@ -777,8 +809,14 @@ export const InterviewStep: React.FC<{
     }
   };
 
-  const handleMicClick = () => {
+  const handleMicClick = async () => {
     if (mode !== 'VOICE' || isSpeakingRef.current) return;
+    
+    // Ensure playback context is resumed on user interaction
+    if (playbackContextRef.current && playbackContextRef.current.state === 'suspended') {
+      await playbackContextRef.current.resume().catch(console.error);
+    }
+
     if (isRecordingRef.current) {
       stopRecording(true);
     } else {

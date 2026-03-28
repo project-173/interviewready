@@ -148,7 +148,7 @@ async def interview_live_websocket(
                         
                         if "bytes" in data:
                             # SKILL.md: Send audio using the 'audio' key in send_realtime_input
-                            logger.debug(f"Relaying raw bytes from client: {len(data['bytes'])} bytes")
+                            logger.info(f"[VOICE_BACKEND] Relaying raw bytes from client: {len(data['bytes'])} bytes")
                             await session.send_realtime_input(
                                 audio=types.Blob(data=data["bytes"], mime_type="audio/pcm;rate=16000")
                             )
@@ -157,13 +157,14 @@ async def interview_live_websocket(
                                 msg = json.loads(data["text"])
                                 if msg.get("type") == "realtimeInput" and msg.get("audioData"):
                                     audio_bytes = base64.b64decode(msg["audioData"])
-                                    logger.debug(f"Relaying base64 audio from client: {len(audio_bytes)} bytes")
+                                    logger.info(f"[VOICE_BACKEND] Relaying base64 audio from client: {len(audio_bytes)} bytes")
                                     await session.send_realtime_input(
                                         audio=types.Blob(data=audio_bytes, mime_type="audio/pcm;rate=16000")
                                     )
                                 elif msg.get("type") == "contentUpdateText" and msg.get("text"):
                                     await session.send_realtime_input(text=msg["text"])
                                 elif msg.get("event") == "ping":
+                                    await websocket.send_json({"event": "pong"})
                                     continue
                                 elif msg.get("text"):
                                     await session.send_realtime_input(text=msg["text"])
