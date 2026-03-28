@@ -291,6 +291,7 @@ export const InterviewStep: React.FC<{
 }> = ({ history, onSend, onSendAudio, isLoading, chatEndRef, mode, sessionId, onExit }) => {
   const [isRecording, setIsRecording] = React.useState(false);
   const [isSpeaking, setIsSpeaking] = React.useState(false);
+  const [connectionStatus, setConnectionStatus] = React.useState<'connecting' | 'connected' | 'error' | 'closed'>('connecting');
   const [mediaStream, setMediaStream] = React.useState<MediaStream | null>(null);
   const [processor, setProcessor] = React.useState<AudioWorkletNode | null>(null);
   const audioChunksRef = React.useRef<Float32Array[]>([]);
@@ -342,6 +343,7 @@ export const InterviewStep: React.FC<{
 
     socket.onopen = async () => {
       console.log('[VOICE_FRONTEND] Voice WebSocket connected');
+      setConnectionStatus('connected');
       // Try to resume contexts — often fails without a user gesture, but worth a try
       try {
         if (playbackContextRef.current && playbackContextRef.current.state === 'suspended') {
@@ -443,6 +445,7 @@ export const InterviewStep: React.FC<{
 
     socket.onerror = (error) => {
       console.error('WebSocket Error:', error);
+      setConnectionStatus('error');
       isSpeakingRef.current = false;
       isRecordingRef.current = false;
       setIsSpeaking(false);
@@ -451,6 +454,7 @@ export const InterviewStep: React.FC<{
 
     socket.onclose = (event) => {
       console.log('WebSocket closed:', event.code, event.reason || 'No reason provided');
+      setConnectionStatus('closed');
       isSpeakingRef.current = false;
       isRecordingRef.current = false;
       setIsSpeaking(false);
@@ -842,7 +846,7 @@ export const InterviewStep: React.FC<{
   const handleMicClick = async () => {
     // Crucial: AudioContext must be resumed from a user gesture
     try {
-      if (!playbackContextRef.current) {
+      if (!playbackContextRef.current || playbackContextRef.current.state === 'closed') {
         playbackContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       }
       if (playbackContextRef.current.state === 'suspended') {
@@ -850,7 +854,7 @@ export const InterviewStep: React.FC<{
         await playbackContextRef.current.resume();
       }
       
-      if (!recordingContextRef.current) {
+      if (!recordingContextRef.current || recordingContextRef.current.state === 'closed') {
         recordingContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       }
       if (recordingContextRef.current.state === 'suspended') {
@@ -861,7 +865,17 @@ export const InterviewStep: React.FC<{
       console.error('[VOICE_FRONTEND] Failed to resume contexts:', e);
     }
 
-    if (mode !== 'VOICE' || isSpeakingRef.current) return;
+    if (mode !== 'VOICE') return;
+    
+    // Manual fallback: If AI is stuck in speaking mode, allow force-stop/start
+    if (isSpeakingRef.current) {
+      console.log('[VOICE_FRONTEND] Manual Override: Forcing AI to stop and opening mic');
+      playbackQueueRef.current = [];
+      isSpeakingRef.current = false;
+      setIsSpeaking(false);
+      startRecording();
+      return;
+    }
 
     if (isRecordingRef.current) {
       stopRecording(true);
@@ -890,10 +904,21 @@ export const InterviewStep: React.FC<{
                 <div className="w-2 h-2 rounded-full bg-slate-400 animate-spin"></div>
                 Thinking...
               </>
-            ) : socketRef.current?.readyState === WebSocket.OPEN ? (
-              <span className="text-emerald-600">Coach is Ready</span>
+            ) : connectionStatus === 'connected' ? (
+              <span className="text-emerald-600 flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                Coach is Ready
+              </span>
+            ) : connectionStatus === 'error' || connectionStatus === 'closed' ? (
+              <span className="text-red-500 flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
+                Connection Lost - Reconnecting...
+              </span>
             ) : (
-              <span className="text-amber-500">Initializing Voice Link...</span>
+              <span className="text-amber-500 flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce"></div>
+                Initializing Voice Link...
+              </span>
             )}
           </div>
           <h3 className="text-xl font-medium text-slate-800 max-w-md mx-auto leading-relaxed h-8 text-center px-4">
