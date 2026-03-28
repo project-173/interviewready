@@ -53,6 +53,7 @@ class Settings(BaseSettings):
 
     # Evals
     SKIP_EVAL_TESTS: bool = True
+    EVAL_SAMPLE_RATE: float = 0.1
 
     # Mock agent response
     MOCK_RESUME_CRITIC_AGENT: bool = False

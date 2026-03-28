@@ -1,10 +1,11 @@
 """LLM-as-a-judge evaluator for agent outputs."""
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
 from langfuse import get_client
 
 from app.core.logging import logger
+from app.agents.eval_rubrics import JUDGE_TEMPERATURE, get_rubric
 
 
 class JudgeEvaluation(BaseModel):
@@ -20,29 +21,32 @@ class JudgeEvaluation(BaseModel):
 class LLmasJudgeEvaluator:
     """LLM-as-a-judge to evaluate agent outputs independently."""
 
-    JUDGE_SYSTEM_PROMPT = """You are an expert evaluator of AI agent outputs. 
+    JUDGE_SYSTEM_PROMPT_BASE = """You are an expert evaluator of AI agent outputs.
 Your task is to critically evaluate the quality of agent responses for a resume coaching application.
 
 Evaluate on these dimensions:
-1. **Quality** (0-1): Is the output well-structured, clear, and actionable?
-2. **Accuracy** (0-1): Is the feedback factually correct and based on the resume content?
-3. **Helpfulness** (0-1): Would this help a job seeker improve their resume?
+1. Quality (0-1): Is the output well-structured, clear, and actionable?
+2. Accuracy (0-1): Is the feedback factually correct and based on the resume content?
+3. Helpfulness (0-1): Would this help a job seeker improve their resume?
 
 Provide a JSON response with:
 - quality_score: float (0-1)
-- accuracy_score: float (0-1)  
+- accuracy_score: float (0-1)
 - helpfulness_score: float (0-1)
 - reasoning: str (brief explanation)
-- concerns: list[str] (any issues, empty if none)"""
+- concerns: list[str] (any issues, empty if none)
+"""
 
-    def __init__(self, gemini_service: Any):
+    def __init__(self, gemini_service: Any, *, temperature: float = JUDGE_TEMPERATURE):
         """Initialize with a Gemini service instance.
 
         Args:
             gemini_service: Service to use for judge LLM calls
+            temperature: Gemini temperature for judge runs
         """
         self.gemini_service = gemini_service
         self.langfuse = get_client()
+        self.temperature = temperature
 
     def evaluate(
         self,
@@ -53,6 +57,8 @@ Provide a JSON response with:
         trace_id: Optional[str] = None,
         intent: Optional[str] = None,
         session_id: Optional[str] = None,
+        message_history: Optional[List[Any]] = None,
+        run_name: Optional[str] = None,
     ) -> JudgeEvaluation:
         """Evaluate an agent's output using LLM-as-a-judge.
 
@@ -77,14 +83,20 @@ Provide a JSON response with:
         )
 
         judge_input = self._build_judge_prompt(
-            agent_name, input_data, output, expected_output
+            agent_name,
+            input_data,
+            output,
+            expected_output,
+            message_history=message_history,
         )
+        system_prompt = self._build_system_prompt(agent_name)
 
         try:
             response = self.gemini_service.generate_response(
-                system_prompt=self.JUDGE_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
                 user_input=judge_input,
                 context=None,
+                temperature=self.temperature,
             )
 
             evaluation = self._parse_judge_response(response)
@@ -96,6 +108,7 @@ Provide a JSON response with:
                     evaluation=evaluation,
                     intent=intent,
                     session_id=session_id,
+                    run_name=run_name,
                 )
 
             logger.info(
@@ -120,12 +133,18 @@ Provide a JSON response with:
                 concerns=["Judge evaluation unavailable"],
             )
 
+    def _build_system_prompt(self, agent_name: str) -> str:
+        rubric = get_rubric(agent_name)
+        return f"{self.JUDGE_SYSTEM_PROMPT_BASE}\nRUBRIC:\n{rubric}"
+
     def _build_judge_prompt(
         self,
         agent_name: str,
         input_data: str,
         output: str,
         expected_output: Optional[str],
+        *,
+        message_history: Optional[List[Any]] = None,
     ) -> str:
         """Build the prompt for the judge LLM."""
         prompt = f"""Evaluate the following agent output from '{agent_name}'.
@@ -136,6 +155,16 @@ AGENT INPUT:
 AGENT OUTPUT:
 {output[:2000]}
 """
+        if message_history:
+            prompt += "\nMESSAGE HISTORY (most recent first):"
+            for message in list(reversed(message_history))[:6]:
+                if isinstance(message, dict):
+                    role = message.get("role", "unknown")
+                    text = message.get("text", "")
+                else:
+                    role = getattr(message, "role", "unknown")
+                    text = getattr(message, "text", "")
+                prompt += f"\n- {role}: {str(text)[:240]}"
 
         if expected_output:
             prompt += f"""
@@ -178,18 +207,21 @@ Provide your evaluation as valid JSON."""
         evaluation: JudgeEvaluation,
         intent: Optional[str] = None,
         session_id: Optional[str] = None,
+        run_name: Optional[str] = None,
     ) -> None:
         """Log evaluation scores to Langfuse."""
         try:
             # Build metadata with all available context
             metadata = {
-                "agent": agent_name, 
+                "agent": agent_name,
                 "evaluator": "llm-as-a-judge",
             }
             if intent:
                 metadata["intent"] = intent
             if session_id:
                 metadata["session_id"] = session_id
+            if run_name:
+                metadata["run_name"] = run_name
             
             self.langfuse.create_score(
                 name="judge_quality_score",

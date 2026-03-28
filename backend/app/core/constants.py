@@ -81,26 +81,3 @@ RESUME_SCHEMA = """
 }
 """
 
-# LLM-as-a-Judge evaluation score thresholds
-EVAL_SCORE_THRESHOLDS = {
-    "ResumeCriticAgent": {
-        "min_quality_score": 0.7,
-        "min_accuracy_score": 0.8,
-        "min_helpfulness_score": 0.7,
-    },
-    "ContentStrengthAgent": {
-        "min_quality_score": 0.7,
-        "min_accuracy_score": 0.7,
-        "min_helpfulness_score": 0.8,
-    },
-    "JobAlignmentAgent": {
-        "min_quality_score": 0.7,
-        "min_accuracy_score": 0.8,
-        "min_helpfulness_score": 0.7,
-    },
-    "InterviewCoachAgent": {
-        "min_quality_score": 0.7,
-        "min_accuracy_score": 0.7,
-        "min_helpfulness_score": 0.8,
-    },
-}

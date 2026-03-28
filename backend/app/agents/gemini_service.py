@@ -56,6 +56,7 @@ class GeminiService:
         system_prompt: str,
         user_input: str,
         context: Optional[SessionContext] = None,
+        temperature: Optional[float] = None,
     ) -> str:
         """Generate response from Gemini.
 
@@ -63,6 +64,7 @@ class GeminiService:
             system_prompt: System prompt for the model
             user_input: User input text
             context: Optional session context
+            temperature: Optional generation temperature
 
         Returns:
             Generated response text
@@ -75,13 +77,16 @@ class GeminiService:
         user_message = self._construct_user_message(user_input, context)
 
         try:
+            config_kwargs = {
+                "system_instruction": system_prompt,
+                "max_output_tokens": MAX_OUTPUT_TOKENS,
+            }
+            if temperature is not None:
+                config_kwargs["temperature"] = temperature
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=user_message,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    max_output_tokens=MAX_OUTPUT_TOKENS,
-                ),
+                config=types.GenerateContentConfig(**config_kwargs),
             )
             return response.text
         except Exception as e:

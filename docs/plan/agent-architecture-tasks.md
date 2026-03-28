@@ -129,6 +129,20 @@ Tests:
   - `backend/tests/test_resume_input_priority.py`
   - `backend/tests/test_orchestration_governance.py`
 
+## Evals (Script-Based, Occasional)
+Keep evals lightweight and off the request path by running a periodic script with curated datasets.
+
+Proposed structure:
+- `evals/datasets/agent1_resume_critic.json`
+- `evals/datasets/agent2_job_alignment.json`
+- `evals/datasets/agent3_interview_coach.json`
+- `evals/run_evals.py`
+- `evals/judges.py`
+
+Notes:
+- Reuse the same judge prompts as live evals for consistent scoring.
+- Add a per-agent minimum score threshold in tests.
+
 ## Exit Criteria
 - Intent routing is deterministic and validated.
 - Normalize->Analyze pipeline runs end-to-end.

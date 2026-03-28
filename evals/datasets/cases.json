@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "resume_critic_strong_swe",
+      "agent": "ResumeCriticAgent",
+      "intent": "RESUME_CRITIC",
+      "resume_id": "resume_strong_swe",
+      "notes": "Baseline strong resume with clear metrics.",
+      "tags": ["structural"]
+    },
+    {
+      "id": "resume_critic_sparse_metrics",
+      "agent": "ResumeCriticAgent",
+      "intent": "RESUME_CRITIC",
+      "resume_id": "resume_sparse_metrics",
+      "notes": "Edge case with vague statements and minimal detail.",
+      "edge_case": true
+    },
+    {
+      "id": "resume_critic_employment_gap",
+      "agent": "ResumeCriticAgent",
+      "intent": "RESUME_CRITIC",
+      "resume_id": "resume_employment_gap",
+      "notes": "Gap between roles to test structure and clarity."
+    },
+    {
+      "id": "resume_critic_career_changer",
+      "agent": "ResumeCriticAgent",
+      "intent": "RESUME_CRITIC",
+      "resume_id": "resume_career_changer",
+      "notes": "Career changer with mixed experience sections."
+    },
+
+    {
+      "id": "content_strength_strong_swe",
+      "agent": "ContentStrengthAgent",
+      "intent": "CONTENT_STRENGTH",
+      "resume_id": "resume_strong_swe",
+      "notes": "Strong metrics to test evidence strength.",
+      "tags": ["structural"]
+    },
+    {
+      "id": "content_strength_sparse_metrics",
+      "agent": "ContentStrengthAgent",
+      "intent": "CONTENT_STRENGTH",
+      "resume_id": "resume_sparse_metrics",
+      "notes": "Edge case with low evidence strength.",
+      "edge_case": true
+    },
+    {
+      "id": "content_strength_employment_gap",
+      "agent": "ContentStrengthAgent",
+      "intent": "CONTENT_STRENGTH",
+      "resume_id": "resume_employment_gap",
+      "notes": "Highlights gaps and reporting improvements."
+    },
+    {
+      "id": "content_strength_overqualified",
+      "agent": "ContentStrengthAgent",
+      "intent": "CONTENT_STRENGTH",
+      "resume_id": "resume_overqualified_senior",
+      "notes": "Senior leadership focus with high-level outcomes."
+    },
+
+    {
+      "id": "alignment_backend_strong",
+      "agent": "JobAlignmentAgent",
+      "intent": "ALIGNMENT",
+      "resume_id": "resume_strong_swe",
+      "job_description_id": "jd_backend_api",
+      "notes": "Backend alignment with overlapping skills.",
+      "tags": ["structural"]
+    },
+    {
+      "id": "alignment_frontend_sparse",
+      "agent": "JobAlignmentAgent",
+      "intent": "ALIGNMENT",
+      "resume_id": "resume_sparse_metrics",
+      "job_description_id": "jd_frontend_react",
+      "notes": "Edge case with weak frontend signal.",
+      "edge_case": true
+    },
+    {
+      "id": "alignment_data_career_change",
+      "agent": "JobAlignmentAgent",
+      "intent": "ALIGNMENT",
+      "resume_id": "resume_career_changer",
+      "job_description_id": "jd_data_analyst",
+      "notes": "Career changer aligning to data analyst role."
+    },
+    {
+      "id": "alignment_platform_senior",
+      "agent": "JobAlignmentAgent",
+      "intent": "ALIGNMENT",
+      "resume_id": "resume_overqualified_senior",
+      "job_description_id": "jd_platform_sre",
+      "notes": "Senior platform experience compared to SRE role."
+    },
+
+    {
+      "id": "interview_coach_t1",
+      "agent": "InterviewCoachAgent",
+      "intent": "INTERVIEW_COACH",
+      "resume_id": "resume_strong_swe",
+      "job_description_id": "jd_backend_api",
+      "history_id": "history_t1",
+      "notes": "First turn, no prior history.",
+      "tags": ["structural"]
+    },
+    {
+      "id": "interview_coach_t5",
+      "agent": "InterviewCoachAgent",
+      "intent": "INTERVIEW_COACH",
+      "resume_id": "resume_strong_swe",
+      "job_description_id": "jd_backend_api",
+      "history_id": "history_t5",
+      "notes": "Mid-interview with light history.",
+      "context_shared_memory": {
+        "interview_active": true,
+        "current_question_index": 1,
+        "asked_questions": [
+          "Tell me about a time you improved a process.",
+          "Describe a challenging technical decision you made."
+        ],
+        "user_answers": [
+          "I automated weekly reports and reduced manual work for the team.",
+          "I chose a simpler caching strategy to cut latency with fewer moving parts."
+        ],
+        "total_questions": 5
+      }
+    },
+    {
+      "id": "interview_coach_t10",
+      "agent": "InterviewCoachAgent",
+      "intent": "INTERVIEW_COACH",
+      "resume_id": "resume_strong_swe",
+      "job_description_id": "jd_backend_api",
+      "history_id": "history_t10",
+      "notes": "Near completion with full history.",
+      "context_shared_memory": {
+        "interview_active": true,
+        "current_question_index": 4,
+        "asked_questions": [
+          "Walk me through a project you led.",
+          "How did you measure success?",
+          "Tell me about a technical tradeoff you made.",
+          "Describe a time you mentored someone.",
+          "What would you do differently next time?"
+        ],
+        "user_answers": [
+          "I led a migration to a shared auth gateway across 12 services.",
+          "We tracked incident rates and saw a 60 percent drop within two months.",
+          "I prioritized reliability over feature speed to stabilize the release.",
+          "I coached a junior engineer on debugging and testing strategies.",
+          "I would involve stakeholders earlier to reduce late scope changes."
+        ],
+        "total_questions": 5
+      }
+    },
+    {
+      "id": "interview_coach_career_change_t1",
+      "agent": "InterviewCoachAgent",
+      "intent": "INTERVIEW_COACH",
+      "resume_id": "resume_career_changer",
+      "job_description_id": "jd_data_analyst",
+      "history_id": "history_t1",
+      "notes": "Edge case with career change context.",
+      "edge_case": true
+    }
+  ]
+}

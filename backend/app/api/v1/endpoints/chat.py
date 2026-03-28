@@ -1,5 +1,8 @@
 """Chat endpoint for interacting with the agentic system."""
 
+import asyncio
+import datetime as dt
+import random
 from typing import Annotated, Any
 from app.core.config import settings
 from fastapi import APIRouter, HTTPException, Query, status
@@ -12,9 +15,6 @@ from app.api.v1.services import (
 )
 from app.agents import GeminiService
 from app.agents.llm_judge import LLmasJudgeEvaluator
-from langfuse import Langfuse, observe, propagate_attributes
-
-langfuse = Langfuse()
 from app.models import AgentResponse, ChatApiResponse, ChatRequest
 from app.utils.json_parser import parse_json_payload
 
@@ -82,35 +82,43 @@ async def chat_endpoint(
                 )
 
                 if settings.LANGFUSE_LLM_AS_A_JUDGE_ENABLED and internal_response.content:
-                    try:
-                        judge = get_llm_judge()
-                        input_summary = f"Intent: {request.intent}, Job Description: {request.jobDescription[:200] if request.jobDescription else 'None'}"
-                        # Get current trace ID from Langfuse
+                    sample_rate = max(0.0, min(settings.EVAL_SAMPLE_RATE, 1.0))
+                    if sample_rate > 0 and random.random() < sample_rate:
+                        input_summary = (
+                            "Intent: "
+                            f"{request.intent}, "
+                            "Job Description: "
+                            f"{request.jobDescription[:200] if request.jobDescription else 'None'}"
+                        )
                         current_trace = langfuse.get_current_trace()
                         trace_id = current_trace.id if current_trace else None
-                        
-                        evaluation = judge.evaluate(
-                            agent_name=internal_response.agent_name or "unknown",
-                            input_data=input_summary,
-                            output=internal_response.content,
-                            trace_id=trace_id,
-                            intent=request.intent,
-                            session_id=session_id,
+                        run_name = (
+                            f"live/{internal_response.agent_name or 'unknown'}/"
+                            f"{request.intent}/{dt.date.today().isoformat()}"
                         )
-                        langfuse.update_current_span(
-                            metadata={
-                                "judge_quality_score": evaluation.quality_score,
-                                "judge_accuracy_score": evaluation.accuracy_score,
-                                "judge_helpfulness_score": evaluation.helpfulness_score,
-                                "judge_reasoning": evaluation.reasoning[:200],
-                            }
-                        )
-                    except Exception as judge_error:
-                        import logging
 
-                        logging.getLogger(__name__).warning(
-                            f"LLM-as-a-judge evaluation failed: {judge_error}"
-                        )
+                        async def _run_judge_eval() -> None:
+                            try:
+                                judge = get_llm_judge()
+                                await run_in_threadpool(
+                                    judge.evaluate,
+                                    agent_name=internal_response.agent_name or "unknown",
+                                    input_data=input_summary,
+                                    output=internal_response.content,
+                                    trace_id=trace_id,
+                                    intent=request.intent,
+                                    session_id=session_id,
+                                    message_history=request.messageHistory or [],
+                                    run_name=run_name,
+                                )
+                            except Exception as judge_error:
+                                import logging
+
+                                logging.getLogger(__name__).warning(
+                                    f"LLM-as-a-judge evaluation failed: {judge_error}"
+                                )
+
+                        asyncio.create_task(_run_judge_eval())
 
                 result = ChatApiResponse(
                     agent=internal_response.agent_name,
