@@ -416,7 +416,7 @@ export const InterviewStep: React.FC<{
       if (socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ event: 'ping' }));
       }
-    }, 30000);
+    }, 5000);
 
     return () => {
       clearInterval(heartbeat);
@@ -636,9 +636,9 @@ export const InterviewStep: React.FC<{
         const dataArray = new Uint8Array(bufferLength);
         
         let lastSpeakTime = Date.now();
-        const SILENCE_THRESHOLD = 10;
-        const SILENCE_DURATION = 2000;
-        const MAX_RECORDING_TIME = 60000;
+        const SILENCE_THRESHOLD = 5;
+        const SILENCE_DURATION = 4000;
+        const MAX_RECORDING_TIME = 120000;
 
         silenceTimeoutRef.current = setTimeout(() => {
           console.log('VAD: Max recording time reached');
