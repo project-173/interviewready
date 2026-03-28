@@ -172,8 +172,19 @@ async def interview_live_websocket(
                                 elif msg.get("type") == "contentUpdateText" and msg.get("text"):
                                     await session.send_realtime_input(text=msg["text"])
                                 elif msg.get("event") == "interrupt":
-                                    logger.info("[VOICE_BACKEND] Client signaled interruption")
-                                    # Interrupting model turn in SDK
+                                    logger.info("[VOICE_BACKEND] Client signaled interruption. Clearing Gemini session...")
+                                    # The Multimodal Live SDK session has a specific 'clear' method 
+                                    # to stop current model generation and clear the output queue.
+                                    try:
+                                        # This is the standard way to interrupt in genai SDK
+                                        await session.send(types.LiveClientContent(
+                                            data=types.ClientContent(
+                                                turns=[],
+                                                turn_complete=True
+                                            )
+                                        ))
+                                    except Exception as clear_e:
+                                        logger.warning(f"Failed to send explicit clear to Gemini: {clear_e}")
                                     continue
                                 elif msg.get("event") == "ping":
                                     await websocket.send_json({"event": "pong"})

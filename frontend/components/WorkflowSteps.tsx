@@ -821,9 +821,9 @@ export const InterviewStep: React.FC<{
             // If silent for too long during a VOICE session, we could auto-stop
             // but for a live interview, we usually keep it open unless AI interrupts.
             const silentDuration = Date.now() - lastSpeakTime;
-            if (silentDuration > SILENCE_DURATION) {
-               // Aggressive silent logging for debugging
-               if (Math.random() < 0.1) console.log('[VOICE_DEBUG] VAD: User silent for:', silentDuration);
+            if (silentDuration > SILENCE_DURATION && isRecordingRef.current) {
+               console.log('[VOICE_DEBUG] VAD: Silence duration met, stopping recording to hand off turn');
+               stopRecording();
             }
           }
           
