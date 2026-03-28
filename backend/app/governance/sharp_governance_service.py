@@ -33,10 +33,9 @@ class SharpGovernanceService:
         original_input: str | None = None,
     ) -> AgentResponse:
         """Audit response and attach governance metadata."""
-        metadata: dict[str, Any] = {
-            "governance_audit": "passed",
-            "audit_timestamp": int(time.time() * 1000),
-        }
+        metadata: dict[str, Any] = dict(response.sharp_metadata or {})
+        metadata["governance_audit"] = "passed"
+        metadata["audit_timestamp"] = int(time.time() * 1000)
 
         hallucination_check = self._check_hallucination(response, original_input)
         metadata["hallucination_check_passed"] = hallucination_check
@@ -46,6 +45,8 @@ class SharpGovernanceService:
 
         if response.agent_name == "ContentStrengthAgent":
             self._validate_content_strength_agent(response, metadata, original_input)
+        elif response.agent_name == "InterviewCoachAgent":
+            self._validate_interview_coach_agent(metadata)
 
         flags: list[str] = []
         if not hallucination_check:
@@ -55,10 +56,34 @@ class SharpGovernanceService:
 
         if flags:
             metadata["governance_audit"] = "flagged"
-            metadata["audit_flags"] = flags
+            for flag in flags:
+                self._append_flag(metadata, flag)
 
         response.sharp_metadata = metadata
         return response
+
+    def _append_flag(self, metadata: dict[str, Any], flag: str) -> None:
+        flags = list(metadata.get("audit_flags", []))
+        if flag not in flags:
+            flags.append(flag)
+        metadata["audit_flags"] = flags
+
+    def _validate_interview_coach_agent(self, metadata: dict[str, Any]) -> None:
+        """Apply interview-specific responsible AI governance checks."""
+        if metadata.get("sensitive_input_detected"):
+            metadata["governance_audit"] = "flagged"
+            self._append_flag(metadata, "sensitive_interview_content")
+            self._append_flag(metadata, "requires_human_review")
+
+        if metadata.get("prompt_injection_blocked"):
+            metadata["governance_audit"] = "flagged"
+            self._append_flag(metadata, "prompt_injection_attempt")
+            self._append_flag(metadata, "requires_human_review")
+
+        if metadata.get("bias_review_required"):
+            metadata["governance_audit"] = "flagged"
+            self._append_flag(metadata, "bias_review_required")
+            self._append_flag(metadata, "requires_human_review")
 
     def contains_quantifiable_claim(self, text: str | None) -> bool:
         """Return true when text contains measurable claims."""
