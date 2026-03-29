@@ -55,6 +55,10 @@ class OrchestrationAgent:
         self.governance = governance
         self.workflow = self._build_workflow()
 
+    def get_agents(self) -> dict[str, BaseAgentProtocol]:
+        """Return the registered agents keyed by name."""
+        return self.agent_list
+
     # ---------- Public API ----------
 
     @observe(name="orchestration_execution")
@@ -145,6 +149,7 @@ class OrchestrationAgent:
 
         state.response = audited
         state.artifacts.append(self._build_artifact(audited, agent_name))
+        self._update_memory(context, artifacts=[artifact.model_dump() for artifact in state.artifacts])
         state.index += 1
 
         return state
@@ -242,7 +247,18 @@ class OrchestrationAgent:
         return ResumeDocument(source=source, raw_text=raw)
 
     def _has_content(self, resume: Resume) -> bool:
-        return bool(resume.model_dump(exclude_none=True))
+        def _contains_value(value: Any) -> bool:
+            if value is None:
+                return False
+            if isinstance(value, str):
+                return bool(value.strip())
+            if isinstance(value, dict):
+                return any(_contains_value(item) for item in value.values())
+            if isinstance(value, list):
+                return any(_contains_value(item) for item in value)
+            return True
+
+        return _contains_value(resume.model_dump(exclude_none=True))
 
     def _build_artifact(self, response: AgentResponse, agent_name: str):
         parsed = parse_json_payload(response.content or "", allow_array=True)

@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "id": "jd_backend_api",
+      "title": "Senior Backend Engineer",
+      "notes": "Backend role focused on APIs, reliability, and cloud operations.",
+      "last_reviewed": "2026-03-27",
+      "requirements": [
+        "Python",
+        "FastAPI",
+        "PostgreSQL",
+        "AWS",
+        "Testing and observability"
+      ],
+      "text": "We are seeking a Senior Backend Engineer to build and scale API services. Requirements: 5+ years Python, experience with FastAPI or similar frameworks, strong SQL and PostgreSQL knowledge, AWS production experience, and a track record of building reliable systems with testing and observability."
+    },
+    {
+      "id": "jd_frontend_react",
+      "title": "Frontend Engineer",
+      "notes": "Frontend role emphasizing React, TypeScript, and accessibility.",
+      "last_reviewed": "2026-03-27",
+      "requirements": [
+        "React",
+        "TypeScript",
+        "Accessibility",
+        "Performance optimization",
+        "Design collaboration"
+      ],
+      "text": "We are hiring a Frontend Engineer to deliver user-facing features. Requirements: React and TypeScript expertise, experience with accessibility best practices, performance tuning, and close collaboration with design teams."
+    },
+    {
+      "id": "jd_data_analyst",
+      "title": "Data Analyst",
+      "notes": "Analyst role with SQL, visualization, and experiment analysis.",
+      "last_reviewed": "2026-03-27",
+      "requirements": [
+        "SQL",
+        "Tableau or Looker",
+        "Statistics",
+        "Stakeholder communication",
+        "Experiment analysis"
+      ],
+      "text": "We are looking for a Data Analyst to support product and operations teams. Requirements: strong SQL skills, Tableau or Looker experience, solid statistics background, and ability to communicate insights clearly."
+    },
+    {
+      "id": "jd_platform_sre",
+      "title": "Platform SRE",
+      "notes": "SRE role focused on reliability and infrastructure automation.",
+      "last_reviewed": "2026-03-27",
+      "requirements": [
+        "Kubernetes",
+        "Terraform",
+        "CI/CD",
+        "On-call experience",
+        "Monitoring and incident response"
+      ],
+      "text": "We are hiring a Platform SRE to improve reliability and automation. Requirements: Kubernetes in production, Terraform infrastructure as code, CI/CD pipelines, on-call rotation experience, and strong monitoring/incident response practices."
+    }
+  ]
+}

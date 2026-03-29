@@ -1,7 +1,7 @@
 import { 
   Resume, 
-  StructuralAssessment, 
-  ContentAnalysisReport, 
+  ResumeCriticReport, 
+  ContentStrengthReport, 
   AlignmentReport,
   ChatRequest,
   resumeJsonSchema,
@@ -198,7 +198,7 @@ class BackendService {
     return localStorage.getItem('authToken') || '';
   }
 
-  async resumeCriticAgent(resume: Resume): Promise<StructuralAssessment> {
+  async resumeCriticAgent(resume: Resume): Promise<ResumeCriticReport> {
     const request: ChatRequest = {
       intent: 'RESUME_CRITIC',
       resumeData: resume,
@@ -220,7 +220,7 @@ class BackendService {
     throw new Error('Invalid response from resume critic agent');
   }
 
-  async contentStrengthAgent(resume?: Resume | null): Promise<ContentAnalysisReport> {
+  async contentStrengthAgent(resume?: Resume | null): Promise<ContentStrengthReport> {
     const request: ChatRequest = {
       intent: 'CONTENT_STRENGTH',
       jobDescription: '',

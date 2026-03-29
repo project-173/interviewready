@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "id": "history_t1",
+      "title": "Turn 1 (no history)",
+      "notes": "Empty history for first question.",
+      "last_reviewed": "2026-03-27",
+      "messages": []
+    },
+    {
+      "id": "history_t5",
+      "title": "Turn 5 (light history)",
+      "notes": "Two prior Q and A pairs with a recent user answer.",
+      "last_reviewed": "2026-03-27",
+      "messages": [
+        {
+          "role": "user",
+          "text": "I am ready for the interview."
+        },
+        {
+          "role": "assistant",
+          "text": "Tell me about a time you improved a process."
+        },
+        {
+          "role": "user",
+          "text": "I automated weekly reports and reduced manual work for the team."
+        },
+        {
+          "role": "assistant",
+          "text": "Describe a challenging technical decision you made."
+        },
+        {
+          "role": "user",
+          "text": "I chose a simpler caching strategy to cut latency with fewer moving parts."
+        }
+      ]
+    },
+    {
+      "id": "history_t10",
+      "title": "Turn 10 (full round)",
+      "notes": "Five Q and A pairs with a recent detailed user answer.",
+      "last_reviewed": "2026-03-27",
+      "messages": [
+        {
+          "role": "assistant",
+          "text": "Walk me through a project you led."
+        },
+        {
+          "role": "user",
+          "text": "I led a migration to a shared auth gateway across 12 services."
+        },
+        {
+          "role": "assistant",
+          "text": "How did you measure success?"
+        },
+        {
+          "role": "user",
+          "text": "We tracked incident rates and saw a 60 percent drop within two months."
+        },
+        {
+          "role": "assistant",
+          "text": "Tell me about a technical tradeoff you made."
+        },
+        {
+          "role": "user",
+          "text": "I prioritized reliability over feature speed to stabilize the release."
+        },
+        {
+          "role": "assistant",
+          "text": "Describe a time you mentored someone."
+        },
+        {
+          "role": "user",
+          "text": "I coached a junior engineer on debugging and testing strategies."
+        },
+        {
+          "role": "assistant",
+          "text": "What would you do differently next time?"
+        },
+        {
+          "role": "user",
+          "text": "I would involve stakeholders earlier to reduce late scope changes."
+        }
+      ]
+    }
+  ]
+}
