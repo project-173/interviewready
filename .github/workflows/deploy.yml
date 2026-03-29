@@ -26,9 +26,30 @@ jobs:
           ignore-unfixed: true
           severity: CRITICAL,HIGH
 
+  backend-quality-gates:
+    name: Backend Quality Gates
+    needs: security-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "./backend[dev]"
+
+      - name: Run backend quality tests
+        run: |
+          python -m pytest backend/tests/test_interview_coach.py backend/tests/test_orchestration_governance.py
+
   build-backend:
     name: Build & Push Backend
-    needs: security-scan
+    needs: backend-quality-gates
     runs-on: ubuntu-latest
     permissions:
       contents: read
