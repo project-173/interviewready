@@ -3,11 +3,12 @@ import {
   SharedState, 
   WorkflowStatus,
   ChatRequest,
-  Resume
+  Resume,
+  InterviewMode
 } from './types';
 import {
   contentStrengthAgent, 
-  alignmentAgent, 
+  alignmentAgent,
   backendService 
 } from './backendService';
 import { StepIndicator } from './components/StepIndicator';
@@ -20,7 +21,8 @@ import {
   ContentStep, 
   AlignmentStep, 
   AlignmentReportStep, 
-  InterviewStep 
+  InterviewStep,
+  InterviewModeSelectionStep
 } from './components/WorkflowSteps';
 
 const AppContent: React.FC = () => {
@@ -503,12 +505,27 @@ const WorkflowController: React.FC<{
     }
   };
 
-  const startInterview = async () => {
+  const startInterviewSelection = () => {
     setState(prev => ({
       ...prev,
+      status: WorkflowStatus.SELECTING_INTERVIEW_MODE,
+      interviewHistory: [],
+    }));
+  };
+
+  const startInterview = async (mode: InterviewMode) => {
+    setState(prev => ({
+      ...prev,
+      interviewMode: mode,
       status: WorkflowStatus.INTERVIEWING,
       interviewHistory: [],
     }));
+
+    if (mode === 'VOICE') {
+      setError(null);
+      return; // Handled by WebSocket auto-start
+    }
+
     startLoading('Starting interview...', ['Preparing first question', 'Personalizing coach guidance']);
     setError(null);
     try {
@@ -528,7 +545,7 @@ const WorkflowController: React.FC<{
       setError(err.message);
       setState(prev => ({
         ...prev,
-        status: WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL,
+        status: WorkflowStatus.SELECTING_INTERVIEW_MODE,
         interviewHistory: [],
       }));
     } finally {
@@ -557,11 +574,14 @@ const WorkflowController: React.FC<{
   };
 
   const handleInterviewAudioMessage = async (audio: Uint8Array) => {
-    const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: '[Audio response]' }];
+    // This is the legacy audio path used only in CHAT mode for voice-to-text
+    const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: '[Analyzing audio...]' }];
     setState(prev => ({ ...prev, interviewHistory: updatedHistory }));
-    startLoading('Processing audio...', ['Transcribing speech', 'Analyzing content', 'Generating response']);
+    
+    // Non-blocking loading for audio to prevent stuck "analyzing" overlays
+    // startLoading('Processing audio...', ['Transcribing speech', 'Analyzing content', 'Generating response']);
+    
     try {
-      updateProgress(33, 0);
       const request: ChatRequest = {
         intent: 'INTERVIEW_COACH',
         resumeData: state.currentResume,
@@ -569,15 +589,28 @@ const WorkflowController: React.FC<{
         messageHistory: updatedHistory,
         audioData: audio,
       };
-      updateProgress(66, 1);
+      
       const response = await backendService.callChatEndpoint(request);
       const responseText = backendService.formatInterviewCoachPayload(response.payload ?? response.content);
-      updateProgress(100, 2);
-      setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
+      
+      setState(prev => {
+        // Replace the placeholder text with the actual transcription if available
+        const newHistory = prev.interviewHistory.map((msg, i) => 
+          i === prev.interviewHistory.length - 1 && msg.text === '[Analyzing audio...]' 
+            ? { ...msg, text: (response as any).transcription || '[Audio response]' } 
+            : msg
+        );
+        return { ...prev, interviewHistory: [...newHistory, { role: 'agent', text: responseText }] };
+      });
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Failed to process audio');
+      // Revert the placeholder
+      setState(prev => ({
+        ...prev,
+        interviewHistory: prev.interviewHistory.filter(msg => msg.text !== '[Analyzing audio...]')
+      }));
     } finally {
-      stopLoading();
+      // stopLoading();
     }
   };
 
@@ -587,8 +620,9 @@ const WorkflowController: React.FC<{
       {(state.status === WorkflowStatus.CRITIQUING || state.status === WorkflowStatus.AWAITING_CRITIC_APPROVAL) && state.criticReport && <CriticStep report={state.criticReport} onApprove={approveCritic} />}
       {(state.status === WorkflowStatus.ANALYZING_CONTENT || state.status === WorkflowStatus.AWAITING_CONTENT_APPROVAL) && state.contentReport && <ContentStep report={state.contentReport} onApprove={approveContent} />}
       {(state.status === WorkflowStatus.ALIGNING_JD) && <AlignmentStep jd={state.jobDescription} onChangeJD={(val) => setState(prev => ({ ...prev, jobDescription: val }))} onAnalyze={runAlignment} isLoading={false} />}
-      {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterview} />}
-      {state.status === WorkflowStatus.INTERVIEWING && <InterviewStep history={state.interviewHistory} onSend={handleInterviewMessage} onSendAudio={handleInterviewAudioMessage} isLoading={false} chatEndRef={chatEndRef} />}
+      {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterviewSelection} />}
+      {(state.status === WorkflowStatus.SELECTING_INTERVIEW_MODE) && <InterviewModeSelectionStep onSelect={startInterview} />}
+      {state.status === WorkflowStatus.INTERVIEWING && <InterviewStep history={state.interviewHistory} onSend={handleInterviewMessage} onSendAudio={handleInterviewAudioMessage} isLoading={false} chatEndRef={chatEndRef} mode={state.interviewMode || 'CHAT'} sessionId={backendService.getSessionId()} onExit={() => setState(prev => ({ ...prev, status: WorkflowStatus.SELECTING_INTERVIEW_MODE }))} />}
     </>
   );
 };

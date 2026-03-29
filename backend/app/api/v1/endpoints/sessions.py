@@ -13,7 +13,7 @@ router = APIRouter()
 
 
 @router.get("/{session_id}/resume")
-@limiter.limit("50/minute")
+@limiter.limit(settings.DEFAULT_RATE_LIMIT)
 async def get_session_resume(
     request: Request,
     session_id: Annotated[str, Path()],

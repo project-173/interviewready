@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - sit
+      - fix-audio
+      - add-audio-interview
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}

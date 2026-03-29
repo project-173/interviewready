@@ -71,6 +71,8 @@ class OrchestrationAgent:
             with propagate_attributes(user_id=user_id, session_id=session_id):
 
                 intent = self._parse_intent(request.intent)
+                if request.jobDescription:
+                    context.job_description = request.jobDescription
                 normalized = self._normalize_or_fail(request, context)
                 if isinstance(normalized, AgentResponse):
                     return normalized
@@ -227,10 +229,16 @@ class OrchestrationAgent:
     def _render_input(self, agent_input: AgentInput) -> str:
         data = (
             agent_input.resume.model_dump(exclude_none=True)
-            if agent_input.resume
+            if agent_input.resume is not None
             else {}
         )
-        if agent_input.intent == Intent.ALIGNMENT.value:
+        # Handle cases where agent_input.intent might be an Enum or a string
+        intent_value = (
+            agent_input.intent.value
+            if hasattr(agent_input.intent, "value")
+            else agent_input.intent
+        )
+        if intent_value == Intent.ALIGNMENT.value:
             return f"{json.dumps(data, indent=2)}\nJD: {agent_input.job_description}"
         return json.dumps(data, indent=2)
 

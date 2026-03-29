@@ -1,0 +1,314 @@
+import asyncio
+import base64
+import json
+from typing import Annotated
+
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
+from google import genai
+from google.genai import types
+
+from app.api.v1.services import get_session_context
+from app.core.config import settings
+from app.core.logging import logger
+
+router = APIRouter()
+LIVE_MODEL = "gemini-3.1-flash-live-preview"
+
+
+@router.websocket("/live")
+async def interview_live_websocket(
+    websocket: WebSocket,
+    session_id: Annotated[str, Query(alias="sessionId")],
+):
+    """Handle a real-time Multimodal Live interview session with Gemini."""
+
+    user_id = "dev-user"
+
+    try:
+        context = get_session_context(session_id=session_id, user_id=user_id)
+    except Exception:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    if not context:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    await websocket.accept()
+    await websocket.send_json(
+        {
+            "type": "textStream",
+            "data": "Connecting to AI Coach... Please wait a moment.",
+        }
+    )
+
+    client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+    system_instruction = (
+        "You are an expert Interview Coach conducting a LIVE VOICE mock interview. "
+        "IMPORTANT: You must speak naturally, warmly, and concisely. "
+        "Your goal is to simulate a professional interview based on the user's resume and the job description provided.\n\n"
+        "MANDATORY STARTUP RULE:\n"
+        "1. Immediately start the conversation yourself. Do NOT wait for a 'hello' from the user.\n"
+        "2. Begin with a professional greeting (e.g., 'Hello! Thanks for joining today.').\n"
+        "3. Explicitly state the role you are interviewing them for.\n"
+        "4. Ask the FIRST targeted interview question right away.\n"
+        "5. Keep your responses short to allow for a back-and-forth flow.\n\n"
+        "Focus on one question at a time. If the user stops talking, wait briefly but be ready to guide the conversation if needed."
+    )
+
+    if context.resume_data:
+        resume_context = context.resume_data
+        if isinstance(resume_context, dict):
+            resume_context = json.dumps(resume_context, indent=2)
+        system_instruction += f"\n\nCandidate Resume Context:\n{resume_context}"
+
+    if context.job_description:
+        system_instruction += f"\n\nTarget Job Description:\n{context.job_description}"
+
+    logger.info(
+        f"Starting Live Interview for session {session_id}. "
+        f"System instruction length: {len(system_instruction)}"
+    )
+
+    try:
+        system_instruction_content = types.Content(
+            parts=[types.Part(text=system_instruction)]
+        )
+
+        async with client.aio.live.connect(
+            model=LIVE_MODEL,
+            config=types.LiveConnectConfig(
+                system_instruction=system_instruction_content,
+                response_modalities=[types.Modality.AUDIO],
+                input_audio_transcription=types.AudioTranscriptionConfig(),
+                output_audio_transcription=types.AudioTranscriptionConfig(),
+                speech_config=types.SpeechConfig(
+                    language_code="en-US",
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name="Aoede"
+                        )
+                    ),
+                ),
+                thinking_config=types.ThinkingConfig(
+                    thinking_level=types.ThinkingLevel.MINIMAL
+                ),
+                context_window_compression=types.ContextWindowCompressionConfig(
+                    sliding_window=types.SlidingWindow(),
+                ),
+            ),
+        ) as session:
+            await websocket.send_json(
+                {
+                    "type": "textStream",
+                    "data": "Voice session active. AI is initializing...",
+                }
+            )
+
+            awaiting_model_response = True
+            await session.send_realtime_input(
+                text=(
+                    "Start the live mock interview now. "
+                    "Greet the candidate, mention the role, and ask the first question."
+                )
+            )
+
+            async def send_to_client() -> None:
+                """Relay Gemini events back to the browser websocket."""
+
+                chunk_count = 0
+                nonlocal awaiting_model_response
+
+                try:
+                    async for response in session.receive():
+                        try:
+                            content = response.server_content
+                            if content:
+                                if getattr(content, "interrupted", False):
+                                    logger.info("[VOICE_BACKEND] AI interrupted by user")
+                                    awaiting_model_response = False
+                                    await websocket.send_json({"interrupted": True})
+
+                                if getattr(content, "model_turn", None):
+                                    awaiting_model_response = True
+                                    for part in content.model_turn.parts:
+                                        if getattr(part, "inline_data", None):
+                                            audio_data = part.inline_data.data
+                                            chunk_count += 1
+                                            if chunk_count % 20 == 0:
+                                                logger.info(
+                                                    "[VOICE_TELEMETRY] Relaying AI audio "
+                                                    f"chunk #{chunk_count}: {len(audio_data)} bytes"
+                                                )
+                                            encoded_audio = base64.b64encode(
+                                                audio_data
+                                            ).decode("utf-8")
+                                            await websocket.send_json(
+                                                {
+                                                    "type": "audioStream",
+                                                    "data": encoded_audio,
+                                                }
+                                            )
+                                        if getattr(part, "text", None):
+                                            logger.info(
+                                                f"[VOICE_BACKEND] AI Text Part: {part.text}"
+                                            )
+                                            await websocket.send_json(
+                                                {
+                                                    "type": "textStream",
+                                                    "data": part.text,
+                                                }
+                                            )
+
+                                if getattr(content, "input_transcription", None):
+                                    text = content.input_transcription.text
+                                    logger.info(
+                                        f"[VOICE_BACKEND] User Input Transcription: {text}"
+                                    )
+                                    await websocket.send_json(
+                                        {
+                                            "type": "inputTranscription",
+                                            "data": text,
+                                        }
+                                    )
+
+                                if getattr(content, "output_transcription", None):
+                                    text = content.output_transcription.text
+                                    logger.info(
+                                        f"[VOICE_BACKEND] AI Output Transcription: {text}"
+                                    )
+                                    await websocket.send_json(
+                                        {"type": "textStream", "data": text}
+                                    )
+
+                                if getattr(content, "turn_complete", False):
+                                    logger.info(
+                                        "[VOICE_BACKEND] Turn Complete signal received from Gemini"
+                                    )
+                                    awaiting_model_response = False
+                                    await websocket.send_json(
+                                        {"event": "turn_complete"}
+                                    )
+
+                                if getattr(content, "generation_complete", False):
+                                    logger.info(
+                                        "[VOICE_BACKEND] Generation Complete signal received from Gemini"
+                                    )
+                                    awaiting_model_response = False
+                                    await websocket.send_json(
+                                        {"event": "generation_complete"}
+                                    )
+
+                            if response.go_away:
+                                await websocket.send_json(
+                                    {
+                                        "type": "warning",
+                                        "data": (
+                                            "Session will terminate in "
+                                            f"{response.go_away.time_left} due to connection limits."
+                                        ),
+                                    }
+                                )
+                        except Exception as inner_e:
+                            logger.error(
+                                f"Error processing Gemini message part: {inner_e}"
+                            )
+                except Exception as e:
+                    logger.error(f"Gemini receive error: {e}")
+                    await websocket.send_json({"error": str(e)})
+
+            async def receive_from_client() -> None:
+                """Relay browser audio/control messages to Gemini."""
+
+                chunk_in_count = 0
+                nonlocal awaiting_model_response
+
+                try:
+                    while True:
+                        data = await websocket.receive()
+
+                        if data.get("bytes"):
+                            awaiting_model_response = False
+                            audio_bytes = data["bytes"]
+                            chunk_in_count += 1
+                            if chunk_in_count % 50 == 0:
+                                logger.debug(
+                                    "[VOICE_BACKEND] Relaying chunk "
+                                    f"#{chunk_in_count} ({len(audio_bytes)} bytes) to Gemini"
+                                )
+
+                            await session.send_realtime_input(
+                                audio=types.Blob(
+                                    data=audio_bytes,
+                                    mime_type="audio/pcm;rate=16000",
+                                )
+                            )
+                            continue
+
+                        if not data.get("text"):
+                            continue
+
+                        try:
+                            msg = json.loads(data["text"])
+                        except json.JSONDecodeError:
+                            continue
+
+                        event_type = msg.get("event") or msg.get("type")
+
+                        if msg.get("type") == "realtimeInput" and msg.get("audioData"):
+                            audio_bytes = base64.b64decode(msg["audioData"])
+                            awaiting_model_response = False
+                            await session.send_realtime_input(
+                                audio=types.Blob(
+                                    data=audio_bytes,
+                                    mime_type="audio/pcm;rate=16000",
+                                )
+                            )
+                            continue
+
+                        if event_type == "interrupt":
+                            logger.info("[VOICE_BACKEND] Interrupt received")
+                            awaiting_model_response = False
+                            # Gemini Live 3.1 handles interruption through incoming
+                            # realtime audio and server-side VAD. The client uses this
+                            # event only as a local synchronization signal.
+                            continue
+
+                        if event_type == "audio_stream_end":
+                            logger.info("[VOICE_BACKEND] Audio stream end received")
+                            awaiting_model_response = True
+                            await session.send_realtime_input(audio_stream_end=True)
+                            continue
+
+                        if event_type == "ping":
+                            await websocket.send_json({"event": "pong"})
+                            continue
+
+                        if msg.get("text"):
+                            awaiting_model_response = False
+                            await session.send_realtime_input(text=msg["text"])
+                except WebSocketDisconnect:
+                    logger.info(f"Client disconnected for session {session_id}")
+                    raise
+                except Exception as e:
+                    logger.error(f"Error receiving from Client: {e}")
+                    await websocket.send_json(
+                        {"error": f"Client communication error: {str(e)}"}
+                    )
+
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(send_to_client())
+                tg.create_task(receive_from_client())
+
+            logger.info(f"WebSocket disconnected for session {session_id}")
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for session {session_id}")
+    except Exception as e:
+        logger.error(f"WebSocket Error: {e}")
+        if websocket.client_state.name != "DISCONNECTED":
+            try:
+                await websocket.send_json({"error": f"Voice session failed: {str(e)}"})
+            except Exception:
+                pass
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR, reason="Voice session failed")

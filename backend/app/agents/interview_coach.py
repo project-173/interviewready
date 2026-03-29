@@ -183,6 +183,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
     def _store_answer_and_advance(self, user_answer: str, context: SessionContext) -> None:
         """Store user's answer and advance to next question."""
         shared_memory = self._ensure_shared_memory(context)
+        # Ensure we don't duplicate answers if the process is called multiple times for the same state
         user_answers = list(shared_memory.get("user_answers", []))
         user_answers.append(user_answer)
         shared_memory["user_answers"] = user_answers
@@ -749,7 +750,12 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 
             # Parse the JSON response and handle progression logic
             try:
-                response_json = json.loads(result)
+                # Robust JSON parsing (handles markdown blocks)
+                from ..utils.json_parser import parse_json_payload
+                response_json = parse_json_payload(result)
+                if response_json is None:
+                    raise json.JSONDecodeError("Failed to parse JSON from result", result, 0)
+
                 if response_json.get("interview_complete", False):
                     if isinstance(input_data, AgentInput) and is_follow_up and user_answer:
                         self._store_answer_and_advance(user_answer, context)

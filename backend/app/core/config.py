@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     SERVER_PORT: int = 8080
     LOG_LEVEL: str = "DEBUG"
     APP_ENV: str = "local" # (e.g. local, staging, prod)
+    DEFAULT_RATE_LIMIT: str = "20/minute"
 
     # Google Configuration
     GEMINI_MODEL: str = "gemini-2.5-flash"

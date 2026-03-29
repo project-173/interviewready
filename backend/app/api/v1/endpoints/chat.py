@@ -18,6 +18,8 @@ from app.agents import GeminiService
 from app.agents.llm_judge import LLmasJudgeEvaluator
 from app.models import AgentResponse, ChatApiResponse, ChatRequest
 from app.utils.json_parser import parse_json_payload
+from app.core.limiter import limiter
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -36,11 +38,11 @@ def get_llm_judge() -> LLmasJudgeEvaluator:
 
 
 @router.post("")
-@limiter.limit("10/minute")
+@limiter.limit(settings.DEFAULT_RATE_LIMIT)
 @observe(name="chat_endpoint")
 async def chat_endpoint(
-    http_request: Request,
-    request: ChatRequest,
+    request: Request,
+    chat_request: ChatRequest,
     session_id: Annotated[str, Query(alias="sessionId")],
 ) -> ChatApiResponse:
     """Run orchestration for the chat message within a user-owned session."""
@@ -81,7 +83,7 @@ async def chat_endpoint(
 
             try:
                 internal_response = await run_in_threadpool(
-                    orchestrator.orchestrate, request, context
+                    orchestrator.orchestrate, chat_request, context
                 )
 
                 if settings.LANGFUSE_LLM_AS_A_JUDGE_ENABLED and internal_response.content:
@@ -160,7 +162,10 @@ def _extract_api_payload(response: AgentResponse) -> dict[str, Any] | list[Any] 
 
 def _parse_json_payload(content: str) -> dict[str, Any] | list[Any] | None:
     """Parse JSON payload from raw content or fenced markdown code block."""
-    parsed = parse_json_payload(content, allow_array=True)
-    if isinstance(parsed, (dict, list)):
-        return parsed
+    try:
+        parsed = parse_json_payload(content, allow_array=True)
+        if isinstance(parsed, (dict, list)):
+            return parsed
+    except Exception as exc:
+        logger.warning(f"Failed to parse JSON payload in chat endpoint: {exc}", content_preview=content[:100])
     return None
