@@ -514,6 +514,15 @@ export const InterviewStep: React.FC<{
           // Clear playback queue if user interrupts AI
           console.log('[VOICE_FRONTEND] AI Interrupted, clearing playback queue');
           playbackQueueRef.current = [];
+          
+          // CRITICAL: Stop the AudioContext immediately to kill any currently playing buffer
+          if (playbackContextRef.current && playbackContextRef.current.state === 'running') {
+            playbackContextRef.current.suspend().then(() => {
+              nextStartTimeRef.current = 0;
+              playbackContextRef.current?.resume();
+            });
+          }
+
           isSpeakingRef.current = false;
           aiTurnActiveRef.current = false;
           setIsSpeaking(false);
@@ -908,13 +917,17 @@ export const InterviewStep: React.FC<{
         analyser.fftSize = 256;
         source.connect(analyser);
         
-        const bufferLength = analyser.frequencyBinCount;
+        const bufferLength = analyser.fftSize;
         const dataArray = new Uint8Array(bufferLength);
         
         let lastSpeakTime = Date.now();
         let speechGateUntil = 0;
-        // Documentation Match: Increase threshold to avoid background-noise interruptions
-        const SILENCE_THRESHOLD = 15; 
+        let consecutiveSpeechFrames = 0;
+        const recordingStartedAt = Date.now();
+        // RMS-based VAD is more stable than frequency average for mic noise.
+        const SPEECH_RMS_THRESHOLD = 0.035;
+        const MIN_CONSECUTIVE_SPEECH_FRAMES = 4;
+        const VAD_WARMUP_MS = 300;
         const MAX_RECORDING_TIME = 120000;
 
         silenceTimeoutRef.current = setTimeout(() => {
@@ -934,17 +947,31 @@ export const InterviewStep: React.FC<{
           // but we can dampen it or ignore VAD events locally.
           // Gemini server-side VAD handles the turn taking.
 
-          analyser.getByteFrequencyData(dataArray);
-          const average = dataArray.reduce((x, y) => x + y) / bufferLength;
+          analyser.getByteTimeDomainData(dataArray);
+          let sumSquares = 0;
+          for (let i = 0; i < bufferLength; i++) {
+            const normalized = (dataArray[i] - 128) / 128;
+            sumSquares += normalized * normalized;
+          }
+          const rms = Math.sqrt(sumSquares / bufferLength);
+          const speechDetectedNow =
+            Date.now() - recordingStartedAt > VAD_WARMUP_MS &&
+            rms > SPEECH_RMS_THRESHOLD;
 
             // Renamed for clarity: this is the duration after which silence triggers a turn completion
             const USER_TURN_END_SILENCE_MS = 1200; 
 
-            if (average > SILENCE_THRESHOLD) {
+            if (speechDetectedNow) {
+                consecutiveSpeechFrames += 1;
+            } else {
+                consecutiveSpeechFrames = 0;
+            }
+
+            if (consecutiveSpeechFrames >= MIN_CONSECUTIVE_SPEECH_FRAMES) {
                 lastSpeakTime = Date.now();
                 speechGateUntil = lastSpeakTime + 250;
                 if (!hasDetectedSpeechRef.current) {
-                    console.log("[VOICE] Speech detected");
+                    console.log("[VOICE] Speech detected", { rms: Number(rms.toFixed(4)) });
                 }
                 hasDetectedSpeechRef.current = true;
                 isSendingAudioRef.current = true;

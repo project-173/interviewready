@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import time
 from typing import Annotated
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
@@ -107,6 +108,13 @@ async def interview_live_websocket(
             )
 
             awaiting_model_response = True
+            user_turn_state = {
+                "id": 0,
+                "chunks": 0,
+                "bytes": 0,
+                "started_at": None,
+                "input_transcriptions": 0,
+            }
             await session.send_realtime_input(
                 text=(
                     "Start the live mock interview now. "
@@ -118,98 +126,85 @@ async def interview_live_websocket(
                 """Relay Gemini events back to the browser websocket."""
 
                 chunk_count = 0
-                nonlocal awaiting_model_response
+                nonlocal awaiting_model_response, user_turn_state
 
                 try:
                     async for response in session.receive():
                         try:
                             content = response.server_content
-                            if content:
-                                if getattr(content, "interrupted", False):
-                                    logger.info("[VOICE_BACKEND] AI interrupted by user")
-                                    awaiting_model_response = False
-                                    await websocket.send_json({"interrupted": True})
+                            if not content:
+                                # Check for go_away even if content is missing
+                                if response.go_away:
+                                    logger.warning(f"Session closing in {response.go_away.time_left}")
+                                    await websocket.send_json({
+                                        "type": "warning",
+                                        "data": f"Session will terminate in {response.go_away.time_left} due to connection limits."
+                                    })
+                                continue
 
-                                if getattr(content, "model_turn", None):
-                                    awaiting_model_response = True
-                                    for part in content.model_turn.parts:
-                                        if getattr(part, "inline_data", None):
-                                            audio_data = part.inline_data.data
-                                            chunk_count += 1
-                                            if chunk_count % 20 == 0:
-                                                logger.info(
-                                                    "[VOICE_TELEMETRY] Relaying AI audio "
-                                                    f"chunk #{chunk_count}: {len(audio_data)} bytes"
-                                                )
-                                            encoded_audio = base64.b64encode(
-                                                audio_data
-                                            ).decode("utf-8")
-                                            await websocket.send_json(
-                                                {
-                                                    "type": "audioStream",
-                                                    "data": encoded_audio,
-                                                }
-                                            )
-                                        if getattr(part, "text", None):
-                                            logger.info(
-                                                f"[VOICE_BACKEND] AI Text Part: {part.text}"
-                                            )
-                                            await websocket.send_json(
-                                                {
-                                                    "type": "textStream",
-                                                    "data": part.text,
-                                                }
-                                            )
+                            # 1. Handle Interruption (Highest Priority)
+                            if getattr(content, "interrupted", False):
+                                logger.info("[VOICE_BACKEND] AI interrupted by user")
+                                awaiting_model_response = False
+                                await websocket.send_json({"interrupted": True})
 
-                                if getattr(content, "input_transcription", None):
-                                    text = content.input_transcription.text
-                                    logger.info(
-                                        f"[VOICE_BACKEND] User Input Transcription: {text}"
-                                    )
-                                    await websocket.send_json(
-                                        {
-                                            "type": "inputTranscription",
-                                            "data": text,
-                                        }
-                                    )
+                            # 2. Handle Input Transcriptions (User Voice)
+                            if getattr(content, "input_transcription", None):
+                                text = content.input_transcription.text
+                                user_turn_state["input_transcriptions"] += 1
+                                logger.info(
+                                    f"[VOICE_BACKEND] User Input Transcription: {text}"
+                                )
+                                await websocket.send_json({
+                                    "type": "inputTranscription",
+                                    "data": text,
+                                })
 
-                                if getattr(content, "output_transcription", None):
-                                    text = content.output_transcription.text
-                                    logger.info(
-                                        f"[VOICE_BACKEND] AI Output Transcription: {text}"
-                                    )
-                                    await websocket.send_json(
-                                        {"type": "textStream", "data": text}
-                                    )
+                            # 3. Handle Model Turn (AI Audio and Text)
+                            if getattr(content, "model_turn", None):
+                                awaiting_model_response = True
+                                for part in content.model_turn.parts:
+                                    # Audio Data
+                                    if getattr(part, "inline_data", None):
+                                        audio_data = part.inline_data.data
+                                        chunk_count += 1
+                                        if chunk_count % 50 == 0:
+                                            logger.info(f"[VOICE_TELEMETRY] Relaying AI audio chunk #{chunk_count}")
+                                        
+                                        encoded_audio = base64.b64encode(audio_data).decode("utf-8")
+                                        await websocket.send_json({
+                                            "type": "audioStream",
+                                            "data": encoded_audio,
+                                        })
+                                    
+                                    # Text Part (including thinking)
+                                    if getattr(part, "text", None):
+                                        logger.info(f"[VOICE_BACKEND] AI Text Part: {part.text}")
+                                        await websocket.send_json({
+                                            "type": "textStream",
+                                            "data": part.text,
+                                        })
 
-                                if getattr(content, "turn_complete", False):
-                                    logger.info(
-                                        "[VOICE_BACKEND] Turn Complete signal received from Gemini"
-                                    )
-                                    awaiting_model_response = False
-                                    await websocket.send_json(
-                                        {"event": "turn_complete"}
-                                    )
+                            # 4. Handle Output Transcriptions (AI Voice)
+                            if getattr(content, "output_transcription", None):
+                                text = content.output_transcription.text
+                                logger.info(f"[VOICE_BACKEND] AI Output Transcription: {text}")
+                                await websocket.send_json({
+                                    "type": "textStream", 
+                                    "data": text
+                                })
 
-                                if getattr(content, "generation_complete", False):
-                                    logger.info(
-                                        "[VOICE_BACKEND] Generation Complete signal received from Gemini"
-                                    )
-                                    awaiting_model_response = False
-                                    await websocket.send_json(
-                                        {"event": "generation_complete"}
-                                    )
+                            # 5. Handle Turn Completion Signals
+                            if getattr(content, "turn_complete", False) or getattr(content, "generation_complete", False):
+                                logger.info("[VOICE_BACKEND] Turn/Generation Complete signal")
+                                awaiting_model_response = False
+                                await websocket.send_json({"event": "turn_complete"})
 
                             if response.go_away:
-                                await websocket.send_json(
-                                    {
-                                        "type": "warning",
-                                        "data": (
-                                            "Session will terminate in "
-                                            f"{response.go_away.time_left} due to connection limits."
-                                        ),
-                                    }
-                                )
+                                await websocket.send_json({
+                                    "type": "warning",
+                                    "data": f"Session will terminate in {response.go_away.time_left} due to connection limits.",
+                                })
                         except Exception as inner_e:
                             logger.error(
                                 f"Error processing Gemini message part: {inner_e}"
@@ -222,7 +217,7 @@ async def interview_live_websocket(
                 """Relay browser audio/control messages to Gemini."""
 
                 chunk_in_count = 0
-                nonlocal awaiting_model_response
+                nonlocal awaiting_model_response, user_turn_state
 
                 try:
                     while True:
@@ -232,6 +227,15 @@ async def interview_live_websocket(
                             awaiting_model_response = False
                             audio_bytes = data["bytes"]
                             chunk_in_count += 1
+                            if user_turn_state["chunks"] == 0:
+                                user_turn_state["id"] += 1
+                                user_turn_state["started_at"] = time.monotonic()
+                                logger.info(
+                                    "[VOICE_BACKEND] Starting user audio turn "
+                                    f"#{user_turn_state['id']}"
+                                )
+                            user_turn_state["chunks"] += 1
+                            user_turn_state["bytes"] += len(audio_bytes)
                             if chunk_in_count % 50 == 0:
                                 logger.debug(
                                     "[VOICE_BACKEND] Relaying chunk "
@@ -259,6 +263,15 @@ async def interview_live_websocket(
                         if msg.get("type") == "realtimeInput" and msg.get("audioData"):
                             audio_bytes = base64.b64decode(msg["audioData"])
                             awaiting_model_response = False
+                            if user_turn_state["chunks"] == 0:
+                                user_turn_state["id"] += 1
+                                user_turn_state["started_at"] = time.monotonic()
+                                logger.info(
+                                    "[VOICE_BACKEND] Starting user audio turn "
+                                    f"#{user_turn_state['id']} (base64 payload)"
+                                )
+                            user_turn_state["chunks"] += 1
+                            user_turn_state["bytes"] += len(audio_bytes)
                             await session.send_realtime_input(
                                 audio=types.Blob(
                                     data=audio_bytes,
@@ -276,9 +289,28 @@ async def interview_live_websocket(
                             continue
 
                         if event_type == "audio_stream_end":
-                            logger.info("[VOICE_BACKEND] Audio stream end received")
+                            duration_ms = None
+                            if user_turn_state["started_at"] is not None:
+                                duration_ms = int(
+                                    (time.monotonic() - user_turn_state["started_at"]) * 1000
+                                )
+                            logger.info(
+                                "[VOICE_BACKEND] Audio stream end received "
+                                f"for turn #{user_turn_state['id']} "
+                                f"(chunks={user_turn_state['chunks']}, "
+                                f"bytes={user_turn_state['bytes']}, "
+                                f"input_transcriptions={user_turn_state['input_transcriptions']}, "
+                                f"duration_ms={duration_ms})"
+                            )
                             awaiting_model_response = True
                             await session.send_realtime_input(audio_stream_end=True)
+                            user_turn_state = {
+                                "id": user_turn_state["id"],
+                                "chunks": 0,
+                                "bytes": 0,
+                                "started_at": None,
+                                "input_transcriptions": 0,
+                            }
                             continue
 
                         if event_type == "ping":
