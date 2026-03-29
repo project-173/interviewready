@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import traceback
 from typing import Annotated
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
@@ -220,26 +221,35 @@ async def interview_live_websocket(
 
     try:
         await run_session()
+    except asyncio.CancelledError:
+        logger.info(f"[VOICE_BACKEND] Session task cancelled for session {session_id}")
     except WebSocketDisconnect:
         logger.info(f"[VOICE_BACKEND] WebSocket disconnected for session {session_id}")
     except Exception as exc:
-        logger.error(f"[VOICE_BACKEND] WebSocket Error: {exc}")
+        logger.error(f"[VOICE_BACKEND] WebSocket Error in session {session_id}: {type(exc).__name__}: {exc}")
+        logger.error(traceback.format_exc())
         if websocket.client_state.name != "DISCONNECTED":
             try:
                 await websocket.send_json({"error": f"Voice session failed: {str(exc)}"})
             except Exception:
                 pass
-            await websocket.close(
-                code=status.WS_1011_INTERNAL_ERROR, reason="Voice session failed"
-            )
+            try:
+                await websocket.close(
+                    code=status.WS_1011_INTERNAL_ERROR, reason=f"Voice session error: {type(exc).__name__}"
+                )
+            except Exception:
+                pass
     finally:
         receive_task.cancel()
         try:
-            await receive_task
-        except Exception:
+            # Shield the cleanup to ensure it completes even if the main task is being cancelled
+            await asyncio.shield(receive_task)
+        except (asyncio.CancelledError, Exception):
             pass
+        
         if websocket.client_state.name != "DISCONNECTED":
             try:
+                logger.info(f"[VOICE_BACKEND] Closing WebSocket for session {session_id}")
                 await websocket.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[VOICE_BACKEND] Error during final websocket close: {e}")

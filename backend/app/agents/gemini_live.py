@@ -124,6 +124,7 @@ class GeminiLive:
                             
                             if response.go_away:
                                 logger.warning(f"Received GoAway from Gemini: {response.go_away}")
+                                await event_queue.put({"type": "error", "error": "Gemini session ended: GoAway received"})
                             
                             server_content = response.server_content
                             tool_call = response.tool_call
@@ -185,8 +186,12 @@ class GeminiLive:
                 except asyncio.CancelledError:
                     logger.debug("receive_loop task cancelled")
                 except Exception as e:
-                    logger.error(f"receive_loop error: {type(e).__name__}: {e}")
-                    await event_queue.put({"type": "error", "error": f"{type(e).__name__}: {e}"})
+                    err_msg = str(e)
+                    logger.error(f"receive_loop error: {type(e).__name__}: {err_msg}")
+                    if "Resource has been exhausted" in err_msg or "quota" in err_msg.lower():
+                        await event_queue.put({"type": "error", "error": "AI Quota exhausted. Please wait a minute and try again."})
+                    else:
+                        await event_queue.put({"type": "error", "error": f"{type(e).__name__}: {err_msg}"})
                 finally:
                     logger.info("receive_loop exiting")
                     await event_queue.put(None)

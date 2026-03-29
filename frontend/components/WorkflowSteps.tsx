@@ -313,6 +313,7 @@ export const InterviewStep: React.FC<{
   const nextStartTimeRef = React.useRef(0);
   const animationFrameRef = React.useRef<number | null>(null);
   const silenceTimeoutRef = React.useRef<any | null>(null);
+  const heartbeatIntervalRef = React.useRef<any | null>(null);
   const resumeListeningTimeoutRef = React.useRef<number | null>(null);
   const socketRef = React.useRef<WebSocket | null>(null);
   const liveSessionRef = React.useRef<any>(null);
@@ -456,7 +457,7 @@ export const InterviewStep: React.FC<{
     let isComponentMounted = true;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || window.location.origin;
-    
+
     // Robustly construct the WebSocket URL to avoid double-slash issues.
     // If the base URL includes a protocol, strip it before prepending the ws protocol.
     const hostAndPath = API_BASE_URL.replace(/^https?:\/\//, '').replace(/\/$/, '');
@@ -473,6 +474,14 @@ export const InterviewStep: React.FC<{
           if (!isComponentMounted) return;
           console.log('[VOICE_FRONTEND] Relay Connection Established');
           setConnectionStatus('connected');
+
+          // Start heartbeat to prevent infrastructure timeouts (Cloud Run/Nginx)
+          if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+          heartbeatIntervalRef.current = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ event: 'ping', type: 'control' }));
+            }
+          }, 25000); // 25s ping
           
           try {
             if (!playbackContextRef.current || playbackContextRef.current.state === 'closed') {
@@ -567,9 +576,13 @@ export const InterviewStep: React.FC<{
           setConnectionStatus('error');
         };
 
-        ws.onclose = () => {
-          console.log('[VOICE_FRONTEND] Relay Connection Closed');
+        ws.onclose = (event) => {
+          console.log(`[VOICE_FRONTEND] Relay Connection Closed (Code: ${event.code}, Reason: ${event.reason || 'none'})`);
           setConnectionStatus('closed');
+          if (heartbeatIntervalRef.current) {
+            clearInterval(heartbeatIntervalRef.current);
+            heartbeatIntervalRef.current = null;
+          }
           stopPlaybackImmediately();
           teardownRecording(false);
         };
@@ -587,6 +600,9 @@ export const InterviewStep: React.FC<{
       teardownRecording(false);
       if (socketRef.current) {
         socketRef.current.close();
+      }
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
       }
       if (resumeListeningTimeoutRef.current) {
         window.clearTimeout(resumeListeningTimeoutRef.current);
