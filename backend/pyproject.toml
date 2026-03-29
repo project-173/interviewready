@@ -26,6 +26,7 @@ dependencies = [
     "llm-guard>=0.3.0",
     "pip",
     "langchain>=1.2.13",
+    "slowapi>=0.1.9",
 ]
 requires-python = ">=3.11"
 readme = "README.md"

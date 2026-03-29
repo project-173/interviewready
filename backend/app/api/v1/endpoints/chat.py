@@ -43,8 +43,8 @@ def get_llm_judge() -> LLmasJudgeEvaluator:
 @limiter.limit("10/minute")
 @observe(name="chat_endpoint")
 async def chat_endpoint(
-    http_request: Request,
-    request: ChatRequest,
+    request: Request,
+    chat_request: ChatRequest,
     session_id: Annotated[str, Query(alias="sessionId")],
 ) -> ChatApiResponse:
     """Run orchestration for the chat message within a user-owned session."""
@@ -85,7 +85,7 @@ async def chat_endpoint(
 
             try:
                 internal_response = await run_in_threadpool(
-                    orchestrator.orchestrate, request, context
+                    orchestrator.orchestrate, chat_request, context
                 )
 
                 if settings.LANGFUSE_LLM_AS_A_JUDGE_ENABLED and internal_response.content:
@@ -93,15 +93,15 @@ async def chat_endpoint(
                     if sample_rate > 0 and random.random() < sample_rate:
                         input_summary = (
                             "Intent: "
-                            f"{request.intent}, "
+                            f"{chat_request.intent}, "
                             "Job Description: "
-                            f"{request.jobDescription[:200] if request.jobDescription else 'None'}"
+                            f"{chat_request.jobDescription[:200] if chat_request.jobDescription else 'None'}"
                         )
                         current_trace = langfuse.get_current_trace()
                         trace_id = current_trace.id if current_trace else None
                         run_name = (
                             f"live/{internal_response.agent_name or 'unknown'}/"
-                            f"{request.intent}/{dt.date.today().isoformat()}"
+                            f"{chat_request.intent}/{dt.date.today().isoformat()}"
                         )
 
                         async def _run_judge_eval() -> None:
@@ -113,9 +113,9 @@ async def chat_endpoint(
                                     input_data=input_summary,
                                     output=internal_response.content,
                                     trace_id=trace_id,
-                                    intent=request.intent,
+                                    intent=chat_request.intent,
                                     session_id=session_id,
-                                    message_history=request.messageHistory or [],
+                                    message_history=chat_request.messageHistory or [],
                                     run_name=run_name,
                                 )
                             except Exception as judge_error:
