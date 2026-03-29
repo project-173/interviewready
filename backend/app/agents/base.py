@@ -85,14 +85,22 @@ class BaseAgent(ABC, BaseAgentProtocol):
             return cls._mock_responses_cache
 
         try:
+            if not cls.MOCK_RESPONSES_FILE.exists():
+                logger.error(
+                    f"Mock responses file does not exist at expected path: {cls.MOCK_RESPONSES_FILE}"
+                )
+                return {}
+
             raw = cls.MOCK_RESPONSES_FILE.read_text(encoding="utf-8")
             parsed = json.loads(raw)
             if isinstance(parsed, dict):
                 cls._mock_responses_cache = parsed
                 return parsed
-        except Exception:
+        except Exception as e:
             logger.warning(
-                "Failed to load mock responses file", path=str(cls.MOCK_RESPONSES_FILE)
+                "Failed to load mock responses file", 
+                path=str(cls.MOCK_RESPONSES_FILE),
+                error=str(e)
             )
 
         cls._mock_responses_cache = {}
