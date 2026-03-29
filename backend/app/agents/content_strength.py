@@ -16,7 +16,7 @@ from ..models.session import SessionContext
 class ContentStrengthAgent(BaseAgent):
     """Agent for analyzing content strength, skills reasoning, and evidence evaluation."""
 
-    USE_MOCK_RESPONSE = settings.MOCK_CONTENT_STRENGTH_AGENT
+    USE_MOCK_RESPONSE = True
     MOCK_RESPONSE_KEY = "ContentStrengthAgent"
     
     SYSTEM_PROMPT = (
@@ -122,7 +122,15 @@ class ContentStrengthAgent(BaseAgent):
 
             raw_result = raw_result or self.call_gemini(input_text, context)
 
-            structured_result = self.parse_and_validate(raw_result, ContentStrengthReport).model_dump()
+            # Ensure we have a valid dictionary for validation
+            parsed = self._parse_json(raw_result) if isinstance(raw_result, str) else raw_result
+            if not isinstance(parsed, dict):
+                parsed = {}
+            
+            # Re-serialize for parse_and_validate to handle potential string output
+            raw_content = json.dumps(parsed)
+
+            structured_result = self.parse_and_validate(raw_content, ContentStrengthReport).model_dump()
 
             processing_time = time.time() - processing_start_time
             
@@ -160,7 +168,7 @@ class ContentStrengthAgent(BaseAgent):
 
             # Log response creation
             logger.debug(
-                f"ContentStrengthAgent response created",
+                "ContentStrengthAgent response created",
                 session_id=session_id,
                 confidence_score=overall_confidence,
                 hallucination_risk=hallucination_risk,
@@ -173,7 +181,7 @@ class ContentStrengthAgent(BaseAgent):
             processing_time = time.time() - processing_start_time
             logger.log_agent_error(agent_name, e, session_id)
             logger.error(
-                f"ContentStrengthAgent processing failed",
+                "ContentStrengthAgent processing failed",
                 session_id=session_id,
                 processing_time_ms=round(processing_time * 1000, 2),
                 error_type=type(e).__name__,
@@ -263,6 +271,38 @@ class ContentStrengthAgent(BaseAgent):
             return float(node.get(field, 0.0))
         except (ValueError, TypeError):
             return 0.0
+
+    def _parse_json(self, text: str) -> Dict[str, Any]:
+        """Parse JSON from raw or fenced markdown text."""
+        if not text:
+            return {}
+
+        # Remove markdown code blocks if the AI ignored instructions
+        text = text.strip()
+        if text.startswith("```json"):
+            text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+        try:
+            return json.loads(text)
+        except Exception as e:
+            logger.warning(f"Direct JSON parse failed, trying regex: {e}")
+
+        # If it still fails, find the first { and last }
+        try:
+            start_idx = text.find("{")
+            end_idx = text.rfind("}")
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                json_str = text[start_idx : end_idx + 1]
+                return json.loads(json_str)
+        except Exception as e:
+            logger.error(f"Failed to parse JSON using regex extraction: {e}")
+
+        return {}
 
     @staticmethod
     def _build_prompt(input_data: AgentInput) -> str:

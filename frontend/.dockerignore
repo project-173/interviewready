@@ -1,8 +1,14 @@
-node_modules/
-dist/
-.git/
+node_modules
+dist
+.git
 .gitignore
+README.md
 Dockerfile
-docker-compose.yaml
-.env*
-! .env.production
+.dockerignore
+npm-debug.log
+build
+.env
+.env.local
+.env.example
+public/vite.svg
+tests/

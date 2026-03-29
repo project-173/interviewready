@@ -80,3 +80,4 @@ RESUME_SCHEMA = """
   }]
 }
 """
+

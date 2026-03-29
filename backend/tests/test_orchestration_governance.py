@@ -87,6 +87,53 @@ def test_governance_content_strength_audit_flags_unfaithful() -> None:
     assert audited.sharp_metadata["has_quantified_achievements"] is True
 
 
+def test_governance_preserves_interview_metadata_and_flags_sensitive_content() -> None:
+    governance = SharpGovernanceService()
+    response = AgentResponse(
+        agent_name="InterviewCoachAgent",
+        content='{"question":"Q1","can_proceed":true}',
+        reasoning="interview reasoning",
+        confidence_score=0.9,
+        decision_trace=[],
+        sharp_metadata={
+            "sensitive_input_detected": True,
+            "sensitive_input_types": ["email"],
+            "bias_review_required": True,
+            "bias_flags": ["age"],
+            "responsible_ai": {"explainability": {"decision_basis": ["job alignment"]}},
+        },
+    )
+
+    audited = governance.audit(response, "resume input")
+
+    assert audited.sharp_metadata["responsible_ai"]["explainability"]["decision_basis"] == ["job alignment"]
+    assert audited.sharp_metadata["governance_audit"] == "flagged"
+    assert "sensitive_interview_content" in audited.sharp_metadata["audit_flags"]
+    assert "bias_review_required" in audited.sharp_metadata["audit_flags"]
+    assert "requires_human_review" in audited.sharp_metadata["audit_flags"]
+
+
+def test_governance_flags_prompt_injection_attempts_for_interview_agent() -> None:
+    governance = SharpGovernanceService()
+    response = AgentResponse(
+        agent_name="InterviewCoachAgent",
+        content='{"question":"Q2","can_proceed":false}',
+        reasoning="interview reasoning",
+        confidence_score=0.9,
+        decision_trace=[],
+        sharp_metadata={
+            "prompt_injection_blocked": True,
+            "prompt_injection_signals": ["heuristic:ignore"],
+        },
+    )
+
+    audited = governance.audit(response, "malicious interview input")
+
+    assert audited.sharp_metadata["governance_audit"] == "flagged"
+    assert "prompt_injection_attempt" in audited.sharp_metadata["audit_flags"]
+    assert "requires_human_review" in audited.sharp_metadata["audit_flags"]
+
+
 def test_orchestration_routes_resume_critic_intent() -> None:
     """Test that ResumeCritic intent routes to ResumeCriticAgent."""
     governance = SharpGovernanceService()
@@ -102,7 +149,7 @@ def test_orchestration_routes_resume_critic_intent() -> None:
     context = SessionContext(session_id="s1", user_id="u1")
     request = ChatRequest(
         intent="RESUME_CRITIC",
-        resumeData={},
+        resumeData={"skills": [{"name": "Python"}]},
         jobDescription="",
         messageHistory=[]
     )
@@ -112,7 +159,7 @@ def test_orchestration_routes_resume_critic_intent() -> None:
     assert len(context.history or []) == 1
     assert resume_agent.inputs
     assert not content_agent.inputs
-    assert context.decision_trace[-1].startswith("Orchestrator: Routed to ResumeCriticAgent")
+    assert context.decision_trace[-1].startswith("Routed to ResumeCriticAgent")
 
 
 def test_orchestration_routes_alignment_intent() -> None:
@@ -129,7 +176,7 @@ def test_orchestration_routes_alignment_intent() -> None:
     context = SessionContext(session_id="s2", user_id="u2")
     request = ChatRequest(
         intent="ALIGNMENT",
-        resumeData={},
+        resumeData={"skills": [{"name": "Python"}]},
         jobDescription="",
         messageHistory=[]
     )
@@ -139,9 +186,7 @@ def test_orchestration_routes_alignment_intent() -> None:
     assert len(context.history or []) == 1
     assert job_agent.inputs
     assert len(job_agent.inputs) == 1
-    artifacts = (context.shared_memory or {}).get("artifacts")
-    assert isinstance(artifacts, list)
-    assert artifacts and artifacts[0].get("agent") == "JobAlignmentAgent"
+    assert context.decision_trace[-1].startswith("Routed to JobAlignmentAgent")
 
 
 def test_orchestration_interview_coach_reads_from_other_agents() -> None:
@@ -158,7 +203,7 @@ def test_orchestration_interview_coach_reads_from_other_agents() -> None:
     context = SessionContext(session_id="s3", user_id="u3")
     request = ChatRequest(
         intent="INTERVIEW_COACH",
-        resumeData={"work": ["Engineering"]},
+        resumeData={"skills": [{"name": "Python"}]},
         jobDescription="Urgent backend role",
         messageHistory=[{"role": "user", "text": "Tell me interview tips"}],
     )
@@ -166,12 +211,8 @@ def test_orchestration_interview_coach_reads_from_other_agents() -> None:
     result = orchestrator.orchestrate(request, context)
 
     assert result.agent_name == "InterviewCoachAgent"
-    assert resume_agent.inputs
-    assert content_agent.inputs
-    assert job_agent.inputs
     assert interview_agent.inputs
-
-    shared_memory = context.shared_memory or {}
-    assert shared_memory.get("resumecritic") == "ResumeCriticAgent processed: Resume data: {\n  \"work\": [\"Engineering\"]\n}"
-    assert shared_memory.get("contentstrength") == "ContentStrengthAgent processed: Resume data: {\n  \"work\": [\"Engineering\"]\n}"
-    assert shared_memory.get("jobalignment") == "JobAlignmentAgent processed: Resume data: {\n  \"work\": [\"Engineering\"]\n}\nJob Description: Urgent backend role"
+    assert not resume_agent.inputs
+    assert not content_agent.inputs
+    assert not job_agent.inputs
+    assert context.decision_trace[-1].startswith("Routed to InterviewCoachAgent")

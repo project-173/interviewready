@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "id": "job_swe_role",
+      "title": "Software Engineer Role",
+      "notes": "Standard software engineer job description",
+      "last_reviewed": "2026-03-28",
+      "requirements": [
+        "Bachelor's degree in Computer Science or related field",
+        "3+ years of software development experience",
+        "Proficiency in JavaScript, Python, or similar languages",
+        "Experience with web frameworks",
+        "Strong problem-solving skills"
+      ],
+      "text": "We are seeking a talented Software Engineer to join our growing team. The ideal candidate will have experience building scalable web applications, working with modern frameworks, and collaborating in an agile environment. You will be responsible for developing new features, maintaining existing code, and participating in code reviews."
+    },
+    {
+      "id": "job_massive_description",
+      "title": "Massive Job Description",
+      "notes": "Extremely long job description to test context window limits",
+      "last_reviewed": "2026-03-28",
+      "requirements": [
+        "Bachelor's degree in Computer Science or related field",
+        "5+ years of software development experience",
+        "Expertise in multiple programming languages",
+        "Experience with cloud platforms",
+        "Strong communication skills",
+        "Leadership experience",
+        "Project management skills",
+        "Database design expertise",
+        "Security knowledge",
+        "Performance optimization experience",
+        "Additional Requirement 1: This is an extended requirement to test context window limits and ensure the system can handle very long job descriptions with many detailed requirements and specifications.",
+        "Additional Requirement 2: Must have experience with microservices architecture and distributed systems design patterns.",
+        "Additional Requirement 3: Proficiency in containerization technologies like Docker and Kubernetes.",
+        "Additional Requirement 4: Experience with CI/CD pipelines and automated testing frameworks.",
+        "Additional Requirement 5: Strong understanding of security best practices and compliance requirements.",
+        "Additional Requirement 6: Ability to work with large datasets and optimize database queries.",
+        "Additional Requirement 7: Experience with monitoring and observability tools.",
+        "Additional Requirement 8: Knowledge of API design and RESTful services.",
+        "Additional Requirement 9: Familiarity with agile methodologies and project management tools.",
+        "Additional Requirement 10: Excellent written and verbal communication skills."
+      ],
+      "text": "This is an extremely long job description designed to test context window limits. We are seeking a highly qualified Senior Software Engineer with extensive experience in building large-scale distributed systems. The ideal candidate will have a proven track record of delivering complex projects on time and within budget. You will be responsible for architecting and implementing solutions that can handle millions of users. This role requires deep technical expertise and strong leadership capabilities. The position offers competitive compensation, comprehensive benefits, and significant growth opportunities. We are looking for someone who can mentor junior developers and drive technical excellence across the organization. The successful candidate will work with cutting-edge technologies and have the opportunity to make a significant impact on our products and services. This is a challenging role that requires dedication, innovation, and a commitment to continuous learning. We offer a dynamic work environment with flexible hours, remote work options, and a collaborative culture. The ideal candidate will be passionate about technology and excited to solve complex problems. Long job description content for testing context limits. Additional job details to extend the content and test context limits. More verbose content to ensure we reach the desired token count for testing purposes. Extended job description continues with more details about the role, responsibilities, and expectations. This content is deliberately repetitive to test how well the system handles very long input documents. The job requires expertise in multiple areas including frontend development, backend development, database management, system architecture, and team leadership. Candidates should have experience with modern development practices and tools. The role involves working with cross-functional teams and stakeholders across the organization. We value innovation, creativity, and a passion for learning. The ideal candidate will be able to balance technical excellence with business acumen. This position offers opportunities for professional growth and career advancement. We provide a supportive environment that encourages experimentation and continuous improvement. The successful candidate will contribute to our mission of delivering high-quality software solutions that meet our customers' needs."
+    }
+  ]
+}

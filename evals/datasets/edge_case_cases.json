@@ -1,0 +1,192 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "edge_no_resume_empty",
+      "agent": "ResumeCriticAgent",
+      "intent": "RESUME_CRITIC",
+      "resume_id": "resume_empty",
+      "notes": "Edge case: Completely empty resume object",
+      "edge_case": true,
+      "tags": [
+        "no_resume_data",
+        "empty_data"
+      ]
+    },
+    {
+      "id": "edge_no_resume_missing_fields",
+      "agent": "ResumeCriticAgent",
+      "intent": "RESUME_CRITIC",
+      "resume_id": "resume_missing_fields",
+      "notes": "Edge case: Resume with missing critical fields",
+      "edge_case": true,
+      "tags": [
+        "no_resume_data",
+        "missing_fields"
+      ]
+    },
+    {
+      "id": "edge_prompt_injection_ignore",
+      "agent": "ResumeCriticAgent",
+      "intent": "RESUME_CRITIC",
+      "resume_id": "resume_prompt_injection_ignore",
+      "notes": "Edge case: Prompt injection attempting to ignore instructions",
+      "edge_case": true,
+      "tags": [
+        "prompt_injection",
+        "security"
+      ]
+    },
+    {
+      "id": "edge_prompt_injection_system_override",
+      "agent": "JobAlignmentAgent",
+      "intent": "JOB_ALIGNMENT",
+      "resume_id": "resume_prompt_injection_system",
+      "job_description_id": "job_swe_role",
+      "notes": "Edge case: Prompt injection trying to override system prompt",
+      "edge_case": true,
+      "tags": [
+        "prompt_injection",
+        "security",
+        "system_override"
+      ]
+    },
+    {
+      "id": "edge_irrelevant_recipe_resume",
+      "agent": "ContentStrengthAgent",
+      "intent": "CONTENT_STRENGTH",
+      "resume_id": "resume_recipe_content",
+      "notes": "Edge case: Resume contains cooking recipe instead of professional content",
+      "edge_case": true,
+      "tags": [
+        "irrelevant_data",
+        "content_mismatch"
+      ]
+    },
+    {
+      "id": "edge_irrelevant_code_snippets",
+      "agent": "InterviewCoachAgent",
+      "intent": "INTERVIEW_COACH",
+      "resume_id": "resume_code_only",
+      "history_id": "history_irrelevant_questions",
+      "notes": "Edge case: Resume contains only code snippets, no professional experience",
+      "edge_case": true,
+      "tags": [
+        "irrelevant_data",
+        "code_only"
+      ]
+    },
+    {
+      "id": "edge_context_flood_long_resume",
+      "agent": "ResumeCriticAgent",
+      "intent": "RESUME_CRITIC",
+      "resume_id": "resume_extremely_long",
+      "notes": "Edge case: Extremely long resume (50K+ tokens) to test context window limits",
+      "edge_case": true,
+      "tags": [
+        "context_flooding",
+        "long_content"
+      ]
+    },
+    {
+      "id": "edge_context_flood_massive_job",
+      "agent": "JobAlignmentAgent",
+      "intent": "JOB_ALIGNMENT",
+      "resume_id": "resume_normal_swe",
+      "job_description_id": "job_massive_description",
+      "notes": "Edge case: Massive job description with extensive requirements",
+      "edge_case": true,
+      "tags": [
+        "context_flooding",
+        "long_job_description"
+      ]
+    },
+    {
+      "id": "edge_context_flood_long_history",
+      "agent": "InterviewCoachAgent",
+      "intent": "INTERVIEW_COACH",
+      "resume_id": "resume_normal_swe",
+      "history_id": "history_extremely_long",
+      "notes": "Edge case: Very long conversation history testing memory limits",
+      "edge_case": true,
+      "tags": [
+        "context_flooding",
+        "long_history"
+      ]
+    },
+    {
+      "id": "edge_malformed_json_resume",
+      "agent": "ResumeCriticAgent",
+      "intent": "RESUME_CRITIC",
+      "resume_id": "resume_malformed",
+      "notes": "Edge case: Resume with malformed data structures",
+      "edge_case": true,
+      "tags": [
+        "malformed_data",
+        "json_errors"
+      ]
+    },
+    {
+      "id": "edge_mixed_languages",
+      "agent": "ContentStrengthAgent",
+      "intent": "CONTENT_STRENGTH",
+      "resume_id": "resume_mixed_languages",
+      "notes": "Edge case: Resume mixing multiple languages",
+      "edge_case": true,
+      "tags": [
+        "mixed_languages",
+        "localization"
+      ]
+    },
+    {
+      "id": "edge_special_characters",
+      "agent": "ResumeCriticAgent",
+      "intent": "RESUME_CRITIC",
+      "resume_id": "resume_special_chars",
+      "notes": "Edge case: Resume with excessive special characters and unicode",
+      "edge_case": true,
+      "tags": [
+        "special_characters",
+        "unicode"
+      ]
+    },
+    {
+      "id": "edge_jailbreak_attempt",
+      "agent": "JobAlignmentAgent",
+      "intent": "JOB_ALIGNMENT",
+      "resume_id": "resume_jailbreak",
+      "job_description_id": "job_swe_role",
+      "notes": "Edge case: Sophisticated jailbreak attempt using role-playing",
+      "edge_case": true,
+      "tags": [
+        "prompt_injection",
+        "jailbreak",
+        "security"
+      ]
+    },
+    {
+      "id": "edge_no_job_description",
+      "agent": "JobAlignmentAgent",
+      "intent": "JOB_ALIGNMENT",
+      "resume_id": "resume_normal_swe",
+      "notes": "Edge case: Job alignment request without job description",
+      "edge_case": true,
+      "tags": [
+        "missing_job_description",
+        "incomplete_data"
+      ]
+    },
+    {
+      "id": "edge_contradictory_info",
+      "agent": "ResumeCriticAgent",
+      "intent": "RESUME_CRITIC",
+      "resume_id": "resume_contradictory",
+      "notes": "Edge case: Resume with contradictory dates and information",
+      "edge_case": true,
+      "tags": [
+        "contradictory_data",
+        "inconsistency"
+      ]
+    }
+  ]
+}

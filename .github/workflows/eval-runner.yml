@@ -1,0 +1,89 @@
+name: Run Evals (Optional)
+
+on:
+  workflow_dispatch:
+    inputs:
+      agent:
+        description: "Comma-separated agents (optional)"
+        required: false
+      dataset:
+        description: "Langfuse dataset name (optional)"
+        required: false
+      max_cases:
+        description: "Max number of cases"
+        required: false
+      run_name:
+        description: "Override run name"
+        required: false
+      trace_id:
+        description: "Trace ID (manual mode)"
+        required: false
+
+jobs:
+  run-evals:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        cd backend
+        pip install uv
+        uv sync
+        
+    - name: Run evals
+      env:
+        LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+        LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+        GEMINI_API_KEY: ${{ secrets.GOOGLE_AI_API_KEY }}
+        PYTHONPATH: ".."
+        TORCHINDUCTOR_CPP_USE_CONSTEXPR_FOR_INT_ARRAY: "0"
+      run: |
+        cd backend
+        
+        # Build command
+        CMD="uv run python -m evals.run_evals"
+        
+        # Add optional parameters
+        if [ -n "${{ github.event.inputs.agent }}" ]; then
+          CMD="$CMD --agent '${{ github.event.inputs.agent }}'"
+        fi
+        
+        if [ -n "${{ github.event.inputs.dataset }}" ]; then
+          CMD="$CMD --langfuse-dataset '${{ github.event.inputs.dataset }}'"
+        fi
+        
+        if [ -n "${{ github.event.inputs.max_cases }}" ]; then
+          CMD="$CMD --max-cases ${{ github.event.inputs.max_cases }}"
+        fi
+        
+        if [ -n "${{ github.event.inputs.run_name }}" ]; then
+          CMD="$CMD --run-name '${{ github.event.inputs.run_name }}'"
+        fi
+        
+        if [ -n "${{ github.event.inputs.trace_id }}" ]; then
+          CMD="$CMD --trace-id '${{ github.event.inputs.trace_id }}'"
+        fi
+        
+        echo "Running: $CMD"
+        eval $CMD
+        
+    - name: Upload results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: eval-results-${{ github.run_number }}
+        path: |
+          backend/evals/logs/
+        retention-days: 30

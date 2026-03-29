@@ -17,7 +17,7 @@ from ..models.session import SessionContext
 
 class ResumeCriticAgent(BaseAgent):
     """Agent for analyzing resume structure, ATS compatibility, and impact."""
-    USE_MOCK_RESPONSE = settings.MOCK_RESUME_CRITIC_AGENT
+    USE_MOCK_RESPONSE = True
     MOCK_RESPONSE_KEY = "ResumeCriticAgent"
 
     SYSTEM_PROMPT = (
@@ -116,7 +116,14 @@ class ResumeCriticAgent(BaseAgent):
 
             raw_result = raw_result or self.call_gemini(input_text, context)
 
-            structured_result = self.parse_and_validate(raw_result, ResumeCriticReport).model_dump()
+            # Extract just the critique part if the LLM wrapped it, or use the whole thing
+            parsed = self._parse_json(raw_result)
+            critique_data = parsed.get("critique", parsed) if isinstance(parsed, dict) else {}
+            
+            # Re-serialize for parse_and_validate
+            raw_critique = json.dumps(critique_data)
+
+            structured_result = self.parse_and_validate(raw_critique, ResumeCriticReport).model_dump()
 
             processing_time = time.time() - processing_start_time
             

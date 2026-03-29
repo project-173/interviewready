@@ -4,10 +4,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from app.core.limiter import limiter
 from langfuse.langchain import CallbackHandler
 
 from dotenv import load_dotenv
 load_dotenv()
+
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from app.core.limiter import limiter
 
 from app.core.config import settings
 from app.api.v1 import api_router
@@ -28,6 +35,9 @@ app = FastAPI(
     redirect_slashes=False,
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # Configure CORS
 # When allow_credentials=True, origins must be explicit (no wildcard)
 origins = []
@@ -41,9 +51,18 @@ frontend_url = "https://interviewready-frontend-266623940622.asia-southeast1.run
 if frontend_url not in origins:
     origins.append(frontend_url)
 
+# Add backend itself to origins for WebSocket handshake consistency
+backend_url = "https://interviewready-backend-266623940622.asia-southeast1.run.app"
+if backend_url not in origins:
+    origins.append(backend_url)
+
+# RELAXED CORS for debugging 403 errors in production
+# In production, we'll try to use "*" if explicit list fails, but FastAPI requires explicit list with credentials=True
+# So we'll stick to our list but ensure it's comprehensive.
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"] if settings.APP_ENV != "prod" else origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

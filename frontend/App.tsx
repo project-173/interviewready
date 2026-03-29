@@ -3,11 +3,12 @@ import {
   SharedState, 
   WorkflowStatus,
   ChatRequest,
-  Resume
+  InterviewMode,
+  InterviewMessage
 } from './types';
 import {
   contentStrengthAgent, 
-  alignmentAgent, 
+  alignmentAgent,
   backendService 
 } from './backendService';
 import { StepIndicator } from './components/StepIndicator';
@@ -20,7 +21,8 @@ import {
   ContentStep, 
   AlignmentStep, 
   AlignmentReportStep, 
-  InterviewStep 
+  InterviewStep,
+  InterviewModeSelectionStep
 } from './components/WorkflowSteps';
 
 const AppContent: React.FC = () => {
@@ -39,7 +41,6 @@ const AppContent: React.FC = () => {
     };
   });
 
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -93,161 +94,6 @@ const AppContent: React.FC = () => {
     setState(prev => ({ ...prev, status: targetStatus }));
   }, [state.currentResume, state.criticReport, state.contentReport, state.alignmentReport]);
 
-  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      if (file.size > MAX_FILE_SIZE) {
-        reject(new Error(`File size exceeds ${MAX_FILE_SIZE / (1024 * 1024)}MB limit`));
-        return;
-      }
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve((reader.result as string).split(',')[1]);
-      reader.onerror = reject;
-    });
-  };
-
-  const normalizeCriticReport = (data: any) => {
-    const candidate = data && typeof data === 'object' ? (data.critique ?? data) : {};
-    const issues = Array.isArray(candidate.issues)
-        ? candidate.issues
-        : [];
-    return {
-      issueList: issues,
-      summary: typeof candidate.summary === 'string' && candidate.summary.trim()
-        ? candidate.summary
-        : 'Resume processed successfully.',
-      score: typeof candidate.score === 'number' ? candidate.score : undefined
-    };
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    console.log('handleFileupload')
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsLoading(true);
-    setError(null);
-    try {
-      if (file.type === 'application/pdf') {
-        const base64 = await fileToBase64(file);
-
-        const request: ChatRequest = {
-          intent: 'RESUME_CRITIC',
-          resumeData: null,
-          jobDescription: '',
-          messageHistory: [],
-          resumeFile: { data: base64, fileType: 'pdf' }
-        };
-        
-        const response = await backendService.callChatEndpoint(request);
-        const parsedResume = await backendService.fetchCurrentResume();
-        // Parse the structured JSON response from backend
-        let responseData;
-        try {
-          responseData = response.payload || JSON.parse(response.content || '{}');
-        } catch (error) {
-          console.error('Failed to parse backend response:', error);
-          throw new Error('Invalid response from backend');
-        }
-
-        const resumeData = responseData.resume_data || {};
-        const criticReport = normalizeCriticReport(
-          response.payload && typeof response.payload === 'object' && !Array.isArray(response.payload)
-            ? response.payload
-            : responseData
-        );
-
-        setState(prev => ({
-          ...prev,
-          currentResume: parsedResume || prev.currentResume,
-          history: parsedResume ? [...prev.history, parsedResume] : prev.history,
-          criticReport,
-          status: WorkflowStatus.AWAITING_CRITIC_APPROVAL
-        }));
-      } else {
-        setError("Only PDF files are supported.")
-      }
-    } catch (err: any) {
-      setError(err.message || "Failed to process resume");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const approveCritic = async () => {
-    setState(prev => ({ ...prev, status: WorkflowStatus.ANALYZING_CONTENT }));
-    setIsLoading(true);
-    try {
-      const report = await contentStrengthAgent(state.currentResume);
-      setState(prev => ({ ...prev, contentReport: report, status: WorkflowStatus.AWAITING_CONTENT_APPROVAL }));
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const approveContent = () => setState(prev => ({ ...prev, status: WorkflowStatus.ALIGNING_JD }));
-
-  const runAlignment = async () => {
-    if (!state.jobDescription) return;
-    setIsLoading(true);
-    try {
-      const report = await alignmentAgent(state.currentResume, state.jobDescription);
-      setState(prev => ({ ...prev, alignmentReport: report, status: WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL }));
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const startInterview = async () => {
-    setState(prev => ({ 
-      ...prev, 
-      status: WorkflowStatus.INTERVIEWING, 
-      interviewHistory: [{ role: 'agent', text: "Ready to practice? Based on your profile, tell me why you're a fit for this role." }]
-    }));
-  };
-
-  const handleInterviewMessage = async (msg: string) => {
-    const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: msg }];
-    setState(prev => ({ ...prev, interviewHistory: updatedHistory }));
-    setIsLoading(true);
-    try {
-      const responseText = await interviewCoachAgent(state.alignmentReport, updatedHistory);
-      setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleInterviewAudioMessage = async (audio: Uint8Array) => {
-    const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: '[Audio response]' }];
-    setState(prev => ({ ...prev, interviewHistory: updatedHistory }));
-    setIsLoading(true);
-    try {
-      const request: ChatRequest = {
-        intent: 'INTERVIEW_COACH',
-        resumeData: state.currentResume,
-        jobDescription: state.jobDescription,
-        messageHistory: updatedHistory,
-        audioData: audio,
-      };
-      const response = await backendService.callChatEndpoint(request);
-      const responseText = typeof response.payload === 'string' ? response.payload : JSON.stringify(response.payload);
-      setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-white text-slate-950">
       {/* 1. Primary SaaS Navbar */}
@@ -261,7 +107,6 @@ const AppContent: React.FC = () => {
         </div>
         
         <div className="flex items-center gap-4">
-          <div className="h-4 w-[1px] bg-slate-200"></div>
           <button 
             onClick={resetSession}
             className="text-xs font-medium text-slate-500 hover:text-slate-900 transition-colors"
@@ -371,20 +216,6 @@ const WorkflowController: React.FC<{
     });
   };
 
-  const normalizeCriticReport = (data: any) => {
-    const candidate = data && typeof data === 'object' ? (data.critique ?? data) : {};
-    const issues = Array.isArray(candidate.issues)
-        ? candidate.issues
-        : [];
-    return {
-      issueList: issues,
-      summary: typeof candidate.summary === 'string' && candidate.summary.trim()
-        ? candidate.summary
-        : 'Resume processed successfully.',
-      score: typeof candidate.score === 'number' ? candidate.score : undefined
-    };
-  };
-
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -421,45 +252,14 @@ const WorkflowController: React.FC<{
           throw new Error('Invalid response from backend');
         }
 
-        const resumeData = responseData.resume_data || {};
-
-        const resume = {
-          title: resumeData.title || 'Untitled Resume',
-          summary: resumeData.summary || '',
-          isMaster: false,
-          contact: resumeData.contact || {
-            fullName: '',
-            email: '',
-            phone: '',
-            city: '',
-            country: '',
-            linkedin: '',
-            github: '',
-            portfolio: ''
-          },
-          skills: resumeData.skills || [],
-          experience: resumeData.experiences || resumeData.experience || [],
-          education: resumeData.educations || resumeData.education || [],
-          experiences: resumeData.experiences || resumeData.experience || [],
-          educations: resumeData.educations || resumeData.education || [],
-          projects: resumeData.projects || [],
-          certifications: resumeData.certifications || [],
-          awards: resumeData.awards || []
-        };
+        console.log('responseData', responseData);
 
         updateProgress(90, 3);
-
-        const criticReport = normalizeCriticReport(
-          response.payload && typeof response.payload === 'object' && !Array.isArray(response.payload)
-            ? response.payload
-            : responseData
-        );
-
         setState(prev => ({
           ...prev,
           currentResume: parsedResume || prev.currentResume,
           history: parsedResume ? [...prev.history, parsedResume] : prev.history,
-          criticReport,
+          criticReport: responseData,
           status: WorkflowStatus.AWAITING_CRITIC_APPROVAL
         }));
         updateProgress(100, 3);
@@ -503,12 +303,27 @@ const WorkflowController: React.FC<{
     }
   };
 
-  const startInterview = async () => {
+  const startInterviewSelection = () => {
     setState(prev => ({
       ...prev,
+      status: WorkflowStatus.SELECTING_INTERVIEW_MODE,
+      interviewHistory: [],
+    }));
+  };
+
+  const startInterview = async (mode: InterviewMode) => {
+    setState(prev => ({
+      ...prev,
+      interviewMode: mode,
       status: WorkflowStatus.INTERVIEWING,
       interviewHistory: [],
     }));
+
+    if (mode === 'VOICE') {
+      setError(null);
+      return; // Handled by WebSocket auto-start
+    }
+
     startLoading('Starting interview...', ['Preparing first question', 'Personalizing coach guidance']);
     setError(null);
     try {
@@ -528,7 +343,7 @@ const WorkflowController: React.FC<{
       setError(err.message);
       setState(prev => ({
         ...prev,
-        status: WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL,
+        status: WorkflowStatus.SELECTING_INTERVIEW_MODE,
         interviewHistory: [],
       }));
     } finally {
@@ -557,11 +372,11 @@ const WorkflowController: React.FC<{
   };
 
   const handleInterviewAudioMessage = async (audio: Uint8Array) => {
-    const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: '[Audio response]' }];
+    // This is the legacy audio path used only in CHAT mode for voice-to-text
+    const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: '[Analyzing audio...]' }];
     setState(prev => ({ ...prev, interviewHistory: updatedHistory }));
-    startLoading('Processing audio...', ['Transcribing speech', 'Analyzing content', 'Generating response']);
+    
     try {
-      updateProgress(33, 0);
       const request: ChatRequest = {
         intent: 'INTERVIEW_COACH',
         resumeData: state.currentResume,
@@ -569,26 +384,77 @@ const WorkflowController: React.FC<{
         messageHistory: updatedHistory,
         audioData: audio,
       };
-      updateProgress(66, 1);
+      
       const response = await backendService.callChatEndpoint(request);
       const responseText = backendService.formatInterviewCoachPayload(response.payload ?? response.content);
-      updateProgress(100, 2);
-      setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
+      
+      setState(prev => {
+        const newHistory = prev.interviewHistory.map((msg, i) => 
+          i === prev.interviewHistory.length - 1 && msg.text === '[Analyzing audio...]' 
+            ? { ...msg, text: (response as any).transcription || '[Audio response]' } 
+            : msg
+        );
+        return { ...prev, interviewHistory: [...newHistory, { role: 'agent', text: responseText }] };
+      });
     } catch (err: any) {
-      setError(err.message);
-    } finally {
-      stopLoading();
+      setError(err.message || 'Failed to process audio');
+      setState(prev => ({
+        ...prev,
+        interviewHistory: prev.interviewHistory.filter(msg => msg.text !== '[Analyzing audio...]')
+      }));
+    }
+  };
+
+  const handleLiveEvent = (event: { type: string; text?: string }) => {
+    if (event.type === 'user' && event.text) {
+      setState(prev => {
+        const history = [...prev.interviewHistory];
+        const last = history[history.length - 1];
+        if (last && last.role === 'user') {
+          // If the last message was also from user, we might be getting streaming updates
+          // For simplicity in this UI, we just append or replace
+          return { ...prev, interviewHistory: [...history.slice(0, -1), { role: 'user', text: event.text || '' }] };
+        }
+        return { ...prev, interviewHistory: [...history, { role: 'user', text: event.text || '' }] };
+      });
+    } else if (event.type === 'gemini' && event.text) {
+      setState(prev => {
+        const history = [...prev.interviewHistory];
+        const last = history[history.length - 1];
+        if (last && last.role === 'agent') {
+          return { ...prev, interviewHistory: [...history.slice(0, -1), { role: 'agent', text: event.text || '' }] };
+        }
+        return { ...prev, interviewHistory: [...history, { role: 'agent', text: event.text || '' }] };
+      });
     }
   };
 
   return (
     <>
+      <a onClick={() => console.log(state)}>Check state</a>
       {(state.status === WorkflowStatus.IDLE || state.status === WorkflowStatus.EXTRACTING) && <UploadStep onUpload={handleFileUpload} />}
-      {(state.status === WorkflowStatus.CRITIQUING || state.status === WorkflowStatus.AWAITING_CRITIC_APPROVAL) && state.criticReport && <CriticStep report={state.criticReport} onApprove={approveCritic} />}
-      {(state.status === WorkflowStatus.ANALYZING_CONTENT || state.status === WorkflowStatus.AWAITING_CONTENT_APPROVAL) && state.contentReport && <ContentStep report={state.contentReport} onApprove={approveContent} />}
+      {(state.status === WorkflowStatus.CRITIQUING || state.status === WorkflowStatus.AWAITING_CRITIC_APPROVAL) && state.criticReport && (
+        <CriticStep report={state.criticReport} resume={state.currentResume} onApprove={approveCritic} />
+      )}
+      {(state.status === WorkflowStatus.ANALYZING_CONTENT || state.status === WorkflowStatus.AWAITING_CONTENT_APPROVAL) && state.contentReport && (
+        <ContentStep report={state.contentReport} resume={state.currentResume} onApprove={approveContent} />
+      )}
       {(state.status === WorkflowStatus.ALIGNING_JD) && <AlignmentStep jd={state.jobDescription} onChangeJD={(val) => setState(prev => ({ ...prev, jobDescription: val }))} onAnalyze={runAlignment} isLoading={false} />}
-      {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterview} />}
-      {state.status === WorkflowStatus.INTERVIEWING && <InterviewStep history={state.interviewHistory} onSend={handleInterviewMessage} onSendAudio={handleInterviewAudioMessage} isLoading={false} chatEndRef={chatEndRef} />}
+      {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterviewSelection} />}
+      {(state.status === WorkflowStatus.SELECTING_INTERVIEW_MODE) && <InterviewModeSelectionStep onSelect={startInterview} />}
+      {(state.status === WorkflowStatus.INTERVIEWING || state.status === WorkflowStatus.DEBUG_VOICE) && (
+        <InterviewStep 
+          history={state.interviewHistory} 
+          onSend={handleInterviewMessage} 
+          onSendAudio={handleInterviewAudioMessage} 
+          isLoading={false} 
+          chatEndRef={chatEndRef} 
+          mode={state.status === WorkflowStatus.DEBUG_VOICE ? 'VOICE' : (state.interviewMode || 'CHAT')} 
+          sessionId={backendService.getSessionId()} 
+          onExit={() => setState(prev => ({ ...prev, status: WorkflowStatus.SELECTING_INTERVIEW_MODE }))}
+          onLiveEvent={handleLiveEvent}
+        />
+      )}
     </>
   );
 };
