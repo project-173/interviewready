@@ -154,7 +154,7 @@ Response: Final feedback, interview complete
 - **Implementation:** `backend/app/agents/interview_coach.py`
 - **Documentation:** `INTERVIEW_COACH_MODIFICATION.md`
 - **Tests:** `backend/tests/test_agents.py`
-- **Mock responses:** `backend/mock_responses.json`
+- **Mock responses:** `backend/app/mock_responses.json`
 
 ## Backward Compatibility
 
