@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 from google import genai
 from google.genai import types
 
-from app.api.v1.services import get_session_context
+from app.api.v1.services import get_or_create_session_context
 from app.core.config import settings
 from app.core.logging import logger
 
@@ -30,17 +30,17 @@ async def interview_live_websocket(
     user_id = "dev-user"
 
     try:
-        context = get_session_context(session_id=session_id, user_id=user_id)
-    except Exception:
-        logger.warning(f"Session context retrieval failed for {session_id}")
-        # Send error via JSON instead of abrupt close
-        await websocket.send_json({"error": "Invalid session context"})
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        # Use get_or_create to support immediate testing/troubleshooting without prior upload
+        context = get_or_create_session_context(session_id=session_id, user_id=user_id)
+    except Exception as e:
+        logger.error(f"Session context creation failed for {session_id}: {e}")
+        await websocket.send_json({"error": f"Internal session error: {str(e)}"})
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         return
 
     if not context:
-        await websocket.send_json({"error": "Session not found"})
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        await websocket.send_json({"error": "Failed to initialize session"})
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         return
     await websocket.send_json(
         {
@@ -72,6 +72,14 @@ async def interview_live_websocket(
 
     if context.job_description:
         system_instruction += f"\n\nTarget Job Description:\n{context.job_description}"
+
+    # If this is a diagnostic/empty session, adjust the prompt for a simple link test
+    if not context.resume_data and not context.job_description:
+        system_instruction += (
+            "\n\nDIAGNOSTIC MODE: This is a system connectivity test. "
+            "Greet the user warmly, confirm you are 'InterviewReady AI', and ask them how their day is going. "
+            "Keep the response very short and friendly."
+        )
 
     logger.info(
         f"Starting Live Interview for session {session_id}. "
