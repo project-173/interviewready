@@ -1,11 +1,8 @@
-name: Deploy to Google Cloud Run
+name: Deploy to Google Cloud Run (Optimized)
 
 on:
   push:
-    branches:
-      - main
-      - sit
-      - fix-cicd-backendqualitygates
+    branches: [main, sit]
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -19,14 +16,13 @@ jobs:
     name: Security Scan (FS)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Run Trivy vulnerability scanner in repo mode
+      - name: Run Trivy FS scan
         uses: aquasecurity/trivy-action@master
         continue-on-error: true
         with:
-          scan-type: 'fs'
+          scan-type: fs
           ignore-unfixed: true
           format: 'table'
           severity: 'CRITICAL,HIGH'
@@ -52,94 +48,67 @@ jobs:
       - name: Run interview security and governance tests
         run: |
           python -m pytest backend/tests/test_interview_coach.py backend/tests/test_orchestration_governance.py
+          severity: CRITICAL,HIGH
 
   build-backend:
-    name: Build Backend
+    name: Build & Push Backend
     needs: backend-quality-gates
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Configure Docker for GCP
-        run: gcloud auth configure-docker $REGION-docker.pkg.dev
+      - run: gcloud auth configure-docker $REGION-docker.pkg.dev
 
-      - name: Build Backend Image
-        run: |
-          docker build --platform linux/amd64 -t $REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$BACKEND_SERVICE_NAME:${{ github.sha }} ./backend
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Run Trivy scanner on Backend image
-        uses: aquasecurity/trivy-action@master
-        continue-on-error: true
+      - name: Build & Push Backend (cached)
+        uses: docker/build-push-action@v5
         with:
-          image-ref: '${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.BACKEND_SERVICE_NAME }}:${{ github.sha }}'
-          format: 'table'
-          ignore-unfixed: true
-          vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH'
-
-      - name: Push Backend Image
-        run: |
-          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$BACKEND_SERVICE_NAME:${{ github.sha }}
+          context: ./backend
+          push: true
+          tags: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.BACKEND_SERVICE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   build-frontend:
-    name: Build Frontend
-    needs: deploy-backend
+    name: Build & Push Frontend
+    needs: security-scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Configure Docker for GCP
-        run: gcloud auth configure-docker $REGION-docker.pkg.dev
+      - run: gcloud auth configure-docker $REGION-docker.pkg.dev
 
-      - name: Get Backend URL
-        id: backend-url
-        run: |
-          URL=$(gcloud run services describe $BACKEND_SERVICE_NAME --platform managed --region $REGION --format='value(status.url)' 2>/dev/null || echo "")
-          echo "url=$URL" >> $GITHUB_OUTPUT
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Build Frontend Image
-        run: |
-          docker build --platform linux/amd64 -t $REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$FRONTEND_SERVICE_NAME:${{ github.sha }} \
-            --build-arg VITE_API_BASE_URL=${{ steps.backend-url.outputs.url }} \
-            ./frontend
-
-      - name: Run Trivy scanner on Frontend image
-        uses: aquasecurity/trivy-action@master
-        continue-on-error: true
+      - name: Build & Push Frontend (cached)
+        uses: docker/build-push-action@v5
         with:
-          image-ref: '${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.FRONTEND_SERVICE_NAME }}:${{ github.sha }}'
-          format: 'table'
-          ignore-unfixed: true
-          vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH'
-
-      - name: Push Frontend Image
-        run: |
-          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$FRONTEND_SERVICE_NAME:${{ github.sha }}
+          context: ./frontend
+          push: true
+          tags: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.FRONTEND_SERVICE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   deploy-backend:
     name: Deploy Backend
@@ -148,22 +117,15 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Get Frontend URL
-        id: frontend-url
-        run: |
-          URL=$(gcloud run services describe $FRONTEND_SERVICE_NAME --platform managed --region $REGION --format='value(status.url)' 2>/dev/null || echo "")
-          echo "url=$URL" >> $GITHUB_OUTPUT
-
-      - name: Deploy Backend to Cloud Run
+      - name: Deploy Backend
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: ${{ env.BACKEND_SERVICE_NAME }}
@@ -173,8 +135,6 @@ jobs:
           env_vars: |
             APP_ENV=staging
             FIREBASE_ENABLED=False
-            FRONTEND_URL=${{ steps.frontend-url.outputs.url }}
-            BACKEND_URL=https://interviewready-backend-266623940622.asia-southeast1.run.app
             GOOGLE_AI_API_KEY=${{ secrets.GOOGLE_AI_API_KEY }}
             GEMINI_API_KEY=${{ secrets.GOOGLE_AI_API_KEY }}
             LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}
@@ -188,16 +148,15 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Deploy Frontend to Cloud Run
+      - name: Deploy Frontend
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: ${{ env.FRONTEND_SERVICE_NAME }}
