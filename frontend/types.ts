@@ -76,7 +76,7 @@ export interface ResumeCriticIssue {
 }
 
 export interface ResumeCriticReport {
-  issueList: ResumeCriticIssue[];
+  issues: ResumeCriticIssue[];
   summary: string;
   score?: number;
 }
@@ -103,138 +103,6 @@ export interface AlignmentReport {
   reasoning: string;
   sources?: { title: string; uri: string }[];
 }
-
-const workSchema = z.object({
-  name: z.string(),
-  position: z.string(),
-  url: z.string(),
-  startDate: z.string(),
-  endDate: z.string(),
-  summary: z.string(),
-  highlights: z.array(z.string()),
-}).partial();
-
-const volunteerSchema = z.object({
-  organization: z.string(),
-  position: z.string(),
-  url: z.string(),
-  startDate: z.string(),
-  endDate: z.string(),
-  summary: z.string(),
-  highlights: z.array(z.string()),
-}).partial();
-
-const educationSchema = z.object({
-  institution: z.string(),
-  url: z.string(),
-  area: z.string(),
-  studyType: z.string(),
-  startDate: z.string(),
-  endDate: z.string(),
-  score: z.string(),
-  courses: z.array(z.string()),
-}).partial();
-
-const awardSchema = z.object({
-  title: z.string(),
-  date: z.string(),
-  awarder: z.string(),
-  summary: z.string(),
-}).partial();
-
-const certificateSchema = z.object({
-  name: z.string(),
-  date: z.string(),
-  issuer: z.string(),
-  url: z.string(),
-}).partial();
-
-const publicationSchema = z.object({
-  name: z.string(),
-  publisher: z.string(),
-  releaseDate: z.string(),
-  url: z.string(),
-  summary: z.string(),
-}).partial();
-
-const skillSchema = z.object({
-  name: z.string(),
-  level: z.string(),
-  keywords: z.array(z.string()),
-}).partial();
-
-const languageSchema = z.object({
-  language: z.string(),
-  fluency: z.string(),
-}).partial();
-
-const interestSchema = z.object({
-  name: z.string(),
-  keywords: z.array(z.string()),
-}).partial();
-
-const referenceSchema = z.object({
-  name: z.string(),
-  reference: z.string(),
-}).partial();
-
-const projectSchema = z.object({
-  name: z.string(),
-  startDate: z.string(),
-  endDate: z.string(),
-  description: z.string(),
-  highlights: z.array(z.string()),
-  url: z.string(),
-}).partial();
-
-export const resumeJsonSchema = zodToJsonSchema(z.object({
-  work: z.array(workSchema).optional(),
-  volunteer: z.array(volunteerSchema).optional(),
-  education: z.array(educationSchema).optional(),
-  awards: z.array(awardSchema).optional(),
-  certificates: z.array(certificateSchema).optional(),
-  publications: z.array(publicationSchema).optional(),
-  skills: z.array(skillSchema).optional(),
-  languages: z.array(languageSchema).optional(),
-  interests: z.array(interestSchema).optional(),
-  references: z.array(referenceSchema).optional(),
-  projects: z.array(projectSchema).optional(),
-}), 'resumeSchema');
-
-export const structuralAssessmentJsonSchema = zodToJsonSchema(z.object({
-  issueList: z.array(z.object({
-    location: z.string(),
-    type: z.enum(["ats", "structure", "impact", "readability"]),
-    severity: z.enum(["HIGH", "MEDIUM", "LOW"]),
-    description: z.string(),
-  })),
-  summary: z.string(),
-  score: z.number().optional(),
-}), 'structuralAssessmentSchema');
-
-export const contentAnalysisReportJsonSchema = zodToJsonSchema(z.object({
-  suggestions: z.array(z.object({
-    location: z.string(),
-    original: z.string(),
-    suggested: z.string(),
-    evidenceStrength: z.enum(["HIGH", "MEDIUM", "LOW"]),
-    type: z.enum(["action_verb", "specificity", "structure", "redundancy"]),
-  })),
-  summary: z.string(),
-  score: z.number().optional(),
-}), 'contentAnalysisReportSchema');
-
-export const alignmentReportJsonSchema = zodToJsonSchema(z.object({
-  skillsMatch: z.array(z.string()),
-  missingSkills: z.array(z.string()),
-  experienceMatch: z.string(),
-  fitScore: z.number(),
-  reasoning: z.string(),
-  sources: z.array(z.object({
-    title: z.string(),
-    uri: z.string(),
-  })).optional(),
-}), 'alignmentReportSchema');
 
 export enum WorkflowStatus {
   IDLE = 'IDLE',

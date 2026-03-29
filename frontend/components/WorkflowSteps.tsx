@@ -21,7 +21,7 @@ export const UploadStep: React.FC<{ onUpload: (e: React.ChangeEvent<HTMLInputEle
 );
 
 export const CriticStep: React.FC<{ report: ResumeCriticReport; resume?: ResumeSchema | null; onApprove: () => void }> = ({ report, resume, onApprove }) => {
-  const issues = Array.isArray(report.issueList) ? report.issueList : [];
+  const issues = Array.isArray(report.issues) ? report.issues : [];
   const score = typeof report.score === 'number' ? Math.round(report.score) : null;
   const summary = typeof report.summary === 'string' && report.summary.trim()
     ? report.summary
@@ -60,7 +60,7 @@ export const CriticStep: React.FC<{ report: ResumeCriticReport; resume?: ResumeS
                     <div>
                       Section: <span className="font-medium text-slate-600">{capitalizeFirst(resolved.topLevel || 'unknown')}</span>
                     </div>
-                    {resolved.isValid ? (
+                    {resolved.isValid && (
                       <div className="text-slate-500">
                         Evidence: <span className="text-slate-700">
                           {resolved.usedSectionAsEvidence
@@ -68,8 +68,6 @@ export const CriticStep: React.FC<{ report: ResumeCriticReport; resume?: ResumeS
                             : resolved.display}
                         </span>
                       </div>
-                    ) : (
-                      <div className="text-amber-600">Evidence not found in resume.</div>
                     )}
                   </div>
                 );
@@ -135,7 +133,7 @@ export const ContentStep: React.FC<{ report: ContentStrengthReport; resume?: Res
                     <div>
                       Section: <span className="font-medium text-slate-600">{capitalizeFirst(resolved.topLevel || 'unknown')}</span>
                     </div>
-                     {resolved.isValid ? (
+                     {resolved.isValid && (
                        <div className="text-slate-500">
                          Evidence: <span className="text-slate-700">
                            {resolved.usedSectionAsEvidence
@@ -143,8 +141,6 @@ export const ContentStep: React.FC<{ report: ContentStrengthReport; resume?: Res
                              : resolved.display}
                          </span>
                        </div>
-                     ) : (
-                       <div className="text-amber-600">Evidence not found in resume.</div>
                      )}
                    </div>
                  );

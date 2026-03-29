@@ -252,43 +252,14 @@ const WorkflowController: React.FC<{
           throw new Error('Invalid response from backend');
         }
 
-        const resumeData = responseData.resume_data || {};
-
-        const resume = {
-          title: resumeData.title || 'Untitled Resume',
-          summary: resumeData.summary || '',
-          isMaster: false,
-          contact: resumeData.contact || {
-            fullName: '',
-            email: '',
-            phone: '',
-            city: '',
-            country: '',
-            linkedin: '',
-            github: '',
-            portfolio: ''
-          },
-          skills: resumeData.skills || [],
-          experience: resumeData.experiences || resumeData.experience || [],
-          education: resumeData.educations || resumeData.education || [],
-          experiences: resumeData.experiences || resumeData.experience || [],
-          educations: resumeData.educations || resumeData.education || [],
-          projects: resumeData.projects || [],
-          certifications: resumeData.certifications || [],
-          awards: resumeData.awards || []
-        };
+        console.log('responseData', responseData);
 
         updateProgress(90, 3);
         setState(prev => ({
           ...prev,
           currentResume: parsedResume || prev.currentResume,
           history: parsedResume ? [...prev.history, parsedResume] : prev.history,
-          criticReport: {
-            score: Number((critiqueData as any).score) || 85,
-            readability: String((critiqueData as any).readability || 'Resume processed successfully'),
-            formattingRecommendations: Array.isArray((critiqueData as any).formattingRecommendations) ? (critiqueData as any).formattingRecommendations : [],
-            suggestions: Array.isArray((critiqueData as any).suggestions) ? (critiqueData as any).suggestions : []
-          },
+          criticReport: responseData,
           status: WorkflowStatus.AWAITING_CRITIC_APPROVAL
         }));
         updateProgress(100, 3);
@@ -460,9 +431,14 @@ const WorkflowController: React.FC<{
 
   return (
     <>
+      <a onClick={() => console.log(state)}>Check state</a>
       {(state.status === WorkflowStatus.IDLE || state.status === WorkflowStatus.EXTRACTING) && <UploadStep onUpload={handleFileUpload} />}
-      {(state.status === WorkflowStatus.CRITIQUING || state.status === WorkflowStatus.AWAITING_CRITIC_APPROVAL) && state.criticReport && <CriticStep report={state.criticReport} onApprove={approveCritic} />}
-      {(state.status === WorkflowStatus.ANALYZING_CONTENT || state.status === WorkflowStatus.AWAITING_CONTENT_APPROVAL) && state.contentReport && <ContentStep report={state.contentReport} onApprove={approveContent} />}
+      {(state.status === WorkflowStatus.CRITIQUING || state.status === WorkflowStatus.AWAITING_CRITIC_APPROVAL) && state.criticReport && (
+        <CriticStep report={state.criticReport} resume={state.currentResume} onApprove={approveCritic} />
+      )}
+      {(state.status === WorkflowStatus.ANALYZING_CONTENT || state.status === WorkflowStatus.AWAITING_CONTENT_APPROVAL) && state.contentReport && (
+        <ContentStep report={state.contentReport} resume={state.currentResume} onApprove={approveContent} />
+      )}
       {(state.status === WorkflowStatus.ALIGNING_JD) && <AlignmentStep jd={state.jobDescription} onChangeJD={(val) => setState(prev => ({ ...prev, jobDescription: val }))} onAnalyze={runAlignment} isLoading={false} />}
       {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterviewSelection} />}
       {(state.status === WorkflowStatus.SELECTING_INTERVIEW_MODE) && <InterviewModeSelectionStep onSelect={startInterview} />}
