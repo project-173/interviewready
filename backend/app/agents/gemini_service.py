@@ -112,7 +112,7 @@ class GeminiService:
             from ..core.logging import logger
 
             logger.error(f"Gemini API call failed: {str(e)}")
-            raise RuntimeError(f"Gemini API call failed: {str(e)}") from e, None
+            raise RuntimeError(f"Gemini API call failed: {str(e)}") from e
 
     def _generate_content(
         self,
