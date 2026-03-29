@@ -451,7 +451,7 @@ const WorkflowController: React.FC<{
           chatEndRef={chatEndRef} 
           mode={state.status === WorkflowStatus.DEBUG_VOICE ? 'VOICE' : (state.interviewMode || 'CHAT')} 
           sessionId={backendService.getSessionId()} 
-          onExit={() => setState(prev => ({ ...prev, status: WorkflowStatus.IDLE }))}
+          onExit={() => setState(prev => ({ ...prev, status: WorkflowStatus.SELECTING_INTERVIEW_MODE }))}
           onLiveEvent={handleLiveEvent}
         />
       )}
