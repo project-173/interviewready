@@ -277,6 +277,7 @@ export const InterviewModeSelectionStep: React.FC<{
   </div>
 );
 
+import { GoogleGenAI } from '@google/genai';
 import { InterviewMessage, InterviewMode } from '../types';
 
 export const InterviewStep: React.FC<{ 
@@ -300,6 +301,7 @@ export const InterviewStep: React.FC<{
   const silenceTimeoutRef = React.useRef<any | null>(null);
   const resumeListeningTimeoutRef = React.useRef<number | null>(null);
   const socketRef = React.useRef<WebSocket | null>(null);
+  const liveSessionRef = React.useRef<any>(null);
   const isSendingAudioRef = React.useRef(true);
 
   // Refs to track current state inside stale closures (WebSocket handlers, timers, VAD)
@@ -401,201 +403,153 @@ export const InterviewStep: React.FC<{
     }
   };
 
-  // For Live Streaming Voice
+  // For Live Streaming Voice (Native Google SDK Direct Connection)
   useEffect(() => {
     if (mode !== 'VOICE') return;
 
+    let isComponentMounted = true;
     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || window.location.origin;
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    
-    // Improved URL construction to handle various BASE_URL formats
-    let cleanBaseUrl = API_BASE_URL.replace(/^https?:\/\//, '');
-    if (cleanBaseUrl.endsWith('/')) {
-      cleanBaseUrl = cleanBaseUrl.slice(0, -1);
-    }
-    
-    const wsUrl = `${wsProtocol}//${cleanBaseUrl}/api/v1/interview/live?sessionId=${sessionId}`;
-    console.log('Connecting to Voice WebSocket:', wsUrl);
 
-    const socket = new WebSocket(wsUrl);
-    socketRef.current = socket;
-
-    socket.onopen = async () => {
-      console.log('[VOICE_FRONTEND] Voice WebSocket connected');
-      setConnectionStatus('connected');
-      
-      // ENSURE AudioContexts are initialized and running immediately on connect
+    const initializeDirectLive = async () => {
       try {
-        if (!playbackContextRef.current || playbackContextRef.current.state === 'closed') {
-          playbackContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-        }
-        if (playbackContextRef.current.state === 'suspended') {
-          await playbackContextRef.current.resume();
-        }
-        
-        if (!recordingContextRef.current || recordingContextRef.current.state === 'closed') {
-          recordingContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-        }
-        if (recordingContextRef.current.state === 'suspended') {
-          await recordingContextRef.current.resume();
-        }
-        
-        // AUTO-START microphone as soon as we connect to the voice session
-        console.log('[VOICE_FRONTEND] Starting microphone for live session...');
-        await startRecording();
-      } catch (e) {
-        console.error('[VOICE_FRONTEND] Failed to initialize audio contexts:', e);
-      }
-    };
+        console.log('[VOICE_FRONTEND] Requesting session credentials from backend...');
+        const tokenResp = await fetch(`${API_BASE_URL}/api/v1/interview/token?sessionId=${sessionId}`);
+        const configData = await tokenResp.json();
 
-    const base64ToFloat32 = (base64: string) => {
-      const binary = atob(base64);
-      const buffer = new ArrayBuffer(binary.length);
-      const bytes = new Uint8Array(buffer);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      
-      // Multimodal Live API returns 16-bit PCM Little-Endian
-      const dataView = new DataView(buffer);
-      const float32 = new Float32Array(binary.length / 2);
-      for (let i = 0; i < float32.length; i++) {
-        // Read as Int16 Little-Endian (true) and normalize to [-1, 1]
-        float32[i] = dataView.getInt16(i * 2, true) / 32768;
-      }
-      return float32;
-    };
+        if (!isComponentMounted) return;
 
-    socket.onmessage = async (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.event === 'pong') {
-          // Heartbeat received
-          return;
-        }
+        console.log('[VOICE_FRONTEND] Connecting directly to Google Gemini Live API...');
+        const genAI = new GoogleGenAI({ apiKey: configData.api_key });
         
-        console.log('[VOICE_FRONTEND] Received WebSocket message:', msg.type || msg.event || 'unknown');
-        if (msg.type === 'audioStream') {
-          const float32Data = base64ToFloat32(msg.data);
-          playbackQueueRef.current.push(float32Data);
-          
-          // Mark as active model turn
-          aiTurnActiveRef.current = true;
-          
-          // Mark as speaking as soon as we get audio chunks
-          if (!isSpeakingRef.current) {
-            console.log('[VOICE_FRONTEND] AI started speaking (audioStream)');
-            isSpeakingRef.current = true;
-            setIsSpeaking(true);
-            
-            // If we were recording, stop it immediately as AI has priority
-            if (isRecordingRef.current) {
-              console.log('[VOICE_FRONTEND] Stopping recording due to AI incoming stream');
-              isSendingAudioRef.current = false;
+        const session = await genAI.live.connect({
+          model: configData.model,
+          config: {
+            responseModalities: ['AUDIO' as any],
+            systemInstruction: { parts: [{ text: configData.system_instruction }] },
+            speechConfig: {
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } }
+            }
+          },
+          callbacks: {
+            onopen: async () => {
+              console.log('[VOICE_FRONTEND] Direct Link Established');
+              setConnectionStatus('connected');
+              
+              // ENSURE AudioContexts are initialized and running immediately
+              try {
+                if (!playbackContextRef.current || playbackContextRef.current.state === 'closed') {
+                  playbackContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+                }
+                await playbackContextRef.current.resume();
+                
+                if (!recordingContextRef.current || recordingContextRef.current.state === 'closed') {
+                  recordingContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+                }
+                await recordingContextRef.current.resume();
+                
+                await startRecording();
+                
+                // Trigger the initial greeting
+                session.sendRealtimeInput({ 
+                  text: "Start the live mock interview now. Greet the candidate and ask the first question." 
+                });
+              } catch (e) {
+                console.error('[VOICE_FRONTEND] Setup failed:', e);
+              }
+            },
+            onmessage: (response: any) => {
+              const content = response.serverContent;
+              if (!content) return;
+
+              // Handle AI Audio
+              if (content.modelTurn?.parts) {
+                for (const part of content.modelTurn.parts) {
+                  if (part.inlineData) {
+                    const binary = atob(part.inlineData.data);
+                    const buffer = new ArrayBuffer(binary.length);
+                    const bytes = new Uint8Array(buffer);
+                    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                    
+                    const dataView = new DataView(buffer);
+                    const float32 = new Float32Array(binary.length / 2);
+                    for (let i = 0; i < float32.length; i++) {
+                      float32[i] = dataView.getInt16(i * 2, true) / 32768;
+                    }
+
+                    playbackQueueRef.current.push(float32);
+                    aiTurnActiveRef.current = true;
+                    
+                    if (!isSpeakingRef.current) {
+                      isSpeakingRef.current = true;
+                      setIsSpeaking(true);
+                      if (isRecordingRef.current) {
+                        isSendingAudioRef.current = false;
+                        teardownRecording(false);
+                      }
+                    }
+
+                    if (!isQueueProcessingRef.current) {
+                      processPlaybackQueue();
+                    }
+                  }
+                }
+              }
+
+              // Handle Interruption
+              if (content.interrupted) {
+                console.log('[VOICE_FRONTEND] Native interruption signal');
+                playbackQueueRef.current = [];
+                if (playbackContextRef.current?.state === 'running') {
+                  playbackContextRef.current.suspend().then(() => {
+                    nextStartTimeRef.current = 0;
+                    playbackContextRef.current?.resume();
+                  });
+                }
+                isSpeakingRef.current = false;
+                aiTurnActiveRef.current = false;
+                setIsSpeaking(false);
+              }
+
+              // Handle Turn Completion
+              if (content.turnComplete) {
+                aiTurnActiveRef.current = false;
+                isSendingAudioRef.current = true;
+                if (playbackQueueRef.current.length === 0) {
+                  isSpeakingRef.current = false;
+                  setIsSpeaking(false);
+                  queueResumeListening();
+                }
+              }
+            },
+            onerror: (error) => {
+              console.error('[VOICE_FRONTEND] SDK Error:', error);
+              setConnectionStatus('error');
+            },
+            onclose: () => {
+              console.log('[VOICE_FRONTEND] Direct Link Closed');
+              setConnectionStatus('closed');
               teardownRecording(false);
             }
           }
+        });
 
-          if (!isQueueProcessingRef.current) {
-            processPlaybackQueue();
-          }
-        } else if (msg.type === 'textStream') {
-          // Eagerly resume playback context if we receive text but context is suspended
-          if (playbackContextRef.current && playbackContextRef.current.state === 'suspended') {
-            playbackContextRef.current.resume().catch(console.error);
-          }
-        } else if (msg.interrupted) {
-          // Clear playback queue if user interrupts AI
-          console.log('[VOICE_FRONTEND] AI Interrupted, clearing playback queue');
-          playbackQueueRef.current = [];
-          
-          // CRITICAL: Stop the AudioContext immediately to kill any currently playing buffer
-          if (playbackContextRef.current && playbackContextRef.current.state === 'running') {
-            playbackContextRef.current.suspend().then(() => {
-              nextStartTimeRef.current = 0;
-              playbackContextRef.current?.resume();
-            });
-          }
-
-          isSpeakingRef.current = false;
-          aiTurnActiveRef.current = false;
-          setIsSpeaking(false);
-        } else if (msg.event === 'turn_complete' || msg.event === 'generation_complete') {
-          // AI finished its generation turn
-          console.log(`[VOICE_FRONTEND] AI Generation Finished: ${msg.event}`);
-          aiTurnActiveRef.current = false;
-          isSendingAudioRef.current = true;
-          if (playbackQueueRef.current.length === 0) {
-            isSpeakingRef.current = false;
-            setIsSpeaking(false);
-            queueResumeListening();
-          }
-        } else if (msg.type === 'warning') {
-          console.warn('AI Session Warning:', msg.data);
-        } else if (msg.error) {
-          console.error('WebSocket error message:', msg.error);
-        }
-      } catch (e) {
-        // Fallback for raw binary if sent
-        if (event.data instanceof Blob) {
-          const arrayBuffer = await event.data.arrayBuffer();
-          playStreamedAudio(arrayBuffer);
-        }
+        liveSessionRef.current = session;
+      } catch (err) {
+        console.error('[VOICE_FRONTEND] Initialization failed:', err);
+        setConnectionStatus('error');
       }
     };
 
-    socket.onerror = (error) => {
-      console.error('WebSocket Error:', error);
-      setConnectionStatus('error');
-      teardownRecording(false);
-      isSpeakingRef.current = false;
-      setIsSpeaking(false);
-    };
-
-    socket.onclose = (event) => {
-      console.log('WebSocket closed:', event.code, event.reason || 'No reason provided');
-      setConnectionStatus('closed');
-      teardownRecording(false);
-      isSpeakingRef.current = false;
-      aiTurnActiveRef.current = false;
-      setIsSpeaking(false);
-      
-      // Cleanup contexts on close to prevent leaked resources/stuck states
-      if (playbackContextRef.current) {
-        playbackContextRef.current.close().catch(console.error);
-        playbackContextRef.current = null;
-      }
-      if (recordingContextRef.current) {
-        recordingContextRef.current.close().catch(console.error);
-        recordingContextRef.current = null;
-      }
-
-      if (event.code !== 1000 && event.code !== 1001 && mode === 'VOICE') {
-        // Only alert if it's an actual error (1001 is going away, e.g. reload)
-        alert(`Voice connection closed (Code ${event.code}). Please check your internet and API key.`);
-      }
-    };
-
-    // Heartbeat to keep connection alive
-    const heartbeat = setInterval(() => {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: 'realtimeInput', event: 'ping' }));
-      }
-    }, 5000);
+    initializeDirectLive();
 
     return () => {
-      clearInterval(heartbeat);
+      isComponentMounted = false;
       teardownRecording(false);
-      socket.close();
+      if (liveSessionRef.current) {
+        // liveSessionRef.current.close(); // SDK closure logic
+      }
       if (resumeListeningTimeoutRef.current) {
         window.clearTimeout(resumeListeningTimeoutRef.current);
-        resumeListeningTimeoutRef.current = null;
-      }
-      if (playbackContextRef.current) {
-        playbackContextRef.current.close().catch(console.error);
-        playbackContextRef.current = null;
-      }
-      if (recordingContextRef.current) {
-        recordingContextRef.current.close().catch(console.error);
-        recordingContextRef.current = null;
       }
     };
   }, [mode, sessionId]);
@@ -884,9 +838,14 @@ export const InterviewStep: React.FC<{
       
       workletNode.port.onmessage = (ev) => {
         if (ev.data.event === 'chunk') {
-          if (mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN &&
-              isSendingAudioRef.current) {
-            socketRef.current.send(ev.data.data);
+          if (mode === 'VOICE' && liveSessionRef.current && isSendingAudioRef.current) {
+            // Native SDK expects base64 encoded audio
+            const base64Audio = btoa(
+              new Uint8Array(ev.data.data).reduce((data, byte) => data + String.fromCharCode(byte), '')
+            );
+            liveSessionRef.current.sendRealtimeInput({
+              audio: { data: base64Audio, mimeType: 'audio/pcm;rate=16000' }
+            });
           } else if (mode === 'CHAT') {
             // Only collect chunks for legacy buffer in CHAT mode
             audioChunksRef.current.push(new Float32Array(ev.data.data));
@@ -970,19 +929,11 @@ export const InterviewStep: React.FC<{
                 // 🔥 BARGE-IN (interrupt AI)
                 if (isSpeakingRef.current) {
                     console.log("[VOICE] Barge-in detected");
-
                     playbackQueueRef.current = [];
-                    // Keep AI turn active until `turn_complete` from backend
-                    // aiTurnActiveRef.current = false;
                     isSpeakingRef.current = false;
                     setIsSpeaking(false);
-
                     isSendingAudioRef.current = true;
-
-                    socketRef.current?.send(JSON.stringify({
-                        type: "realtimeInput",
-                        event: "interrupt"
-                    }));
+                    // Native SDK handles interruption through incoming audio automatically.
                 }
 
             } else {
@@ -1049,7 +1000,6 @@ export const InterviewStep: React.FC<{
       isSpeakingRef.current = false;
       aiTurnActiveRef.current = false;
       setIsSpeaking(false);
-      socketRef.current?.send(JSON.stringify({ type: 'realtimeInput', event: 'interrupt' }));
       startRecording();
       return;
     }

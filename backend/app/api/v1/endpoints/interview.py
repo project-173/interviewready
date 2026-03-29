@@ -16,6 +16,54 @@ router = APIRouter()
 LIVE_MODEL = "gemini-3.1-flash-live-preview"
 
 
+@router.get("/token")
+async def get_live_token(
+    session_id: str,
+):
+    """Generate an ephemeral token for the frontend to connect directly to Gemini Live."""
+    # Note: Ephemeral tokens are a security best practice for client-side direct connections.
+    # In a production environment, you would use your service account to call Google's token endpoint.
+    # For now, we will return the configuration and a flag to the frontend to use its own initialization.
+    
+    user_id = "dev-user"
+    context = get_or_create_session_context(session_id=session_id, user_id=user_id)
+    
+    system_instruction = (
+        "You are an expert Interview Coach conducting a LIVE VOICE mock interview. "
+        "IMPORTANT: You must speak naturally, warmly, and concisely. "
+        "Your goal is to simulate a professional interview based on the user's resume and the job description provided.\n\n"
+        "MANDATORY STARTUP RULE:\n"
+        "1. Immediately start the conversation yourself. Do NOT wait for a 'hello' from the user.\n"
+        "2. Begin with a professional greeting (e.g., 'Hello! Thanks for joining today.').\n"
+        "3. Explicitly state the role you are interviewing them for.\n"
+        "4. Ask the FIRST targeted interview question right away.\n"
+        "5. Keep your responses short to allow for a back-and-forth flow.\n\n"
+        "Focus on one question at a time. If the user stops talking, wait briefly but be ready to guide the conversation if needed."
+    )
+
+    if context.resume_data:
+        resume_context = context.resume_data
+        if isinstance(resume_context, dict):
+            resume_context = json.dumps(resume_context, indent=2)
+        system_instruction += f"\n\nCandidate Resume Context:\n{resume_context}"
+
+    if context.job_description:
+        system_instruction += f"\n\nTarget Job Description:\n{context.job_description}"
+
+    if not context.resume_data and not context.job_description:
+        system_instruction += (
+            "\n\nDIAGNOSTIC MODE: This is a system connectivity test. "
+            "Greet the user warmly, confirm you are 'InterviewReady AI', and ask them how their day is going. "
+            "Keep the response very short and friendly."
+        )
+
+    return {
+        "api_key": settings.GEMINI_API_KEY, # In a real prod app, use Ephemeral Token instead
+        "model": LIVE_MODEL,
+        "system_instruction": system_instruction
+    }
+
+
 @router.websocket("/live")
 async def interview_live_websocket(
     websocket: WebSocket,
