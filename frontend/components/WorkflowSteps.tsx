@@ -307,6 +307,9 @@ export const InterviewStep: React.FC<{
   const aiTurnActiveRef = React.useRef(false);
   const isSpeakingRef = React.useRef(false);
   const isRecordingRef = React.useRef(false);
+  const isStartingRecordingRef = React.useRef(false);
+  const hasDetectedSpeechRef = React.useRef(false);
+  const recordingAttemptRef = React.useRef(0);
   const mediaStreamRef = React.useRef<MediaStream | null>(null);
   const processorRef = React.useRef<AudioWorkletNode | null>(null);
   // Single shared AudioContext for playback — avoids creating a new one per audio chunk
@@ -338,6 +341,7 @@ export const InterviewStep: React.FC<{
         socketRef.current?.readyState === WebSocket.OPEN &&
         !isSpeakingRef.current &&
         !isRecordingRef.current &&
+        !isStartingRecordingRef.current &&
         !aiTurnActiveRef.current
       ) {
         startRecording().catch((error) => {
@@ -359,10 +363,15 @@ export const InterviewStep: React.FC<{
 
     const currentProcessor = processorRef.current;
     const currentStream = mediaStreamRef.current;
+    const shouldSignalAudioEnd = notifyBackend && hasDetectedSpeechRef.current;
 
     processorRef.current = null;
     mediaStreamRef.current = null;
     isRecordingRef.current = false;
+    isStartingRecordingRef.current = false;
+    isSendingAudioRef.current = false;
+    hasDetectedSpeechRef.current = false;
+    recordingAttemptRef.current += 1;
     setIsRecording(false);
 
     if (currentProcessor) {
@@ -372,7 +381,7 @@ export const InterviewStep: React.FC<{
       currentStream.getTracks().forEach(track => track.stop());
     }
 
-    if (notifyBackend && mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN) {
+    if (shouldSignalAudioEnd && mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN) {
       console.log('[VOICE_FRONTEND] Signaling audio stream end to backend');
       socketRef.current.send(JSON.stringify({ type: 'realtimeInput', event: 'audio_stream_end' }));
     }
@@ -750,15 +759,35 @@ export const InterviewStep: React.FC<{
       resumeListeningTimeoutRef.current = null;
     }
     // Use refs for the guard to avoid stale closure issues
-    if (isRecordingRef.current || isSpeakingRef.current) {
-      console.log('[VOICE_DEBUG] startRecording blocked:', { isRecording: isRecordingRef.current, isSpeaking: isSpeakingRef.current });
+    if (isRecordingRef.current || isSpeakingRef.current || isStartingRecordingRef.current) {
+      console.log('[VOICE_DEBUG] startRecording blocked:', {
+        isRecording: isRecordingRef.current,
+        isSpeaking: isSpeakingRef.current,
+        isStarting: isStartingRecordingRef.current,
+      });
       return;
     }
     try {
+      isStartingRecordingRef.current = true;
+      const attemptId = ++recordingAttemptRef.current;
+      hasDetectedSpeechRef.current = false;
+      isSendingAudioRef.current = mode === 'CHAT';
       console.log('[VOICE_DEBUG] Requesting microphone access');
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
       });
+
+      if (
+        attemptId !== recordingAttemptRef.current ||
+        isSpeakingRef.current ||
+        aiTurnActiveRef.current ||
+        socketRef.current?.readyState !== WebSocket.OPEN
+      ) {
+        console.log('[VOICE_DEBUG] Discarding stale microphone start');
+        stream.getTracks().forEach(track => track.stop());
+        isStartingRecordingRef.current = false;
+        return;
+      }
       
       const track = stream.getAudioTracks()[0];
       const settings = track.getSettings();
@@ -781,6 +810,18 @@ export const InterviewStep: React.FC<{
       if (context.state === 'suspended') {
         console.log('[VOICE_DEBUG] Resuming recording AudioContext');
         await context.resume();
+      }
+
+      if (
+        attemptId !== recordingAttemptRef.current ||
+        isSpeakingRef.current ||
+        aiTurnActiveRef.current ||
+        socketRef.current?.readyState !== WebSocket.OPEN
+      ) {
+        console.log('[VOICE_DEBUG] Aborting microphone start after context resume');
+        stream.getTracks().forEach(track => track.stop());
+        isStartingRecordingRef.current = false;
+        return;
       }
 
       if (!workletRegisteredRef.current) {
@@ -825,6 +866,18 @@ export const InterviewStep: React.FC<{
           URL.revokeObjectURL(url);
         }
       }
+
+      if (
+        attemptId !== recordingAttemptRef.current ||
+        isSpeakingRef.current ||
+        aiTurnActiveRef.current ||
+        socketRef.current?.readyState !== WebSocket.OPEN
+      ) {
+        console.log('[VOICE_DEBUG] Aborting microphone start after worklet setup');
+        stream.getTracks().forEach(track => track.stop());
+        isStartingRecordingRef.current = false;
+        return;
+      }
       
       const source = context.createMediaStreamSource(stream);
       const workletNode = new AudioWorkletNode(context, 'audio-recorder-worklet');
@@ -845,7 +898,8 @@ export const InterviewStep: React.FC<{
       mediaStreamRef.current = stream;
       processorRef.current = workletNode;
       isRecordingRef.current = true;
-      isSendingAudioRef.current = true;
+      isStartingRecordingRef.current = false;
+      isSendingAudioRef.current = mode === 'CHAT';
       setIsRecording(true);
 
       // Organic VAD Logic
@@ -858,6 +912,7 @@ export const InterviewStep: React.FC<{
         const dataArray = new Uint8Array(bufferLength);
         
         let lastSpeakTime = Date.now();
+        let speechGateUntil = 0;
         // Documentation Match: Increase threshold to avoid background-noise interruptions
         const SILENCE_THRESHOLD = 15; 
         const MAX_RECORDING_TIME = 120000;
@@ -887,6 +942,12 @@ export const InterviewStep: React.FC<{
 
             if (average > SILENCE_THRESHOLD) {
                 lastSpeakTime = Date.now();
+                speechGateUntil = lastSpeakTime + 250;
+                if (!hasDetectedSpeechRef.current) {
+                    console.log("[VOICE] Speech detected");
+                }
+                hasDetectedSpeechRef.current = true;
+                isSendingAudioRef.current = true;
 
                 // 🔥 BARGE-IN (interrupt AI)
                 if (isSpeakingRef.current) {
@@ -907,7 +968,11 @@ export const InterviewStep: React.FC<{
                 }
 
             } else {
+                if (Date.now() > speechGateUntil) {
+                    isSendingAudioRef.current = false;
+                }
                 if (
+                    hasDetectedSpeechRef.current &&
                     Date.now() - lastSpeakTime > USER_TURN_END_SILENCE_MS &&
                     !aiTurnActiveRef.current
                 ) {
@@ -925,6 +990,7 @@ export const InterviewStep: React.FC<{
       }
     } catch (error) {
       console.error("Error starting recording:", error);
+      isStartingRecordingRef.current = false;
       isRecordingRef.current = false;
       setIsRecording(false);
     }
