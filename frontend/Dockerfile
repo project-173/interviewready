@@ -3,17 +3,16 @@ FROM node:20-slim AS build
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files first for layer caching
 COPY package.json package-lock.json* ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies using 'npm ci' for faster, deterministic installs
+RUN npm ci
 
 # Copy the rest of the application
 COPY . .
 
 # Build the application
-# We use a build argument for the backend URL
 ARG VITE_API_BASE_URL
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
