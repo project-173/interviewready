@@ -277,7 +277,6 @@ export const InterviewModeSelectionStep: React.FC<{
   </div>
 );
 
-import { GoogleGenAI } from '@google/genai';
 import { InterviewMessage, InterviewMode } from '../types';
 
 export const InterviewStep: React.FC<{ 
@@ -289,7 +288,8 @@ export const InterviewStep: React.FC<{
   mode: InterviewMode;
   sessionId: string;
   onExit?: () => void;
-}> = ({ history, onSend, onSendAudio, isLoading, chatEndRef, mode, sessionId, onExit }) => {
+  onLiveEvent?: (event: { type: string; text?: string }) => void;
+}> = ({ history, onSend, onSendAudio, isLoading, chatEndRef, mode, sessionId, onExit, onLiveEvent }) => {
   const [isRecording, setIsRecording] = React.useState(false);
   const [isSpeaking, setIsSpeaking] = React.useState(false);
   const [connectionStatus, setConnectionStatus] = React.useState<'connecting' | 'connected' | 'error' | 'closed'>('connecting');
@@ -403,101 +403,78 @@ export const InterviewStep: React.FC<{
     }
   };
 
-  // For Live Streaming Voice (Native Google SDK Direct Connection)
+  // For Live Streaming Voice (Relay through Backend - Example SDK Pattern)
   useEffect(() => {
     if (mode !== 'VOICE') return;
 
     let isComponentMounted = true;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || window.location.origin;
+    const wsUrl = `${protocol}//${API_BASE_URL.replace(/^https?:\/\//, '')}/api/v1/interview/live?sessionId=${sessionId}`;
 
-    const initializeDirectLive = async () => {
+    const initializeRelaySession = async () => {
       try {
-        console.log('[VOICE_FRONTEND] Requesting session credentials from backend...');
-        const tokenResp = await fetch(`${API_BASE_URL}/api/v1/interview/token?sessionId=${sessionId}`);
-        const configData = await tokenResp.json();
+        console.log('[VOICE_FRONTEND] Connecting to Backend Relay WebSocket...');
+        const ws = new WebSocket(wsUrl);
+        ws.binaryType = 'arraybuffer';
+        socketRef.current = ws;
 
-        if (!isComponentMounted) return;
-
-        console.log('[VOICE_FRONTEND] Connecting directly to Google Gemini Live API...');
-        const genAI = new GoogleGenAI({ apiKey: configData.api_key });
-        
-        const session = await genAI.live.connect({
-          model: configData.model,
-          config: {
-            responseModalities: ['AUDIO' as any],
-            systemInstruction: { parts: [{ text: configData.system_instruction }] },
-            speechConfig: {
-              voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } }
+        ws.onopen = async () => {
+          if (!isComponentMounted) return;
+          console.log('[VOICE_FRONTEND] Relay Connection Established');
+          setConnectionStatus('connected');
+          
+          try {
+            if (!playbackContextRef.current || playbackContextRef.current.state === 'closed') {
+              playbackContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
             }
-          },
-          callbacks: {
-            onopen: async () => {
-              console.log('[VOICE_FRONTEND] Direct Link Established');
-              setConnectionStatus('connected');
+            await playbackContextRef.current.resume();
+            
+            if (!recordingContextRef.current || recordingContextRef.current.state === 'closed') {
+              recordingContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+            }
+            await recordingContextRef.current.resume();
+            
+            await startRecording();
+          } catch (e) {
+            console.error('[VOICE_FRONTEND] Setup failed:', e);
+          }
+        };
+
+        ws.onmessage = (event) => {
+          if (!isComponentMounted) return;
+
+          if (event.data instanceof ArrayBuffer) {
+            // Raw PCM audio from backend
+            const binary = event.data;
+            const dataView = new DataView(binary);
+            const float32 = new Float32Array(binary.byteLength / 2);
+            for (let i = 0; i < float32.length; i++) {
+              float32[i] = dataView.getInt16(i * 2, true) / 32768;
+            }
+
+            playbackQueueRef.current.push(float32);
+            aiTurnActiveRef.current = true;
+            
+            if (!isSpeakingRef.current) {
+              isSpeakingRef.current = true;
+              setIsSpeaking(true);
+              if (isRecordingRef.current) {
+                isSendingAudioRef.current = false;
+                teardownRecording(false);
+              }
+            }
+
+            if (!isQueueProcessingRef.current) {
+              processPlaybackQueue();
+            }
+          } else if (typeof event.data === 'string') {
+            try {
+              const msg = JSON.parse(event.data);
               
-              // ENSURE AudioContexts are initialized and running immediately
-              try {
-                if (!playbackContextRef.current || playbackContextRef.current.state === 'closed') {
-                  playbackContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-                }
-                await playbackContextRef.current.resume();
-                
-                if (!recordingContextRef.current || recordingContextRef.current.state === 'closed') {
-                  recordingContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-                }
-                await recordingContextRef.current.resume();
-                
-                await startRecording();
-                
-                // Trigger the initial greeting
-                session.sendRealtimeInput({ 
-                  text: "Start the live mock interview now. Greet the candidate and ask the first question." 
-                });
-              } catch (e) {
-                console.error('[VOICE_FRONTEND] Setup failed:', e);
-              }
-            },
-            onmessage: (response: any) => {
-              const content = response.serverContent;
-              if (!content) return;
-
-              // Handle AI Audio
-              if (content.modelTurn?.parts) {
-                for (const part of content.modelTurn.parts) {
-                  if (part.inlineData) {
-                    const binary = atob(part.inlineData.data);
-                    const buffer = new ArrayBuffer(binary.length);
-                    const bytes = new Uint8Array(buffer);
-                    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                    
-                    const dataView = new DataView(buffer);
-                    const float32 = new Float32Array(binary.length / 2);
-                    for (let i = 0; i < float32.length; i++) {
-                      float32[i] = dataView.getInt16(i * 2, true) / 32768;
-                    }
-
-                    playbackQueueRef.current.push(float32);
-                    aiTurnActiveRef.current = true;
-                    
-                    if (!isSpeakingRef.current) {
-                      isSpeakingRef.current = true;
-                      setIsSpeaking(true);
-                      if (isRecordingRef.current) {
-                        isSendingAudioRef.current = false;
-                        teardownRecording(false);
-                      }
-                    }
-
-                    if (!isQueueProcessingRef.current) {
-                      processPlaybackQueue();
-                    }
-                  }
-                }
-              }
-
               // Handle Interruption
-              if (content.interrupted) {
-                console.log('[VOICE_FRONTEND] Native interruption signal');
+              if (msg.type === 'interrupted') {
+                console.log('[VOICE_FRONTEND] Interruption signal from relay');
                 playbackQueueRef.current = [];
                 if (playbackContextRef.current?.state === 'running') {
                   playbackContextRef.current.suspend().then(() => {
@@ -511,7 +488,7 @@ export const InterviewStep: React.FC<{
               }
 
               // Handle Turn Completion
-              if (content.turnComplete) {
+              if (msg.type === 'turn_complete') {
                 aiTurnActiveRef.current = false;
                 isSendingAudioRef.current = true;
                 if (playbackQueueRef.current.length === 0) {
@@ -520,33 +497,40 @@ export const InterviewStep: React.FC<{
                   queueResumeListening();
                 }
               }
-            },
-            onerror: (error) => {
-              console.error('[VOICE_FRONTEND] SDK Error:', error);
-              setConnectionStatus('error');
-            },
-            onclose: () => {
-              console.log('[VOICE_FRONTEND] Direct Link Closed');
-              setConnectionStatus('closed');
-              teardownRecording(false);
+
+              // Handle transcriptions (optional but good for UX)
+              if (onLiveEvent) {
+                onLiveEvent(msg);
+              }
+            } catch (e) {
+              console.error('Relay message parse error:', e);
             }
           }
-        });
+        };
 
-        liveSessionRef.current = session;
+        ws.onerror = (error) => {
+          console.error('[VOICE_FRONTEND] Relay WebSocket Error:', error);
+          setConnectionStatus('error');
+        };
+
+        ws.onclose = () => {
+          console.log('[VOICE_FRONTEND] Relay Connection Closed');
+          setConnectionStatus('closed');
+          teardownRecording(false);
+        };
       } catch (err) {
-        console.error('[VOICE_FRONTEND] Initialization failed:', err);
+        console.error('[VOICE_FRONTEND] Relay initialization failed:', err);
         setConnectionStatus('error');
       }
     };
 
-    initializeDirectLive();
+    initializeRelaySession();
 
     return () => {
       isComponentMounted = false;
       teardownRecording(false);
-      if (liveSessionRef.current) {
-        // liveSessionRef.current.close(); // SDK closure logic
+      if (socketRef.current) {
+        socketRef.current.close();
       }
       if (resumeListeningTimeoutRef.current) {
         window.clearTimeout(resumeListeningTimeoutRef.current);
@@ -838,14 +822,9 @@ export const InterviewStep: React.FC<{
       
       workletNode.port.onmessage = (ev) => {
         if (ev.data.event === 'chunk') {
-          if (mode === 'VOICE' && liveSessionRef.current && isSendingAudioRef.current) {
-            // Native SDK expects base64 encoded audio
-            const base64Audio = btoa(
-              new Uint8Array(ev.data.data).reduce((data, byte) => data + String.fromCharCode(byte), '')
-            );
-            liveSessionRef.current.sendRealtimeInput({
-              audio: { data: base64Audio, mimeType: 'audio/pcm;rate=16000' }
-            });
+          if (mode === 'VOICE' && socketRef.current?.readyState === WebSocket.OPEN && isSendingAudioRef.current) {
+            // Send raw binary to backend relay (same as example)
+            socketRef.current.send(ev.data.data);
           } else if (mode === 'CHAT') {
             // Only collect chunks for legacy buffer in CHAT mode
             audioChunksRef.current.push(new Float32Array(ev.data.data));

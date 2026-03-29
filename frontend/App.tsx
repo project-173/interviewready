@@ -3,7 +3,8 @@ import {
   SharedState, 
   WorkflowStatus,
   ChatRequest,
-  InterviewMode
+  InterviewMode,
+  InterviewMessage
 } from './types';
 import {
   contentStrengthAgent, 
@@ -415,9 +416,6 @@ const WorkflowController: React.FC<{
     const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: '[Analyzing audio...]' }];
     setState(prev => ({ ...prev, interviewHistory: updatedHistory }));
     
-    // Non-blocking loading for audio to prevent stuck "analyzing" overlays
-    // startLoading('Processing audio...', ['Transcribing speech', 'Analyzing content', 'Generating response']);
-    
     try {
       const request: ChatRequest = {
         intent: 'INTERVIEW_COACH',
@@ -431,7 +429,6 @@ const WorkflowController: React.FC<{
       const responseText = backendService.formatInterviewCoachPayload(response.payload ?? response.content);
       
       setState(prev => {
-        // Replace the placeholder text with the actual transcription if available
         const newHistory = prev.interviewHistory.map((msg, i) => 
           i === prev.interviewHistory.length - 1 && msg.text === '[Analyzing audio...]' 
             ? { ...msg, text: (response as any).transcription || '[Audio response]' } 
@@ -441,13 +438,34 @@ const WorkflowController: React.FC<{
       });
     } catch (err: any) {
       setError(err.message || 'Failed to process audio');
-      // Revert the placeholder
       setState(prev => ({
         ...prev,
         interviewHistory: prev.interviewHistory.filter(msg => msg.text !== '[Analyzing audio...]')
       }));
-    } finally {
-      // stopLoading();
+    }
+  };
+
+  const handleLiveEvent = (event: { type: string; text?: string }) => {
+    if (event.type === 'user' && event.text) {
+      setState(prev => {
+        const history = [...prev.interviewHistory];
+        const last = history[history.length - 1];
+        if (last && last.role === 'user') {
+          // If the last message was also from user, we might be getting streaming updates
+          // For simplicity in this UI, we just append or replace
+          return { ...prev, interviewHistory: [...history.slice(0, -1), { role: 'user', text: event.text || '' }] };
+        }
+        return { ...prev, interviewHistory: [...history, { role: 'user', text: event.text || '' }] };
+      });
+    } else if (event.type === 'gemini' && event.text) {
+      setState(prev => {
+        const history = [...prev.interviewHistory];
+        const last = history[history.length - 1];
+        if (last && last.role === 'agent') {
+          return { ...prev, interviewHistory: [...history.slice(0, -1), { role: 'agent', text: event.text || '' }] };
+        }
+        return { ...prev, interviewHistory: [...history, { role: 'agent', text: event.text || '' }] };
+      });
     }
   };
 
@@ -468,7 +486,8 @@ const WorkflowController: React.FC<{
           chatEndRef={chatEndRef} 
           mode={state.status === WorkflowStatus.DEBUG_VOICE ? 'VOICE' : (state.interviewMode || 'CHAT')} 
           sessionId={backendService.getSessionId()} 
-          onExit={() => setState(prev => ({ ...prev, status: WorkflowStatus.IDLE }))} 
+          onExit={() => setState(prev => ({ ...prev, status: WorkflowStatus.IDLE }))}
+          onLiveEvent={handleLiveEvent}
         />
       )}
     </>
