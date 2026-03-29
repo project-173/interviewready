@@ -13,6 +13,7 @@ from ..core.constants import ANTI_JAILBREAK_DIRECTIVE
 from ..models.agent import AgentResponse
 from ..models.session import SessionContext
 from ..models.agent import AgentInput
+from ..security.llm_guard_scanner import get_llm_guard_scanner
 
 
 class InterviewCoachAgent(BaseAgent):
@@ -20,6 +21,25 @@ class InterviewCoachAgent(BaseAgent):
 
     USE_MOCK_RESPONSE = settings.MOCK_INTERVIEW_COACH_AGENT
     MOCK_RESPONSE_KEY = "InterviewCoachAgent"
+    SENSITIVE_PATTERNS = {
+        "email": re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE),
+        "phone": re.compile(
+            r"(?:(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4})"
+        ),
+        "ssn": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    }
+    BIAS_PATTERNS = {
+        "age": re.compile(r"\b(young|recent graduate|digital native|energetic)\b", re.IGNORECASE),
+        "gender": re.compile(r"\b(he|she|him|her|male|female|manpower)\b", re.IGNORECASE),
+        "nationality": re.compile(r"\b(native english|american-born|citizens only)\b", re.IGNORECASE),
+    }
+    PROMPT_INJECTION_PATTERNS = [
+        re.compile(r"ignore (all )?(previous|prior) instructions", re.IGNORECASE),
+        re.compile(r"reveal (the )?(system prompt|hidden prompt|developer message)", re.IGNORECASE),
+        re.compile(r"act as (an?|the) ", re.IGNORECASE),
+        re.compile(r"jailbreak|bypass|override|disable guardrails", re.IGNORECASE),
+        re.compile(r"</?(system|assistant|developer|prompt)>", re.IGNORECASE),
+    ]
 
     SYSTEM_PROMPT = (
         """You are an expert Interview Coach specializing in personalized interview preparation. Your job is to simulate a realistic interview by asking questions ONE at a time and guiding the candidate through their responses.
@@ -44,24 +64,14 @@ Your role:
 
 PROCESS:
 - First message: Introduce the mock interview and ask the FIRST question
-- Subsequent messages: Evaluate the candidate's answer, provide a SCORE (0-100), and decide whether to proceed or re-ask
+- Subsequent messages: Use the evaluator result provided in the user prompt to decide whether to proceed or re-ask
 - Continue asking questions in sequence up to a total of 5 questions
 - Always ask questions that bridge their resume to the job requirements
 - Vary question types: behavioral, technical, situational, competency
 
-SCORING GUIDELINES:
-- Score answers from 0-100 based on quality, relevance, and completeness
-- 0-30: Completely inadequate (trolls, irrelevant, no effort)
-- 31-60: Basic attempt but needs significant improvement
-- 61-80: Good solid answer that meets requirements
-- 81-100: Excellent answer with strong detail and structure
-- Consider: relevance to job, use of specific examples, STAR method structure, length/detail
-- STRICT on appropriateness: block trolls, irrelevant answers, and low-effort responses
-- GENEROUS on genuine effort: allow progression for answers that show real thought
-
 PROGRESSION RULES:
-- If score >= 60: Proceed to next question with positive feedback
-- If score < 60: Re-ask the same question with constructive feedback
+- If the evaluator says can_proceed is true: Proceed to the next question with positive feedback
+- If the evaluator says can_proceed is false: Re-ask the same question with constructive feedback
 - Always provide specific suggestions for improvement
 
 RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
@@ -76,6 +86,35 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
   "answer_score": 85,
   "can_proceed": true,
   "next_challenge": "A brief note on what to focus on for the next question"
+}"""
+        + "\n\n" + ANTI_JAILBREAK_DIRECTIVE
+    )
+    EVALUATOR_SYSTEM_PROMPT = (
+        """You are an expert Interview Evaluator. Your only job is to assess the candidate's latest answer to the current interview question.
+
+CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
+
+RULES:
+1. Your entire response must be exactly one JSON object
+2. Start with '{' and end with '}' - nothing else
+3. Do NOT include markdown code blocks
+4. Do NOT include explanatory text, preamble, or summary outside JSON
+5. Do NOT include comments
+6. Do NOT use null values - use empty strings or empty arrays
+7. answer_score must be a number from 0 to 100
+8. can_proceed must be true only when the answer is relevant, substantive, and interview-ready
+
+SCORING GUIDELINES:
+- 0-30: irrelevant, adversarial, empty, or extremely low effort
+- 31-60: partially relevant but weak, vague, or incomplete
+- 61-80: solid and relevant answer with meaningful detail
+- 81-100: strong, well-structured answer with clear impact
+
+RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
+{
+  "answer_score": 75,
+  "can_proceed": true,
+  "feedback": "Specific coaching on what was strong and what to improve."
 }"""
         + "\n\n" + ANTI_JAILBREAK_DIRECTIVE
     )
@@ -121,6 +160,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         shared_memory["current_question_index"] = 0
         shared_memory["asked_questions"] = []
         shared_memory["user_answers"] = []
+        shared_memory["user_answers_redacted"] = []
         shared_memory["total_questions"] = 5
         logger.debug(
             "Interview session initialized",
@@ -136,6 +176,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             "current_question_index": shared_memory.get("current_question_index", 0),
             "asked_questions": list(shared_memory.get("asked_questions", [])),
             "user_answers": list(shared_memory.get("user_answers", [])),
+            "user_answers_redacted": list(shared_memory.get("user_answers_redacted", [])),
             "total_questions": shared_memory.get("total_questions", 5),
         }
 
@@ -145,6 +186,10 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         user_answers = list(shared_memory.get("user_answers", []))
         user_answers.append(user_answer)
         shared_memory["user_answers"] = user_answers
+        user_answers_redacted = list(shared_memory.get("user_answers_redacted", []))
+        redacted_answer, _ = self._sanitize_text(user_answer)
+        user_answers_redacted.append(redacted_answer)
+        shared_memory["user_answers_redacted"] = user_answers_redacted
         current_index = shared_memory.get("current_question_index", 0)
         shared_memory["current_question_index"] = current_index + 1
         logger.debug(
@@ -195,11 +240,105 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             return f"InterviewCoachAgent_Q{question_num}"
         return "InterviewCoachAgent_Summary"
 
+    def _sanitize_text(self, text: str) -> tuple[str, list[str]]:
+        """Redact direct identifiers before sending content to the model."""
+        if not text:
+            return "", []
+        sanitized = text
+        findings: list[str] = []
+        for finding, pattern in self.SENSITIVE_PATTERNS.items():
+            if pattern.search(sanitized):
+                sanitized = pattern.sub(f"[REDACTED_{finding.upper()}]", sanitized)
+                findings.append(finding)
+        return sanitized, findings
+
+    def _sanitize_mapping(self, value) -> tuple[object, list[str]]:
+        """Redact sensitive text recursively in structured payloads."""
+        findings: list[str] = []
+        if isinstance(value, dict):
+            sanitized_dict = {}
+            for key, nested_value in value.items():
+                sanitized_value, nested_findings = self._sanitize_mapping(nested_value)
+                sanitized_dict[key] = sanitized_value
+                findings.extend(nested_findings)
+            return sanitized_dict, findings
+        if isinstance(value, list):
+            sanitized_list = []
+            for nested_value in value:
+                sanitized_value, nested_findings = self._sanitize_mapping(nested_value)
+                sanitized_list.append(sanitized_value)
+                findings.extend(nested_findings)
+            return sanitized_list, findings
+        if isinstance(value, str):
+            return self._sanitize_text(value)
+        return value, []
+
+    def _detect_bias_flags(self, text: str) -> list[str]:
+        """Detect potentially biased language in the hiring context."""
+        if not text:
+            return []
+        flags: list[str] = []
+        for category, pattern in self.BIAS_PATTERNS.items():
+            if pattern.search(text):
+                flags.append(category)
+        return sorted(set(flags))
+
+    def _detect_prompt_injection(self, text: str) -> tuple[bool, list[str]]:
+        """Detect prompt-injection attempts in untrusted interview inputs."""
+        if not text:
+            return False, []
+        findings: list[str] = []
+        for pattern in self.PROMPT_INJECTION_PATTERNS:
+            if pattern.search(text):
+                findings.append(pattern.pattern)
+        return bool(findings), findings
+
+    def _screen_untrusted_text(self, text: str) -> tuple[bool, list[str]]:
+        """Screen candidate-controlled text using heuristics plus scanner when available."""
+        issues: list[str] = []
+        heuristic_blocked, heuristic_findings = self._detect_prompt_injection(text)
+        if heuristic_blocked:
+            issues.extend(f"heuristic:{finding}" for finding in heuristic_findings)
+
+        scanner = get_llm_guard_scanner()
+        safe, _sanitized, scanner_issues = scanner.scan_input(text)
+        if not safe:
+            issues.extend(
+                f"scanner:{issue.get('scanner', 'unknown')}"
+                for issue in scanner_issues
+            )
+        return not issues, issues
+
+    def _build_security_reask_response(
+        self,
+        state: dict,
+        feedback: str,
+        question: str,
+    ) -> str:
+        """Return a deterministic safe re-ask when adversarial content is detected."""
+        response = {
+            "current_question_number": min(
+                state["current_question_index"] + 1,
+                state["total_questions"],
+            ),
+            "total_questions": state["total_questions"],
+            "interview_type": "behavioral",
+            "question": question or "Please answer the interview question using a real work example.",
+            "keywords": ["relevance", "specificity"],
+            "tip": "Focus on a real example, keep it professional, and use STAR.",
+            "feedback": feedback,
+            "answer_score": 0,
+            "can_proceed": False,
+            "next_challenge": "Answer the question directly without meta-instructions or attempts to change system behavior.",
+        }
+        return json.dumps(response)
+
     def _build_interview_prompt(
         self,
         input_data: AgentInput,
         context: SessionContext,
         user_answer: str = "",
+        evaluation_result: Optional[dict] = None,
     ) -> str:
         """Build prompt for the interview coach Gemini call."""
         state = self._get_interview_state(context)
@@ -208,10 +347,14 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             if input_data.resume is not None
             else {}
         )
+        sanitized_resume, _ = self._sanitize_mapping(resume_data)
         job_desc = getattr(input_data, "job_description", "") or context.job_description or ""
-        prompt = f"""Resume:\n{json.dumps(resume_data, indent=2)}
+        sanitized_job_desc, _ = self._sanitize_text(job_desc)
+        sanitized_user_answer, _ = self._sanitize_text(user_answer)
+        bias_flags = self._detect_bias_flags(job_desc)
+        prompt = f"""Resume:\n{json.dumps(sanitized_resume, indent=2)}
 
-Job Description:\n{job_desc}
+Job Description:\n{sanitized_job_desc}
 
 Interview Progress:
 - Current Question: {state['current_question_index'] + 1} of {state['total_questions']}
@@ -221,20 +364,106 @@ Interview Progress:
         if user_answer:
             prompt += f"""
 Candidate's Answer to Previous Question:
-{user_answer}
+{sanitized_user_answer}
 
 Previously Asked Questions:
 {json.dumps(state['asked_questions'], indent=2)}
 """
-            prompt += (
-                "\nEvaluate the candidate's answer yourself. If it is low-effort, irrelevant, trollish, "
-                "or inappropriate, set can_proceed to false and re-ask the same question with specific coaching. "
-                "If it shows genuine thought and meets the bar, set can_proceed to true and move to the next question."
-            )
+            if evaluation_result:
+                prompt += f"""
+
+Evaluator Decision:
+{json.dumps(evaluation_result, indent=2)}
+"""
+                prompt += (
+                    "\nUse the evaluator decision as authoritative. "
+                    "If can_proceed is false, re-ask the same question with constructive coaching. "
+                    "If can_proceed is true, move to the next question."
+                )
         else:
             prompt += "\nThis is the FIRST question of the interview simulation.\n"
+        prompt += (
+            "\nResponsible AI rules:"
+            "\n- Do not infer or mention protected attributes unless the user explicitly provides them and they are job-relevant."
+            "\n- Do not reinforce biased or discriminatory job requirements."
+            "\n- Keep feedback tied to evidence from the answer, resume, and job description."
+            "\n- Avoid requesting or repeating direct identifiers such as email, phone number, or government ID."
+        )
+        if bias_flags:
+            prompt += (
+                "\nPotentially biased job-description signals were detected. "
+                "Avoid using those signals to personalize or score the candidate."
+            )
         prompt += "\nGenerate the next interview question with feedback and guidance."
         return prompt
+
+    def _build_evaluator_prompt(
+        self,
+        input_data: AgentInput,
+        context: SessionContext,
+        user_answer: str,
+    ) -> str:
+        """Build prompt for the evaluator model call."""
+        state = self._get_interview_state(context)
+        resume_data = (
+            input_data.resume.model_dump(exclude_none=True)
+            if input_data.resume is not None
+            else {}
+        )
+        sanitized_resume, _ = self._sanitize_mapping(resume_data)
+        job_desc = getattr(input_data, "job_description", "") or context.job_description or ""
+        sanitized_job_desc, _ = self._sanitize_text(job_desc)
+        sanitized_user_answer, _ = self._sanitize_text(user_answer)
+        current_question = state["asked_questions"][-1] if state["asked_questions"] else ""
+        return f"""Resume:\n{json.dumps(sanitized_resume, indent=2)}
+
+Job Description:
+{sanitized_job_desc}
+
+Current Interview Question:
+{current_question}
+
+Candidate Answer:
+{sanitized_user_answer}
+
+Evaluate only this answer. Base the score on relevance to the question, alignment to the role, specificity, structure, and evidence of impact. Do not ask a new question."""
+
+    def _evaluate_interview_answer(
+        self,
+        input_data: AgentInput,
+        context: SessionContext,
+        user_answer: str,
+    ) -> dict:
+        """Evaluate the latest interview answer with an LLM-backed evaluator."""
+        evaluator_prompt = self._build_evaluator_prompt(input_data, context, user_answer)
+        if self.USE_MOCK_RESPONSE:
+            raw_result = self.gemini_service._generate_mock_response(
+                self.EVALUATOR_SYSTEM_PROMPT,
+                user_answer,
+            )
+        else:
+            raw_result = self._call_gemini_with_system_prompt(
+                evaluator_prompt,
+                context,
+                self.EVALUATOR_SYSTEM_PROMPT,
+            )
+        parsed = json.loads(raw_result)
+        answer_score = parsed.get("answer_score")
+        can_proceed = parsed.get("can_proceed")
+        feedback = parsed.get("feedback")
+
+        if not isinstance(answer_score, (int, float)):
+            raise ValueError("Interview evaluator did not return a numeric answer_score")
+        if not isinstance(can_proceed, bool):
+            raise ValueError("Interview evaluator did not return a boolean can_proceed")
+        if not isinstance(feedback, str) or not feedback.strip():
+            raise ValueError("Interview evaluator did not return feedback text")
+
+        return {
+            "answer_score": round(float(answer_score), 2),
+            "can_proceed": can_proceed,
+            "feedback": feedback.strip(),
+        }
 
     def _build_completion_prompt(self, input_data: AgentInput, context: SessionContext) -> str:
         """Build prompt for the final interview summary."""
@@ -244,10 +473,13 @@ Previously Asked Questions:
             if input_data.resume is not None
             else {}
         )
+        sanitized_resume, _ = self._sanitize_mapping(resume_data)
         job_desc = getattr(input_data, "job_description", "") or context.job_description or ""
-        return f"""Resume:\n{json.dumps(resume_data, indent=2)}
+        sanitized_job_desc, _ = self._sanitize_text(job_desc)
+        redacted_answers = state["user_answers_redacted"] or state["user_answers"]
+        return f"""Resume:\n{json.dumps(sanitized_resume, indent=2)}
 
-Job Description:\n{job_desc}
+Job Description:\n{sanitized_job_desc}
 
 Interview Summary:
 - Total Questions Asked: {len(state['asked_questions'])}
@@ -255,7 +487,7 @@ Interview Summary:
 - Interview Completed: Yes
 
 All user answers:
-{json.dumps(state['user_answers'], indent=2)}
+{json.dumps(redacted_answers, indent=2)}
 
 Previously Asked Questions:
 {json.dumps(state['asked_questions'], indent=2)}
@@ -283,126 +515,6 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             + "\n\n"
             + ANTI_JAILBREAK_DIRECTIVE
         )
-
-    def _score_interview_answer(
-        self,
-        answer: str,
-        question: str = "",
-        context: Optional[SessionContext] = None,
-    ) -> tuple[float, str, bool]:
-        """Score the interview answer and decide whether to proceed."""
-        if not answer or not answer.strip():
-            return 0.0, "Please provide an answer to the interview question.", False
-        answer = answer.strip()
-        answer_lower = answer.lower()
-        normalized_words = re.findall(r"[a-zA-Z']+", answer_lower)
-        word_count = len(normalized_words)
-        skip_indicators = [
-            "idk", "i don't know", "skip", "pass", "whatever", "lol", "haha",
-            "lmao", "test", "random", "don't care", "no idea", "shrug",
-            "dunno", "meh", "n/a", "na", "none", "nothing", "blank", "empty",
-        ]
-        skip_phrases = [indicator for indicator in skip_indicators if " " in indicator or "/" in indicator or "'" in indicator]
-        skip_tokens = {indicator for indicator in skip_indicators if indicator not in skip_phrases}
-        if any(phrase in answer_lower for phrase in skip_phrases) or any(
-            token in skip_tokens for token in normalized_words
-        ):
-            return 0.0, "Please provide a thoughtful answer to the interview question. Low-effort responses won't help you prepare effectively.", False
-        greeting_only_indicators = {"hello", "hi", "hey", "yo", "sup", "greetings"}
-        if normalized_words and all(token in greeting_only_indicators for token in normalized_words):
-            return 0.0, "Please answer the interview question directly instead of sending a greeting.", False
-        nonsense_indicators = {
-            "nonsense", "nonsence", "asdf", "qwerty", "blah", "blahblah", "lorem",
-            "ipsum", "gibberish",
-        }
-        if any(token in nonsense_indicators for token in normalized_words):
-            return 0.0, "Please provide a professional answer that addresses the interview question.", False
-        if word_count < 5:
-            return 0.0, "Please provide a fuller answer with a relevant example or explanation.", False
-        if len(set(normalized_words)) <= 1 and word_count <= 3:
-            return 0.0, "Please provide a more substantive answer to the interview question.", False
-        irrelevant_indicators = ["the weather", "my favorite color", "i like pizza", "just testing"]
-        if any(phrase in answer_lower for phrase in irrelevant_indicators):
-            return 0.0, "Please provide an answer that's relevant to the interview question and professional experience.", False
-
-        score = 30.0
-        feedback_parts = []
-        if word_count >= 40:
-            score += 25.0
-        elif word_count >= 25:
-            score += 20.0
-        elif word_count >= 15:
-            score += 15.0
-            feedback_parts.append("Consider adding more specific examples or details.")
-        elif word_count >= 8:
-            score += 10.0
-            feedback_parts.append("Your answer could benefit from more specific examples.")
-        else:
-            score += 5.0
-            feedback_parts.append("Please provide more detail about your experience and approach.")
-
-        answer_keywords = set(normalized_words)
-        question_keywords = {
-            token for token in re.findall(r"[a-zA-Z']+", (question or "").lower())
-            if len(token) > 3 and token not in {"tell", "about", "when", "have", "with", "your", "this", "that"}
-        }
-        if question_keywords:
-            overlap = len(question_keywords.intersection(answer_keywords))
-            if overlap >= 2:
-                score += 15.0
-            elif overlap == 1:
-                score += 8.0
-                feedback_parts.append("Tie your answer more directly to the specific interview question.")
-            else:
-                feedback_parts.append("Your answer does not address the interview question clearly enough.")
-
-        job_desc = getattr(context, "job_description", "") or "" if context else ""
-        if job_desc and len(job_desc) > 50:
-            job_keywords = {token for token in job_desc.lower().split() if len(token) > 3}
-            overlap = len(job_keywords.intersection(answer_keywords))
-            if overlap >= 3:
-                score += 25.0
-            elif overlap == 2:
-                score += 20.0
-                feedback_parts.append("Try to connect your answer more directly to the job requirements.")
-            elif overlap == 1:
-                score += 15.0
-                feedback_parts.append("Consider how your experience relates to the specific role you're applying for.")
-            else:
-                score += 5.0
-                feedback_parts.append("Your answer doesn't strongly connect to the job requirements.")
-        else:
-            score += 10.0
-
-        star_indicators = ["situation", "task", "action", "result", "challenge", "problem", "solution", "outcome"]
-        star_count = sum(1 for indicator in star_indicators if indicator in answer_lower)
-        if star_count >= 3:
-            score += 20.0
-        elif star_count == 2:
-            score += 15.0
-            feedback_parts.append("Consider using the STAR method (Situation, Task, Action, Result) to structure your answer.")
-        elif star_count == 1:
-            score += 10.0
-            feedback_parts.append("Your answer could be better structured using the STAR method.")
-        else:
-            score += 5.0
-            feedback_parts.append("Consider structuring your answer using the STAR method for better clarity.")
-
-        meets_minimum = score >= 60.0
-        if meets_minimum:
-            if score >= 90:
-                feedback = "Excellent answer! You provided strong detail and clear structure."
-            elif score >= 80:
-                feedback = "Very good answer with solid detail and relevance."
-            else:
-                feedback = "Good answer that meets the requirements."
-                if feedback_parts:
-                    feedback += f" {feedback_parts[0]}"
-        else:
-            feedback = "Your answer needs improvement."
-            if feedback_parts:
-                feedback += f" {' '.join(feedback_parts)}"
-        return score, feedback, meets_minimum
 
     def _extract_follow_up(self, input_data: AgentInput) -> tuple[bool, str]:
         """Extract the latest user answer from message history."""
@@ -454,12 +566,15 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         processing_start_time = time.time()
         is_follow_up = False
         user_answer = ""
-        fallback_score: Optional[float] = None
-        fallback_feedback = ""
-        fallback_can_proceed = True
+        evaluation_result: Optional[dict] = None
         model_answer_score: Optional[float] = None
         model_can_proceed: Optional[bool] = None
+        precomputed_result: Optional[str] = None
+        method_used = "uninitialized"
         state = self._get_interview_state(context)
+        security_findings: list[str] = []
+        bias_flags: list[str] = []
+        prompt_injection_issues: list[str] = []
 
         # Extract input
         if isinstance(input_data, AgentInput):
@@ -475,20 +590,51 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                     )
 
                 is_follow_up, user_answer = self._extract_follow_up(input_data)
-                if is_follow_up and self.USE_MOCK_RESPONSE:
-                    fallback_score, fallback_feedback, fallback_can_proceed = self._score_interview_answer(
-                        user_answer,
-                        state["asked_questions"][-1] if state["asked_questions"] else "",
-                        context,
+                sanitized_user_answer, answer_findings = self._sanitize_text(user_answer)
+                security_findings.extend(answer_findings)
+                bias_flags.extend(self._detect_bias_flags(context.job_description or input_data.job_description))
+                if is_follow_up and user_answer:
+                    input_is_safe, prompt_injection_issues = self._screen_untrusted_text(
+                        user_answer
                     )
-
-                input_text = self._build_interview_prompt(
-                    input_data,
-                    context,
-                    user_answer=user_answer,
-                )
+                    if not input_is_safe:
+                        precomputed_result = self._build_security_reask_response(
+                            state,
+                            "Your last reply looked like an attempt to change system behavior rather than answer the interview question. Please answer the question directly with a relevant example.",
+                            state["asked_questions"][-1] if state["asked_questions"] else "",
+                        )
+                        method_used = "security_block_reask"
+                        model_answer_score = 0.0
+                        model_can_proceed = False
+                        input_text = self._build_interview_prompt(
+                            input_data,
+                            context,
+                            user_answer=sanitized_user_answer,
+                        )
+                    else:
+                        evaluation_result = self._evaluate_interview_answer(
+                            input_data,
+                            context,
+                            user_answer,
+                        )
+                        model_answer_score = evaluation_result["answer_score"]
+                        model_can_proceed = evaluation_result["can_proceed"]
+                        input_text = self._build_interview_prompt(
+                            input_data,
+                            context,
+                            user_answer=user_answer,
+                            evaluation_result=evaluation_result,
+                        )
+                else:
+                    input_text = self._build_interview_prompt(
+                        input_data,
+                        context,
+                        user_answer=user_answer,
+                    )
         else:
             input_text = input_data
+            if isinstance(input_data, str):
+                _, security_findings = self._sanitize_text(input_data)
 
         input_type = "audio" if isinstance(input_text, bytes) else "text"
 
@@ -501,7 +647,13 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         )
 
         try:
-            if isinstance(input_text, bytes):
+            if prompt_injection_issues:
+                result = precomputed_result or self._build_security_reask_response(
+                    state,
+                    "Please answer the interview question directly with a relevant example.",
+                    state["asked_questions"][-1] if state["asked_questions"] else "",
+                )
+            elif isinstance(input_text, bytes):
                 # Handle audio input
                 gemini_live_available = (
                     hasattr(self.gemini_live_service, "connected")
@@ -519,28 +671,27 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                         input_text, self.SYSTEM_PROMPT
                     )
                     method_used = "gemini_live_audio"
+                    if not result:
+                        raise RuntimeError(
+                            "Gemini Live audio processing failed for InterviewCoachAgent"
+                        )
                 else:
-                    result = "Audio processing is not available. Please ensure Gemini Live is connected."
-                    method_used = "audio_unavailable"
+                    raise RuntimeError(
+                        "Audio input requires Gemini Live, but the live connection is unavailable"
+                    )
             else:
                 # Handle text input
                 if self.USE_MOCK_RESPONSE:
                     dynamic_mock_key = self._get_dynamic_mock_key(
                         context,
                         is_follow_up,
-                        fallback_can_proceed,
+                        model_can_proceed if model_can_proceed is not None else True,
                     )
                     result = self.get_mock_response_by_key(dynamic_mock_key)
                     if result is None:
-                        logger.warning(
-                            "InterviewCoachAgent mock enabled but response key not found",
-                            session_id=session_id,
-                            mock_response_key=dynamic_mock_key,
+                        raise ValueError(
+                            f"InterviewCoachAgent mock enabled but response key not found: {dynamic_mock_key}"
                         )
-                        result = self._call_gemini_with_system_prompt(
-                            input_text, context, self.SYSTEM_PROMPT
-                        )
-                        method_used = "standard_gemini_fallback"
                     else:
                         method_used = "mock_response_file"
                 else:
@@ -561,7 +712,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                             session_id=session_id,
                         )
                         result = self._call_gemini_live(input_text, self.SYSTEM_PROMPT)
-                        if not result or result.startswith("Error"):
+                        if not result:
                             logger.warning(
                                 f"InterviewCoachAgent Gemini Live failed, falling back to standard Gemini",
                                 session_id=session_id,
@@ -600,28 +751,27 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             try:
                 response_json = json.loads(result)
                 if response_json.get("interview_complete", False):
+                    if isinstance(input_data, AgentInput) and is_follow_up and user_answer:
+                        self._store_answer_and_advance(user_answer, context)
                     self._set_interview_complete(context)
+                    state = self._get_interview_state(context)
                     logger.debug(
                         "Interview completed - AI generated completion summary",
                         session_id=session_id,
                     )
                 elif isinstance(input_data, AgentInput):
-                    model_answer_score = response_json.get("answer_score")
-                    model_can_proceed = response_json.get("can_proceed")
-                    if model_can_proceed is None and is_follow_up:
-                        model_answer_score, fallback_feedback, fallback_can_proceed = self._score_interview_answer(
-                            user_answer,
-                            state["asked_questions"][-1] if state["asked_questions"] else "",
-                            context,
-                        )
-                        model_can_proceed = fallback_can_proceed
-                        if "feedback" not in response_json and fallback_feedback:
-                            response_json["feedback"] = fallback_feedback
-                        if "answer_score" not in response_json:
-                            response_json["answer_score"] = round(model_answer_score, 2)
-                        if "can_proceed" not in response_json:
-                            response_json["can_proceed"] = model_can_proceed
+                    if is_follow_up and evaluation_result is not None:
+                        response_json["answer_score"] = evaluation_result["answer_score"]
+                        response_json["can_proceed"] = evaluation_result["can_proceed"]
+                        response_json["feedback"] = evaluation_result["feedback"]
+                        model_answer_score = evaluation_result["answer_score"]
+                        model_can_proceed = evaluation_result["can_proceed"]
+                        if not evaluation_result["can_proceed"] and state["asked_questions"]:
+                            response_json["question"] = state["asked_questions"][-1]
                         result = json.dumps(response_json)
+                    else:
+                        model_answer_score = response_json.get("answer_score")
+                        model_can_proceed = response_json.get("can_proceed")
 
                     if is_follow_up and user_answer and model_can_proceed:
                         self._store_answer_and_advance(user_answer, context)
@@ -651,23 +801,19 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                         response_json.get("question")
                         and response_json.get("current_question_number", state["current_question_index"] + 1)
                         == state["current_question_index"] + 1
+                        and model_can_proceed is not False
                     ):
                         self._store_question_if_new(response_json["question"], context)
                     result = json.dumps(response_json)
                     if state["current_question_index"] >= state["total_questions"]:
                         self._set_interview_complete(context)
             except json.JSONDecodeError:
-                if isinstance(input_data, AgentInput) and is_follow_up:
-                    model_answer_score, fallback_feedback, fallback_can_proceed = self._score_interview_answer(
-                        user_answer,
-                        state["asked_questions"][-1] if state["asked_questions"] else "",
-                        context,
-                    )
                 logger.warning(
                     "Failed to parse InterviewCoachAgent response as JSON",
                     session_id=session_id,
                     result_preview=result[:200],
                 )
+                raise ValueError("InterviewCoachAgent returned non-JSON output")
 
             # Build decision trace for auditability
             input_type = "audio" if isinstance(input_text, bytes) else "text"
@@ -681,6 +827,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 f"InterviewCoachAgent: Generated targeted interview question for {input_type} input",
                 f"InterviewCoachAgent: Used coaching model with confidence {self.CONFIDENCE_SCORE}",
                 f"InterviewCoachAgent: Method used: {method_used}",
+                "InterviewCoachAgent: Scoring factors include answer relevance, job alignment, detail depth, and STAR-style structure",
             ]
 
             # Add method used to trace
@@ -696,13 +843,21 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 decision_trace.append(
                     "InterviewCoachAgent: Used mock response from backend/mock_responses.json"
                 )
-            elif method_used == "audio_unavailable":
-                decision_trace.append(
-                    "InterviewCoachAgent: Audio processing unavailable due to missing Gemini Live connection"
-                )
             else:
                 decision_trace.append(
                     "InterviewCoachAgent: Used standard Gemini API (fallback)"
+                )
+            if security_findings:
+                decision_trace.append(
+                    "InterviewCoachAgent: Redacted sensitive candidate data before prompt construction"
+                )
+            if prompt_injection_issues:
+                decision_trace.append(
+                    "InterviewCoachAgent: Blocked adversarial candidate input before model execution and re-asked the same question"
+                )
+            if bias_flags:
+                decision_trace.append(
+                    "InterviewCoachAgent: Detected potentially biased hiring-language signals and excluded them from coaching logic"
                 )
 
             # Create SHARP metadata
@@ -721,21 +876,106 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 "input_type": input_type,
                 "current_question_number": current_question_number,
                 "total_questions": state["total_questions"],
+                "prompt_injection_blocked": bool(prompt_injection_issues),
+                "prompt_injection_signals": prompt_injection_issues,
+                "agent_security_risks": [
+                    "prompt_injection_via_candidate_input",
+                    "pii_exposure_in_resume_or_answers",
+                    "biased_or_discriminatory_questioning",
+                    "unsafe_retention_of_sensitive_interview_content",
+                ],
+                "security_mitigations": {
+                    "code_level": [
+                        "BaseAgent prompt-injection scanning before model calls",
+                        "output sanitization for prompt leakage and dangerous content",
+                        "PII redaction before interview prompts and completion summaries",
+                    ],
+                    "workflow_level": [
+                        "governance audit after orchestration",
+                        "human review recommendation when bias or sensitive-content signals appear",
+                        "CI checks for interview security and governance tests",
+                    ],
+                },
+                "responsible_ai": {
+                    "development_alignment": [
+                        "schema-constrained JSON outputs for predictable behavior",
+                        "defense-in-depth scanning in the base agent",
+                        "auditable decision traces and structured metadata",
+                    ],
+                    "deployment_alignment": [
+                        "post-response governance audit",
+                        "deployment workflow includes security scanning and targeted backend tests",
+                        "Langfuse-compatible tracing for traceability",
+                    ],
+                    "explainability": {
+                        "decision_basis": [
+                            "resume-job alignment",
+                            "question relevance",
+                            "answer completeness",
+                            "STAR-method structure",
+                        ],
+                        "user_visible_fields": [
+                            "feedback",
+                            "answer_score",
+                            "can_proceed",
+                            "next_challenge",
+                        ],
+                    },
+                    "bias_mitigation": [
+                        "do not infer protected attributes",
+                        "detect biased job-description signals",
+                        "focus coaching on evidence and job-relevant behavior",
+                    ],
+                    "sensitive_content_handling": [
+                        "direct identifiers are redacted before model prompts",
+                        "redacted answers are used for completion summaries",
+                        "sensitive-content signals trigger governance review metadata",
+                    ],
+                    "governance_alignment": [
+                        "SHARP metadata attached to each response",
+                        "governance service can flag human review needs",
+                    ],
+                    "imda_model_ai_governance_framework_alignment": {
+                        "internal_governance_structures_and_measures": [
+                            "agent-specific risks and mitigations are attached as structured metadata",
+                            "security and governance tests are enforced in CI before deployment",
+                        ],
+                        "human_involvement_in_ai_augmented_decision_making": [
+                            "human review is recommended for sensitive or bias-related cases",
+                            "agent output is advisory coaching rather than autonomous hiring action",
+                        ],
+                        "operations_management": [
+                            "prompt-injection screening and output sanitization",
+                            "PII redaction before prompts and redacted summary generation",
+                            "governance audit after orchestration",
+                        ],
+                        "stakeholder_interaction_and_communication": [
+                            "reasoning, feedback, answer_score, and can_proceed expose decision basis",
+                            "decision_trace captures method path and safety interventions",
+                        ],
+                    },
+                },
             }
+            sharp_metadata["sensitive_input_detected"] = bool(security_findings)
+            sharp_metadata["sensitive_input_types"] = sorted(set(security_findings))
+            sharp_metadata["bias_review_required"] = bool(bias_flags)
+            sharp_metadata["bias_flags"] = sorted(set(bias_flags))
+            sharp_metadata["human_review_recommended"] = bool(
+                security_findings or bias_flags or prompt_injection_issues
+            )
             if model_answer_score is not None:
                 sharp_metadata["answer_score"] = round(float(model_answer_score), 2)
-            elif fallback_score is not None:
-                sharp_metadata["answer_score"] = round(fallback_score, 2)
 
             if model_can_proceed is not None:
                 sharp_metadata["can_proceed"] = model_can_proceed
-            elif is_follow_up:
-                sharp_metadata["can_proceed"] = fallback_can_proceed
 
             response = AgentResponse(
                 agent_name=self.get_name(),
                 content=result,
-                reasoning="Generated single targeted interview question with feedback.",
+                reasoning=(
+                    "Generated interview coaching based on resume-job alignment and "
+                    "answer-quality heuristics, with explainable score and progression metadata."
+                ),
                 confidence_score=self.CONFIDENCE_SCORE,
                 decision_trace=decision_trace,
                 sharp_metadata=sharp_metadata,
@@ -820,7 +1060,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                     session_id=session_id,
                     execution_time_ms=round(live_execution_time * 1000, 2),
                 )
-                return "(No response from Gemini Live for audio)"
+                return None
 
             logger.debug(
                 "InterviewCoachAgent Gemini Live audio call successful",
@@ -839,7 +1079,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 error_type=type(e).__name__,
                 error_message=str(e),
             )
-            return f"Error contacting Gemini Live for audio: {str(e)}"
+            return None
 
     @observe(name="_call_gemini_live", as_type="tool")
     def _call_gemini_live(self, input_text: str, system_prompt: str) -> Optional[str]:
@@ -880,7 +1120,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                     session_id=session_id,
                     execution_time_ms=round(live_execution_time * 1000, 2),
                 )
-                return "(No response from Gemini Live)"
+                return None
 
             logger.debug(
                 "InterviewCoachAgent Gemini Live call successful",
@@ -899,7 +1139,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 error_type=type(e).__name__,
                 error_message=str(e),
             )
-            return f"Error contacting Gemini Live: {str(e)}"
+            return None
 
     def _call_gemini_with_system_prompt(self, input_text: str, context: SessionContext, system_prompt: str) -> str:
         """Call Gemini API with custom system prompt.
