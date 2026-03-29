@@ -94,6 +94,7 @@ async def interview_live_websocket(
     audio_input_queue: asyncio.Queue[bytes] = asyncio.Queue()
     video_input_queue: asyncio.Queue[bytes] = asyncio.Queue()
     text_input_queue: asyncio.Queue[str] = asyncio.Queue()
+    control_input_queue: asyncio.Queue[str] = asyncio.Queue()
 
     gemini_client = GeminiLive(
         api_key=settings.GEMINI_API_KEY,
@@ -144,8 +145,7 @@ async def interview_live_websocket(
 
                 if event_type == "audio_stream_end":
                     logger.info("[VOICE_BACKEND] Audio stream end received from frontend")
-                    # The current relay relies on server-side VAD; no explicit SDK flush call
-                    # is required in this queue-driven sample bridge.
+                    await control_input_queue.put("audio_stream_end")
                     continue
 
                 if payload.get("audioData"):
@@ -162,6 +162,11 @@ async def interview_live_websocket(
             logger.info(f"[VOICE_BACKEND] Client disconnected for session {session_id}")
             raise
         except Exception as exc:
+            if "disconnect message has been received" in str(exc):
+                logger.info(
+                    f"[VOICE_BACKEND] Client receive loop closed for session {session_id}"
+                )
+                raise WebSocketDisconnect
             logger.error(f"[VOICE_BACKEND] Error receiving from client: {exc}")
             await websocket.send_json(
                 {"error": f"Client communication error: {str(exc)}"}
@@ -176,6 +181,7 @@ async def interview_live_websocket(
             audio_input_queue=audio_input_queue,
             video_input_queue=video_input_queue,
             text_input_queue=text_input_queue,
+            control_input_queue=control_input_queue,
             audio_output_callback=audio_output_callback,
             audio_interrupt_callback=audio_interrupt_callback,
         ):

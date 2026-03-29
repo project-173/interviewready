@@ -32,7 +32,15 @@ class GeminiLive:
         self.tool_mapping = tool_mapping or {}
         self.system_instruction = system_instruction or "You are a helpful AI assistant."
 
-    async def start_session(self, audio_input_queue, video_input_queue, text_input_queue, audio_output_callback, audio_interrupt_callback=None):
+    async def start_session(
+        self,
+        audio_input_queue,
+        video_input_queue,
+        text_input_queue,
+        audio_output_callback,
+        audio_interrupt_callback=None,
+        control_input_queue=None,
+    ):
         config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
             speech_config=types.SpeechConfig(
@@ -91,6 +99,20 @@ class GeminiLive:
                     logger.debug("send_text task cancelled")
                 except Exception as e:
                     logger.error(f"send_text error: {e}")
+
+            async def send_controls():
+                if control_input_queue is None:
+                    return
+                try:
+                    while True:
+                        control = await control_input_queue.get()
+                        if control == "audio_stream_end":
+                            logger.info("Forwarding audio_stream_end to Gemini")
+                            await session.send_realtime_input(audio_stream_end=True)
+                except asyncio.CancelledError:
+                    logger.debug("send_controls task cancelled")
+                except Exception as e:
+                    logger.error(f"send_controls error: {e}")
 
             event_queue = asyncio.Queue()
 
@@ -172,6 +194,7 @@ class GeminiLive:
             send_audio_task = asyncio.create_task(send_audio())
             send_video_task = asyncio.create_task(send_video())
             send_text_task = asyncio.create_task(send_text())
+            send_controls_task = asyncio.create_task(send_controls())
             receive_task = asyncio.create_task(receive_loop())
 
             try:
@@ -188,6 +211,7 @@ class GeminiLive:
                 send_audio_task.cancel()
                 send_video_task.cancel()
                 send_text_task.cancel()
+                send_controls_task.cancel()
                 receive_task.cancel()
         except Exception as e:
             logger.error(f"Gemini Live session error: {type(e).__name__}: {e}")

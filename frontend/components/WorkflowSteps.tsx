@@ -292,6 +292,7 @@ export const InterviewStep: React.FC<{
 }> = ({ history, onSend, onSendAudio, isLoading, chatEndRef, mode, sessionId, onExit, onLiveEvent }) => {
   const [isRecording, setIsRecording] = React.useState(false);
   const [isSpeaking, setIsSpeaking] = React.useState(false);
+  const [isVoiceActive, setIsVoiceActive] = React.useState(false);
   const [connectionStatus, setConnectionStatus] = React.useState<'connecting' | 'connected' | 'error' | 'closed'>('connecting');
   const audioChunksRef = React.useRef<Float32Array[]>([]);
   const playbackQueueRef = React.useRef<Float32Array[]>([]);
@@ -308,6 +309,7 @@ export const InterviewStep: React.FC<{
   const aiTurnActiveRef = React.useRef(false);
   const awaitingTurnCompletionRef = React.useRef(false);
   const isSpeakingRef = React.useRef(false);
+  const isVoiceActiveRef = React.useRef(false);
   const isRecordingRef = React.useRef(false);
   const isStartingRecordingRef = React.useRef(false);
   const hasDetectedSpeechRef = React.useRef(false);
@@ -329,6 +331,10 @@ export const InterviewStep: React.FC<{
   React.useEffect(() => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
+
+  React.useEffect(() => {
+    isVoiceActiveRef.current = isVoiceActive;
+  }, [isVoiceActive]);
 
   const queueResumeListening = (delayMs = 250) => {
     if (resumeListeningTimeoutRef.current) {
@@ -374,8 +380,10 @@ export const InterviewStep: React.FC<{
     awaitingTurnCompletionRef.current = false;
     isSendingAudioRef.current = false;
     hasDetectedSpeechRef.current = false;
+    isVoiceActiveRef.current = false;
     recordingAttemptRef.current += 1;
     setIsRecording(false);
+    setIsVoiceActive(false);
 
     if (currentProcessor) {
       currentProcessor.disconnect();
@@ -461,6 +469,8 @@ export const InterviewStep: React.FC<{
             if (!isSpeakingRef.current) {
               isSpeakingRef.current = true;
               setIsSpeaking(true);
+              isVoiceActiveRef.current = false;
+              setIsVoiceActive(false);
               if (isRecordingRef.current) {
                 isSendingAudioRef.current = false;
                 teardownRecording(false);
@@ -479,6 +489,8 @@ export const InterviewStep: React.FC<{
                 console.log('[VOICE_FRONTEND] Interruption signal from relay');
                 playbackQueueRef.current = [];
                 awaitingTurnCompletionRef.current = false;
+                isVoiceActiveRef.current = false;
+                setIsVoiceActive(false);
                 if (playbackContextRef.current?.state === 'running') {
                   playbackContextRef.current.suspend().then(() => {
                     nextStartTimeRef.current = 0;
@@ -714,7 +726,9 @@ export const InterviewStep: React.FC<{
       const attemptId = ++recordingAttemptRef.current;
       awaitingTurnCompletionRef.current = false;
       hasDetectedSpeechRef.current = false;
+      isVoiceActiveRef.current = false;
       isSendingAudioRef.current = mode === 'CHAT';
+      setIsVoiceActive(false);
       console.log('[VOICE_DEBUG] Requesting microphone access');
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
@@ -912,6 +926,8 @@ export const InterviewStep: React.FC<{
                     console.log("[VOICE] Speech detected", { rms: Number(rms.toFixed(4)) });
                 }
                 hasDetectedSpeechRef.current = true;
+                isVoiceActiveRef.current = true;
+                setIsVoiceActive(true);
                 isSendingAudioRef.current = true;
 
                 // 🔥 BARGE-IN (interrupt AI)
@@ -927,6 +943,10 @@ export const InterviewStep: React.FC<{
             } else {
                 if (Date.now() > speechGateUntil) {
                     isSendingAudioRef.current = false;
+                    if (isVoiceActiveRef.current) {
+                        isVoiceActiveRef.current = false;
+                        setIsVoiceActive(false);
+                    }
                 }
                 if (
                     hasDetectedSpeechRef.current &&
@@ -937,6 +957,8 @@ export const InterviewStep: React.FC<{
                     awaitingTurnCompletionRef.current = true;
                     isSendingAudioRef.current = false;
                     hasDetectedSpeechRef.current = false;
+                    isVoiceActiveRef.current = false;
+                    setIsVoiceActive(false);
                 }
             }
           
@@ -1011,8 +1033,8 @@ export const InterviewStep: React.FC<{
               </>
             ) : isRecording ? (
               <>
-                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-                Listening... (Your turn)
+                <div className={`w-2 h-2 rounded-full ${isVoiceActive ? 'bg-red-500 animate-pulse' : 'bg-slate-300'}`}></div>
+                {isVoiceActive ? 'Voice detected' : 'Listening... (Your turn)'}
               </>
             ) : isLoading ? (
               <>
@@ -1049,7 +1071,7 @@ export const InterviewStep: React.FC<{
 
         <div className="relative">
           {/* Animated Waveform Background */}
-          {(isRecording || isSpeaking) && (
+          {((isVoiceActive && isRecording) || isSpeaking) && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className={`absolute w-32 h-32 rounded-full opacity-20 animate-ping ${isSpeaking ? 'bg-blue-400' : 'bg-red-400'}`}></div>
               <div className={`absolute w-40 h-40 rounded-full opacity-10 animate-pulse ${isSpeaking ? 'bg-blue-400' : 'bg-red-400'}`}></div>
@@ -1061,7 +1083,9 @@ export const InterviewStep: React.FC<{
             disabled={isLoading}
             className={`relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-500 shadow-xl ${
               isRecording 
-                ? 'bg-red-500 text-white scale-110 shadow-red-200' 
+                ? isVoiceActive
+                  ? 'bg-red-500 text-white scale-110 shadow-red-200'
+                  : 'bg-white border-2 border-red-200 text-red-500 shadow-red-100'
                 : isSpeaking 
                   ? 'bg-blue-500 text-white shadow-blue-200'
                   : 'bg-white border-2 border-slate-100 text-slate-400 hover:border-slate-300 hover:text-slate-600'
