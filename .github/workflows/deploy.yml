@@ -3,11 +3,8 @@ name: Deploy to Google Cloud Run
 on:
   push:
     branches:
-      - CICD
-      - langfuse
-      - security
       - main
-      - python-convert
+      - sit
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}

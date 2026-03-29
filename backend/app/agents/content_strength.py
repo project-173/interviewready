@@ -160,7 +160,7 @@ class ContentStrengthAgent(BaseAgent):
 
             # Log response creation
             logger.debug(
-                f"ContentStrengthAgent response created",
+                "ContentStrengthAgent response created",
                 session_id=session_id,
                 confidence_score=overall_confidence,
                 hallucination_risk=hallucination_risk,
@@ -173,7 +173,7 @@ class ContentStrengthAgent(BaseAgent):
             processing_time = time.time() - processing_start_time
             logger.log_agent_error(agent_name, e, session_id)
             logger.error(
-                f"ContentStrengthAgent processing failed",
+                "ContentStrengthAgent processing failed",
                 session_id=session_id,
                 processing_time_ms=round(processing_time * 1000, 2),
                 error_type=type(e).__name__,
