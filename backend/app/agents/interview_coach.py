@@ -702,9 +702,15 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                     )
                     result = self.get_mock_response_by_key(dynamic_mock_key)
                     if result is None:
-                        raise ValueError(
-                            f"InterviewCoachAgent mock enabled but response key not found: {dynamic_mock_key}"
+                        logger.warning(
+                            f"InterviewCoachAgent dynamic mock key not found: {dynamic_mock_key}, falling back to base key"
                         )
+                        result = self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
+                        if result is None:
+                            raise ValueError(
+                                f"InterviewCoachAgent mock enabled but response key not found: {dynamic_mock_key} and fallback {self.MOCK_RESPONSE_KEY}"
+                            )
+                        method_used = "mock_response_file_fallback"
                     else:
                         method_used = "mock_response_file"
                 else:
