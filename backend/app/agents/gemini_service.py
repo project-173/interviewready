@@ -29,7 +29,7 @@ class GeminiService:
     """Service for interacting with Google Gemini API."""
 
     def __init__(
-        self, api_key: Optional[str] = None, model_name: str = "gemini-2.5-flash-lite"
+        self, api_key: Optional[str] = None, model_name: str = "gemini-2.5-flash"
     ):
         """Initialize Gemini service.
 
@@ -88,7 +88,7 @@ class GeminiService:
             from ..core.logging import logger
 
             logger.error(f"Gemini API call failed: {str(e)}")
-            return f"Error calling Gemini API: {str(e)}"
+            raise RuntimeError(f"Gemini API call failed: {str(e)}") from e
 
     def _generate_mock_response(self, system_prompt: str, user_input: str) -> str:
         """Generate a mock response based on the system prompt.
@@ -101,7 +101,35 @@ class GeminiService:
             Mock JSON response
         """
         # Detect response type based on system prompt
-        if "resume" in system_prompt.lower() and "critic" in system_prompt.lower():
+        if "interview evaluator" in system_prompt.lower():
+            lowered_input = user_input.lower()
+            normalized_words = set(re.findall(r"[a-zA-Z']+", lowered_input))
+            token_list = re.findall(r"[a-zA-Z']+", lowered_input)
+            looks_like_gibberish = (
+                len(token_list) == 1
+                and len(token_list[0]) >= 10
+            )
+            low_effort_phrases = [
+                "ignore previous instructions",
+                "i don't know",
+            ]
+            if (
+                any(phrase in lowered_input for phrase in low_effort_phrases)
+                or {"hello", "hi", "idk", "nonsence", "nonsense"} & normalized_words
+                or looks_like_gibberish
+            ):
+                mock_data = {
+                    "answer_score": 20,
+                    "can_proceed": False,
+                    "feedback": "This answer is too weak or not responsive to the interview question. Please answer with a specific, relevant example.",
+                }
+            else:
+                mock_data = {
+                    "answer_score": 82,
+                    "can_proceed": True,
+                    "feedback": "This is a solid answer with relevant detail. Keep making the example concrete and outcome-oriented.",
+                }
+        elif "resume" in system_prompt.lower() and "critic" in system_prompt.lower():
             # Resume Critic mock response
             mock_data = {
                 "resume_data": {
@@ -233,7 +261,7 @@ class GeminiLiveService:
     def connect(
         self,
         api_key: str,
-        model_name: str = "gemini-2.5-flash-native-audio-preview-12-2025",
+        model_name: str = "gemini-2.5-flash",
     ) -> None:
         """Connect to Gemini Live API.
 

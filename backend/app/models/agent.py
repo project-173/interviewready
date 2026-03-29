@@ -190,31 +190,35 @@ class ContentAchievement(BaseModel):
 class ContentSuggestion(BaseModel):
     """Faithful phrasing suggestion for resume improvement."""
 
+    location: str
     original: str
     suggested: str
-    rationale: str
-    faithful: bool
-    confidenceScore: float
+    evidenceStrength: Literal["HIGH", "MEDIUM", "LOW"]
+    type: Literal["action_verb", "specificity", "structure", "redundancy"]
 
 
-class ContentAnalysisReport(BaseModel):
+class ContentStrengthReport(BaseModel):
     """Content strength analysis report."""
 
-    skills: Optional[List[ContentSkill]] = Field(default_factory=list)
-    achievements: Optional[List[ContentAchievement]] = Field(default_factory=list)
-    suggestions: Optional[List[ContentSuggestion]] = Field(default_factory=list)
-    hallucinationRisk: Optional[float] = None
-    summary: Optional[str] = None
+    suggestions: List[ContentSuggestion]
+    summary: str
+    score: Optional[int] = None
 
 
-class StructuralAssessment(BaseModel):
-    """Resume structural assessment."""
+class ResumeCriticIssue(BaseModel):
+    """Resume critic issue."""
+    
+    location: str
+    type: Literal["ats", "structure", "impact", "readability"]
+    severity: Literal["HIGH", "MEDIUM", "LOW"]
+    description: str
 
-    score: Optional[float] = None
-    readability: Optional[str] = None
-    formattingRecommendations: Optional[List[str]] = Field(default_factory=list)
-    suggestions: Optional[List[str]] = Field(default_factory=list)
+class ResumeCriticReport(BaseModel):
+    """Resume critic analysis report."""
 
+    issues: List[ResumeCriticIssue]
+    summary: str
+    score: Optional[int] = None
 
 class WorkflowStatus(BaseModel):
     """Workflow execution status."""

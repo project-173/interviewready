@@ -2,12 +2,12 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   SharedState, 
   WorkflowStatus,
-  ChatRequest
+  ChatRequest,
+  Resume
 } from './types';
 import {
   contentStrengthAgent, 
   alignmentAgent, 
-  interviewCoachAgent,
   backendService 
 } from './backendService';
 import { StepIndicator } from './components/StepIndicator';
@@ -39,6 +39,7 @@ const AppContent: React.FC = () => {
     };
   });
 
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -91,6 +92,161 @@ const AppContent: React.FC = () => {
 
     setState(prev => ({ ...prev, status: targetStatus }));
   }, [state.currentResume, state.criticReport, state.contentReport, state.alignmentReport]);
+
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      if (file.size > MAX_FILE_SIZE) {
+        reject(new Error(`File size exceeds ${MAX_FILE_SIZE / (1024 * 1024)}MB limit`));
+        return;
+      }
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve((reader.result as string).split(',')[1]);
+      reader.onerror = reject;
+    });
+  };
+
+  const normalizeCriticReport = (data: any) => {
+    const candidate = data && typeof data === 'object' ? (data.critique ?? data) : {};
+    const issues = Array.isArray(candidate.issues)
+        ? candidate.issues
+        : [];
+    return {
+      issueList: issues,
+      summary: typeof candidate.summary === 'string' && candidate.summary.trim()
+        ? candidate.summary
+        : 'Resume processed successfully.',
+      score: typeof candidate.score === 'number' ? candidate.score : undefined
+    };
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('handleFileupload')
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsLoading(true);
+    setError(null);
+    try {
+      if (file.type === 'application/pdf') {
+        const base64 = await fileToBase64(file);
+
+        const request: ChatRequest = {
+          intent: 'RESUME_CRITIC',
+          resumeData: null,
+          jobDescription: '',
+          messageHistory: [],
+          resumeFile: { data: base64, fileType: 'pdf' }
+        };
+        
+        const response = await backendService.callChatEndpoint(request);
+        const parsedResume = await backendService.fetchCurrentResume();
+        // Parse the structured JSON response from backend
+        let responseData;
+        try {
+          responseData = response.payload || JSON.parse(response.content || '{}');
+        } catch (error) {
+          console.error('Failed to parse backend response:', error);
+          throw new Error('Invalid response from backend');
+        }
+
+        const resumeData = responseData.resume_data || {};
+        const criticReport = normalizeCriticReport(
+          response.payload && typeof response.payload === 'object' && !Array.isArray(response.payload)
+            ? response.payload
+            : responseData
+        );
+
+        setState(prev => ({
+          ...prev,
+          currentResume: parsedResume || prev.currentResume,
+          history: parsedResume ? [...prev.history, parsedResume] : prev.history,
+          criticReport,
+          status: WorkflowStatus.AWAITING_CRITIC_APPROVAL
+        }));
+      } else {
+        setError("Only PDF files are supported.")
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to process resume");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const approveCritic = async () => {
+    setState(prev => ({ ...prev, status: WorkflowStatus.ANALYZING_CONTENT }));
+    setIsLoading(true);
+    try {
+      const report = await contentStrengthAgent(state.currentResume);
+      setState(prev => ({ ...prev, contentReport: report, status: WorkflowStatus.AWAITING_CONTENT_APPROVAL }));
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const approveContent = () => setState(prev => ({ ...prev, status: WorkflowStatus.ALIGNING_JD }));
+
+  const runAlignment = async () => {
+    if (!state.jobDescription) return;
+    setIsLoading(true);
+    try {
+      const report = await alignmentAgent(state.currentResume, state.jobDescription);
+      setState(prev => ({ ...prev, alignmentReport: report, status: WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL }));
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const startInterview = async () => {
+    setState(prev => ({ 
+      ...prev, 
+      status: WorkflowStatus.INTERVIEWING, 
+      interviewHistory: [{ role: 'agent', text: "Ready to practice? Based on your profile, tell me why you're a fit for this role." }]
+    }));
+  };
+
+  const handleInterviewMessage = async (msg: string) => {
+    const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: msg }];
+    setState(prev => ({ ...prev, interviewHistory: updatedHistory }));
+    setIsLoading(true);
+    try {
+      const responseText = await interviewCoachAgent(state.alignmentReport, updatedHistory);
+      setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleInterviewAudioMessage = async (audio: Uint8Array) => {
+    const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: '[Audio response]' }];
+    setState(prev => ({ ...prev, interviewHistory: updatedHistory }));
+    setIsLoading(true);
+    try {
+      const request: ChatRequest = {
+        intent: 'INTERVIEW_COACH',
+        resumeData: state.currentResume,
+        jobDescription: state.jobDescription,
+        messageHistory: updatedHistory,
+        audioData: audio,
+      };
+      const response = await backendService.callChatEndpoint(request);
+      const responseText = typeof response.payload === 'string' ? response.payload : JSON.stringify(response.payload);
+      setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-white text-slate-950">
@@ -215,6 +371,20 @@ const WorkflowController: React.FC<{
     });
   };
 
+  const normalizeCriticReport = (data: any) => {
+    const candidate = data && typeof data === 'object' ? (data.critique ?? data) : {};
+    const issues = Array.isArray(candidate.issues)
+        ? candidate.issues
+        : [];
+    return {
+      issueList: issues,
+      summary: typeof candidate.summary === 'string' && candidate.summary.trim()
+        ? candidate.summary
+        : 'Resume processed successfully.',
+      score: typeof candidate.score === 'number' ? candidate.score : undefined
+    };
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -278,16 +448,18 @@ const WorkflowController: React.FC<{
         };
 
         updateProgress(90, 3);
+
+        const criticReport = normalizeCriticReport(
+          response.payload && typeof response.payload === 'object' && !Array.isArray(response.payload)
+            ? response.payload
+            : responseData
+        );
+
         setState(prev => ({
           ...prev,
           currentResume: parsedResume || prev.currentResume,
           history: parsedResume ? [...prev.history, parsedResume] : prev.history,
-          criticReport: {
-            score: Number((critiqueData as any).score) || 85,
-            readability: String((critiqueData as any).readability || 'Resume processed successfully'),
-            formattingRecommendations: Array.isArray((critiqueData as any).formattingRecommendations) ? (critiqueData as any).formattingRecommendations : [],
-            suggestions: Array.isArray((critiqueData as any).suggestions) ? (critiqueData as any).suggestions : []
-          },
+          criticReport,
           status: WorkflowStatus.AWAITING_CRITIC_APPROVAL
         }));
         updateProgress(100, 3);
@@ -332,11 +504,36 @@ const WorkflowController: React.FC<{
   };
 
   const startInterview = async () => {
-    setState(prev => ({ 
-      ...prev, 
-      status: WorkflowStatus.INTERVIEWING, 
-      interviewHistory: [{ role: 'agent', text: "Ready to practice? Based on your profile, tell me why you're a fit for this role." }]
+    setState(prev => ({
+      ...prev,
+      status: WorkflowStatus.INTERVIEWING,
+      interviewHistory: [],
     }));
+    startLoading('Starting interview...', ['Preparing first question', 'Personalizing coach guidance']);
+    setError(null);
+    try {
+      updateProgress(50, 0);
+      const openingQuestion = await backendService.interviewCoachAgent(
+        state.currentResume,
+        state.jobDescription,
+        [],
+      );
+      updateProgress(100, 1);
+      setState(prev => ({
+        ...prev,
+        status: WorkflowStatus.INTERVIEWING,
+        interviewHistory: [{ role: 'agent', text: openingQuestion }],
+      }));
+    } catch (err: any) {
+      setError(err.message);
+      setState(prev => ({
+        ...prev,
+        status: WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL,
+        interviewHistory: [],
+      }));
+    } finally {
+      stopLoading();
+    }
   };
 
   const handleInterviewMessage = async (msg: string) => {
@@ -345,7 +542,11 @@ const WorkflowController: React.FC<{
     startLoading('Coach is thinking...', ['Analyzing your response', 'Generating feedback']);
     try {
       updateProgress(50, 0);
-      const responseText = await interviewCoachAgent(state.alignmentReport, updatedHistory);
+      const responseText = await backendService.interviewCoachAgent(
+        state.currentResume,
+        state.jobDescription,
+        updatedHistory,
+      );
       updateProgress(100, 1);
       setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
     } catch (err: any) {
@@ -370,7 +571,7 @@ const WorkflowController: React.FC<{
       };
       updateProgress(66, 1);
       const response = await backendService.callChatEndpoint(request);
-      const responseText = typeof response.payload === 'string' ? response.payload : JSON.stringify(response.payload);
+      const responseText = backendService.formatInterviewCoachPayload(response.payload ?? response.content);
       updateProgress(100, 2);
       setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
     } catch (err: any) {

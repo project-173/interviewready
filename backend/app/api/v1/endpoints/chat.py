@@ -3,7 +3,10 @@
 from typing import Annotated, Any
 from app.core.config import settings
 from fastapi import APIRouter, HTTPException, Query, status
+
+from fastapi import APIRouter, HTTPException, Query, status, Request
 from fastapi.concurrency import run_in_threadpool
+from app.core.limiter import limiter
 from langfuse import get_client, observe, propagate_attributes
 
 from app.api.v1.services import (
@@ -35,8 +38,10 @@ def get_llm_judge() -> LLmasJudgeEvaluator:
 
 
 @router.post("")
+@limiter.limit("10/minute")
 @observe(name="chat_endpoint")
 async def chat_endpoint(
+    http_request: Request,
     request: ChatRequest,
     session_id: Annotated[str, Query(alias="sessionId")],
 ) -> ChatApiResponse:
