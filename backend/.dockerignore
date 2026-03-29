@@ -15,4 +15,3 @@ Dockerfile
 .dockerignore
 tests/
 mock_responses.json
-uv.lock
