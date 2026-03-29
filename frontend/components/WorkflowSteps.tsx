@@ -306,6 +306,7 @@ export const InterviewStep: React.FC<{
 
   // Refs to track current state inside stale closures (WebSocket handlers, timers, VAD)
   const aiTurnActiveRef = React.useRef(false);
+  const awaitingTurnCompletionRef = React.useRef(false);
   const isSpeakingRef = React.useRef(false);
   const isRecordingRef = React.useRef(false);
   const isStartingRecordingRef = React.useRef(false);
@@ -370,6 +371,7 @@ export const InterviewStep: React.FC<{
     mediaStreamRef.current = null;
     isRecordingRef.current = false;
     isStartingRecordingRef.current = false;
+    awaitingTurnCompletionRef.current = false;
     isSendingAudioRef.current = false;
     hasDetectedSpeechRef.current = false;
     recordingAttemptRef.current += 1;
@@ -476,6 +478,7 @@ export const InterviewStep: React.FC<{
               if (msg.type === 'interrupted') {
                 console.log('[VOICE_FRONTEND] Interruption signal from relay');
                 playbackQueueRef.current = [];
+                awaitingTurnCompletionRef.current = false;
                 if (playbackContextRef.current?.state === 'running') {
                   playbackContextRef.current.suspend().then(() => {
                     nextStartTimeRef.current = 0;
@@ -490,6 +493,7 @@ export const InterviewStep: React.FC<{
               // Handle Turn Completion
               if (msg.type === 'turn_complete') {
                 aiTurnActiveRef.current = false;
+                awaitingTurnCompletionRef.current = false;
                 isSendingAudioRef.current = true;
                 if (playbackQueueRef.current.length === 0) {
                   isSpeakingRef.current = false;
@@ -708,6 +712,7 @@ export const InterviewStep: React.FC<{
     try {
       isStartingRecordingRef.current = true;
       const attemptId = ++recordingAttemptRef.current;
+      awaitingTurnCompletionRef.current = false;
       hasDetectedSpeechRef.current = false;
       isSendingAudioRef.current = mode === 'CHAT';
       console.log('[VOICE_DEBUG] Requesting microphone access');
@@ -871,6 +876,10 @@ export const InterviewStep: React.FC<{
             teardownRecording(false);
             return;
           }
+          if (awaitingTurnCompletionRef.current) {
+            animationFrameRef.current = requestAnimationFrame(checkSilence);
+            return;
+          }
           
           // If AI started speaking, we keep the mic open for "Organic" feel
           // but we can dampen it or ignore VAD events locally.
@@ -924,10 +933,10 @@ export const InterviewStep: React.FC<{
                     Date.now() - lastSpeakTime > USER_TURN_END_SILENCE_MS &&
                     !aiTurnActiveRef.current
                 ) {
-                    console.log("[VOICE] Silence → turn complete");
-
-                    stopRecording();
-                    return;
+                    console.log("[VOICE] Silence → waiting for backend turn completion");
+                    awaitingTurnCompletionRef.current = true;
+                    isSendingAudioRef.current = false;
+                    hasDetectedSpeechRef.current = false;
                 }
             }
           
