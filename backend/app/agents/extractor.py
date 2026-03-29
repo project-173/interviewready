@@ -176,7 +176,7 @@ Output format:
             if self.USE_MOCK_RESPONSE:
                 resume = self._generate_mock_response(context)
             else:
-                resume = self._generate_llm_response(extracted_text, context)
+                resume = self._extract_resume_with_llm(extracted_text, context)
 
             resume_document = ResumeDocument(
                 source="resumeFile",
@@ -269,6 +269,10 @@ Output format:
         validated_result = Resume.model_validate(parsed_result)
         self._validate_data(validated_result, text)
         return validated_result
+
+    def _extract_resume_with_llm(self, text: str, context: SessionContext) -> Resume:
+        """Backward-compatible wrapper for resume extraction."""
+        return self._generate_llm_response(text, context)
 
     @staticmethod
     def _parse_payload(input_text: str) -> dict[str, Any]:

@@ -1,15 +1,20 @@
 """Chat endpoint for interacting with the agentic system."""
 
 from typing import Annotated, Any
-
+from app.core.config import settings
 from fastapi import APIRouter, HTTPException, Query, status
+
+from fastapi import APIRouter, HTTPException, Query, status, Request
 from fastapi.concurrency import run_in_threadpool
+from app.core.limiter import limiter
 from langfuse import get_client, observe, propagate_attributes
 
 from app.api.v1.services import (
     get_or_create_session_context,
     get_orchestration_agent,
 )
+from app.agents import GeminiService
+from app.agents.llm_judge import LLmasJudgeEvaluator
 from langfuse import Langfuse, observe, propagate_attributes
 
 langfuse = Langfuse()
@@ -20,10 +25,23 @@ router = APIRouter()
 
 langfuse = get_client()
 
+_llm_judge_evaluator = None
+
+
+def get_llm_judge() -> LLmasJudgeEvaluator:
+    """Get or create LLM-as-a-judge evaluator instance."""
+    global _llm_judge_evaluator
+    if _llm_judge_evaluator is None:
+        gemini_service = GeminiService()
+        _llm_judge_evaluator = LLmasJudgeEvaluator(gemini_service)
+    return _llm_judge_evaluator
+
 
 @router.post("")
+@limiter.limit("10/minute")
 @observe(name="chat_endpoint")
 async def chat_endpoint(
+    http_request: Request,
     request: ChatRequest,
     session_id: Annotated[str, Query(alias="sessionId")],
 ) -> ChatApiResponse:
@@ -67,6 +85,38 @@ async def chat_endpoint(
                 internal_response = await run_in_threadpool(
                     orchestrator.orchestrate, request, context
                 )
+
+                if settings.LANGFUSE_LLM_AS_A_JUDGE_ENABLED and internal_response.content:
+                    try:
+                        judge = get_llm_judge()
+                        input_summary = f"Intent: {request.intent}, Job Description: {request.jobDescription[:200] if request.jobDescription else 'None'}"
+                        # Get current trace ID from Langfuse
+                        current_trace = langfuse.get_current_trace()
+                        trace_id = current_trace.id if current_trace else None
+                        
+                        evaluation = judge.evaluate(
+                            agent_name=internal_response.agent_name or "unknown",
+                            input_data=input_summary,
+                            output=internal_response.content,
+                            trace_id=trace_id,
+                            intent=request.intent,
+                            session_id=session_id,
+                        )
+                        langfuse.update_current_span(
+                            metadata={
+                                "judge_quality_score": evaluation.quality_score,
+                                "judge_accuracy_score": evaluation.accuracy_score,
+                                "judge_helpfulness_score": evaluation.helpfulness_score,
+                                "judge_reasoning": evaluation.reasoning[:200],
+                            }
+                        )
+                    except Exception as judge_error:
+                        import logging
+
+                        logging.getLogger(__name__).warning(
+                            f"LLM-as-a-judge evaluation failed: {judge_error}"
+                        )
+
                 result = ChatApiResponse(
                     agent=internal_response.agent_name,
                     payload=_extract_api_payload(internal_response),
