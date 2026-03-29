@@ -300,7 +300,6 @@ export const InterviewStep: React.FC<{
   const silenceTimeoutRef = React.useRef<any | null>(null);
   const resumeListeningTimeoutRef = React.useRef<number | null>(null);
   const socketRef = React.useRef<WebSocket | null>(null);
-  const [liveTranscription, setLiveTranscription] = React.useState<string>("");
   const isSendingAudioRef = React.useRef(true);
 
   // Refs to track current state inside stale closures (WebSocket handlers, timers, VAD)
@@ -499,17 +498,10 @@ export const InterviewStep: React.FC<{
             processPlaybackQueue();
           }
         } else if (msg.type === 'textStream') {
-          // Update history with live transcription if needed
-          console.log('[VOICE_FRONTEND] AI Transcription:', msg.data);
-          setLiveTranscription(msg.data);
-          
           // Eagerly resume playback context if we receive text but context is suspended
           if (playbackContextRef.current && playbackContextRef.current.state === 'suspended') {
             playbackContextRef.current.resume().catch(console.error);
           }
-        } else if (msg.type === 'inputTranscription') {
-          console.log('[VOICE_FRONTEND] User Input Transcription:', msg.data);
-          setLiveTranscription(msg.data);
         } else if (msg.interrupted) {
           // Clear playback queue if user interrupts AI
           console.log('[VOICE_FRONTEND] AI Interrupted, clearing playback queue');
@@ -762,7 +754,6 @@ export const InterviewStep: React.FC<{
   }, [history.length, mode]);
 
   const startRecording = async () => {
-    setLiveTranscription(""); // Reset for new turn
     if (resumeListeningTimeoutRef.current) {
       window.clearTimeout(resumeListeningTimeoutRef.current);
       resumeListeningTimeoutRef.current = null;
@@ -1108,11 +1099,7 @@ export const InterviewStep: React.FC<{
             )}
           </div>
           <h3 className="text-xl font-medium text-slate-800 max-w-md mx-auto leading-relaxed h-8 text-center px-4">
-            {liveTranscription ? (
-              <span className="italic text-slate-600 animate-in fade-in duration-300">
-                "{liveTranscription}"
-              </span>
-            ) : isSpeaking ? (
+            {isSpeaking ? (
               "Analyzing your profile..."
             ) : isRecording ? (
               "I'm listening to your response"

@@ -82,8 +82,6 @@ async def interview_live_websocket(
             config=types.LiveConnectConfig(
                 system_instruction=system_instruction_content,
                 response_modalities=[types.Modality.AUDIO],
-                input_audio_transcription=types.AudioTranscriptionConfig(),
-                output_audio_transcription=types.AudioTranscriptionConfig(),
                 speech_config=types.SpeechConfig(
                     language_code="en-US",
                     voice_config=types.VoiceConfig(
@@ -91,12 +89,6 @@ async def interview_live_websocket(
                             voice_name="Aoede"
                         )
                     ),
-                ),
-                thinking_config=types.ThinkingConfig(
-                    thinking_level=types.ThinkingLevel.MINIMAL
-                ),
-                context_window_compression=types.ContextWindowCompressionConfig(
-                    sliding_window=types.SlidingWindow(),
                 ),
             ),
         ) as session:
@@ -130,6 +122,9 @@ async def interview_live_websocket(
 
                 try:
                     async for response in session.receive():
+                        # Log the raw event for debugging
+                        logger.debug(f"[GEMINI_RAW_EVENT] {response}")
+
                         try:
                             content = response.server_content
                             if not content:
@@ -148,19 +143,7 @@ async def interview_live_websocket(
                                 awaiting_model_response = False
                                 await websocket.send_json({"interrupted": True})
 
-                            # 2. Handle Input Transcriptions (User Voice)
-                            if getattr(content, "input_transcription", None):
-                                text = content.input_transcription.text
-                                user_turn_state["input_transcriptions"] += 1
-                                logger.info(
-                                    f"[VOICE_BACKEND] User Input Transcription: {text}"
-                                )
-                                await websocket.send_json({
-                                    "type": "inputTranscription",
-                                    "data": text,
-                                })
-
-                            # 3. Handle Model Turn (AI Audio and Text)
+                            # 3. Handle Model Turn (AI Audio only)
                             if getattr(content, "model_turn", None):
                                 awaiting_model_response = True
                                 for part in content.model_turn.parts:
@@ -176,23 +159,6 @@ async def interview_live_websocket(
                                             "type": "audioStream",
                                             "data": encoded_audio,
                                         })
-                                    
-                                    # Text Part (including thinking)
-                                    if getattr(part, "text", None):
-                                        logger.info(f"[VOICE_BACKEND] AI Text Part: {part.text}")
-                                        await websocket.send_json({
-                                            "type": "textStream",
-                                            "data": part.text,
-                                        })
-
-                            # 4. Handle Output Transcriptions (AI Voice)
-                            if getattr(content, "output_transcription", None):
-                                text = content.output_transcription.text
-                                logger.info(f"[VOICE_BACKEND] AI Output Transcription: {text}")
-                                await websocket.send_json({
-                                    "type": "textStream", 
-                                    "data": text
-                                })
 
                             # 5. Handle Turn Completion Signals
                             if getattr(content, "turn_complete", False) or getattr(content, "generation_complete", False):
@@ -303,7 +269,15 @@ async def interview_live_websocket(
                                 f"duration_ms={duration_ms})"
                             )
                             awaiting_model_response = True
-                            await session.send_realtime_input(audio_stream_end=True)
+                            # Force a response by sending turnComplete. Using send() directly as it's the correct way 
+                            # to trigger a response if audio_stream_end alone fails.
+                            try:
+                                await session.send(types.LiveClientContent(turn_complete=True))
+                            except Exception as e:
+                                logger.error(f"Error sending turn_complete: {e}")
+                                # Fallback to standard audio_stream_end if the new SDK method fails
+                                await session.send_realtime_input(audio_stream_end=True)
+                            
                             user_turn_state = {
                                 "id": user_turn_state["id"],
                                 "chunks": 0,

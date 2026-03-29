@@ -106,6 +106,16 @@ const AppContent: React.FC = () => {
         </div>
         
         <div className="flex items-center gap-4">
+          <button 
+            onClick={() => setState(prev => ({ ...prev, status: WorkflowStatus.DEBUG_VOICE, interviewMode: 'VOICE' }))}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-all border border-indigo-100"
+            title="Test Live API"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a2 2 0 00-1.96 1.414l-.711 2.133a2 2 0 01-1.885 1.371H5.33a2 2 0 01-1.885-1.371l-.711-2.133a2 2 0 00-1.96-1.414l-2.387.477a2 2 0 00-1.022.547l1.173 1.173a2 2 0 002.828 0l.172-.172a2 2 0 000-2.828l-1.173-1.173a2 2 0 00-2.828 0l-.172.172a2 2 0 000 2.828l1.173 1.173zM15 3v4a2 2 0 01-2 2H9a2 2 0 01-2-2V3m12 18h-6M9 21h6" />
+            </svg>
+            <span className="text-[10px] font-bold uppercase tracking-wider">Test Live API</span>
+          </button>
           <div className="h-4 w-[1px] bg-slate-200"></div>
           <button 
             onClick={resetSession}
@@ -449,7 +459,18 @@ const WorkflowController: React.FC<{
       {(state.status === WorkflowStatus.ALIGNING_JD) && <AlignmentStep jd={state.jobDescription} onChangeJD={(val) => setState(prev => ({ ...prev, jobDescription: val }))} onAnalyze={runAlignment} isLoading={false} />}
       {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterviewSelection} />}
       {(state.status === WorkflowStatus.SELECTING_INTERVIEW_MODE) && <InterviewModeSelectionStep onSelect={startInterview} />}
-      {state.status === WorkflowStatus.INTERVIEWING && <InterviewStep history={state.interviewHistory} onSend={handleInterviewMessage} onSendAudio={handleInterviewAudioMessage} isLoading={false} chatEndRef={chatEndRef} mode={state.interviewMode || 'CHAT'} sessionId={backendService.getSessionId()} onExit={() => setState(prev => ({ ...prev, status: WorkflowStatus.SELECTING_INTERVIEW_MODE }))} />}
+      {(state.status === WorkflowStatus.INTERVIEWING || state.status === WorkflowStatus.DEBUG_VOICE) && (
+        <InterviewStep 
+          history={state.interviewHistory} 
+          onSend={handleInterviewMessage} 
+          onSendAudio={handleInterviewAudioMessage} 
+          isLoading={false} 
+          chatEndRef={chatEndRef} 
+          mode={state.status === WorkflowStatus.DEBUG_VOICE ? 'VOICE' : (state.interviewMode || 'CHAT')} 
+          sessionId={backendService.getSessionId()} 
+          onExit={() => setState(prev => ({ ...prev, status: WorkflowStatus.IDLE }))} 
+        />
+      )}
     </>
   );
 };
