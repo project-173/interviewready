@@ -108,17 +108,6 @@ const AppContent: React.FC = () => {
         
         <div className="flex items-center gap-4">
           <button 
-            onClick={() => setState(prev => ({ ...prev, status: WorkflowStatus.DEBUG_VOICE, interviewMode: 'VOICE' }))}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-all border border-indigo-100"
-            title="Test Live API"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a2 2 0 00-1.96 1.414l-.711 2.133a2 2 0 01-1.885 1.371H5.33a2 2 0 01-1.885-1.371l-.711-2.133a2 2 0 00-1.96-1.414l-2.387.477a2 2 0 00-1.022.547l1.173 1.173a2 2 0 002.828 0l.172-.172a2 2 0 000-2.828l-1.173-1.173a2 2 0 00-2.828 0l-.172.172a2 2 0 000 2.828l1.173 1.173zM15 3v4a2 2 0 01-2 2H9a2 2 0 01-2-2V3m12 18h-6M9 21h6" />
-            </svg>
-            <span className="text-[10px] font-bold uppercase tracking-wider">Test Live API</span>
-          </button>
-          <div className="h-4 w-[1px] bg-slate-200"></div>
-          <button 
             onClick={resetSession}
             className="text-xs font-medium text-slate-500 hover:text-slate-900 transition-colors"
           >

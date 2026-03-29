@@ -317,6 +317,7 @@ export const InterviewStep: React.FC<{
   const processorRef = React.useRef<AudioWorkletNode | null>(null);
   // Single shared AudioContext for playback — avoids creating a new one per audio chunk
   const playbackContextRef = React.useRef<AudioContext | null>(null);
+  const activePlaybackSourcesRef = React.useRef<Set<AudioBufferSourceNode>>(new Set());
   // Separate AudioContext for microphone capture
   const recordingContextRef = React.useRef<AudioContext | null>(null);
   // Tracks if the worklet module is registered for the recording context
@@ -334,6 +335,30 @@ export const InterviewStep: React.FC<{
   React.useEffect(() => {
     isVoiceActiveRef.current = isVoiceActive;
   }, [isVoiceActive]);
+
+  const stopPlaybackImmediately = () => {
+    playbackQueueRef.current = [];
+    nextStartTimeRef.current = 0;
+    isQueueProcessingRef.current = false;
+
+    activePlaybackSourcesRef.current.forEach((source) => {
+      try {
+        source.onended = null;
+        source.stop();
+      } catch {
+        // Ignore already-ended sources during interruption cleanup.
+      }
+      try {
+        source.disconnect();
+      } catch {
+        // Ignore disconnect races during teardown.
+      }
+    });
+    activePlaybackSourcesRef.current.clear();
+
+    isSpeakingRef.current = false;
+    setIsSpeaking(false);
+  };
 
   const queueResumeListening = (delayMs = 250) => {
     if (resumeListeningTimeoutRef.current) {
@@ -485,7 +510,7 @@ export const InterviewStep: React.FC<{
               // Handle Interruption
               if (msg.type === 'interrupted') {
                 console.log('[VOICE_FRONTEND] Interruption signal from relay');
-                playbackQueueRef.current = [];
+                stopPlaybackImmediately();
                 isVoiceActiveRef.current = false;
                 setIsVoiceActive(false);
                 if (playbackContextRef.current?.state === 'running') {
@@ -528,6 +553,7 @@ export const InterviewStep: React.FC<{
         ws.onclose = () => {
           console.log('[VOICE_FRONTEND] Relay Connection Closed');
           setConnectionStatus('closed');
+          stopPlaybackImmediately();
           teardownRecording(false);
         };
       } catch (err) {
@@ -540,6 +566,7 @@ export const InterviewStep: React.FC<{
 
     return () => {
       isComponentMounted = false;
+      stopPlaybackImmediately();
       teardownRecording(false);
       if (socketRef.current) {
         socketRef.current.close();
@@ -592,6 +619,7 @@ export const InterviewStep: React.FC<{
       const source = currentCtx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(currentCtx.destination);
+      activePlaybackSourcesRef.current.add(source);
 
       const now = currentCtx.currentTime;
       // Use a larger look-ahead buffer (0.1s) to prevent audio underrun/silence
@@ -603,8 +631,9 @@ export const InterviewStep: React.FC<{
       nextStartTimeRef.current += audioBuffer.duration;
 
       source.onended = () => {
+        activePlaybackSourcesRef.current.delete(source);
         // Only reset speaking status if no more audio chunks are queued AND AI is not currently generating more
-        if (playbackQueueRef.current.length === 0) {
+        if (playbackQueueRef.current.length === 0 && activePlaybackSourcesRef.current.size === 0) {
           console.log('[VOICE_FRONTEND] Playback queue empty');
           // Important: We only mark speaking as false if turn is not active or we're waiting for user
           if (!aiTurnActiveRef.current) {
@@ -631,6 +660,10 @@ export const InterviewStep: React.FC<{
       const source = currentCtx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(currentCtx.destination);
+      activePlaybackSourcesRef.current.add(source);
+      source.onended = () => {
+        activePlaybackSourcesRef.current.delete(source);
+      };
       source.start();
     } catch (err) {
       console.error('Legacy playback failed:', err);
@@ -921,9 +954,7 @@ export const InterviewStep: React.FC<{
                 // 🔥 BARGE-IN (interrupt AI)
                 if (isSpeakingRef.current) {
                     console.log("[VOICE] Barge-in detected");
-                    playbackQueueRef.current = [];
-                    isSpeakingRef.current = false;
-                    setIsSpeaking(false);
+                    stopPlaybackImmediately();
                     // Native SDK handles interruption through incoming audio automatically.
                 }
 
@@ -981,10 +1012,8 @@ export const InterviewStep: React.FC<{
     // Manual fallback: If AI is stuck in speaking mode, allow force-stop/start
     if (isSpeakingRef.current || aiTurnActiveRef.current) {
       console.log('[VOICE_FRONTEND] Manual Override: Forcing AI to stop and opening mic');
-      playbackQueueRef.current = [];
-      isSpeakingRef.current = false;
+      stopPlaybackImmediately();
       aiTurnActiveRef.current = false;
-      setIsSpeaking(false);
       startRecording();
       return;
     }
