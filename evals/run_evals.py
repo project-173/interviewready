@@ -349,10 +349,11 @@ def main() -> None:
     parser.add_argument("--warn-stale-days", type=int, default=60)
     parser.add_argument("--langfuse-dataset", help="Langfuse dataset name")
     parser.add_argument("--sync-langfuse-dataset", help="Upload local cases to Langfuse dataset")
+    parser.add_argument("--edge-cases", action="store_true", help="Run edge cases instead of regular cases")
     args = parser.parse_args()
 
     agents_filter = _parse_agents(args.agent)
-    cases = load_eval_cases(DATASET_DIR)
+    cases = load_eval_cases(DATASET_DIR, edge_cases=args.edge_cases)
     cases = filter_cases(cases, agents=agents_filter)
     if args.max_cases:
         cases = cases[: args.max_cases]

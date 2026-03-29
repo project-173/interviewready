@@ -104,11 +104,17 @@ def _load_json(path: Path) -> Any:
         return json.load(handle)
 
 
-def _load_fixtures(dataset_dir: Path) -> EvalFixtures:
-    resumes_path = dataset_dir / "resumes.json"
-    jobs_path = dataset_dir / "job_descriptions.json"
-    histories_path = dataset_dir / "histories.json"
-    cases_path = dataset_dir / "cases.json"
+def _load_fixtures(dataset_dir: Path, edge_cases: bool = False) -> EvalFixtures:
+    if edge_cases:
+        resumes_path = dataset_dir / "edge_case_resumes.json"
+        jobs_path = dataset_dir / "edge_case_jobs.json"
+        histories_path = dataset_dir / "edge_case_histories.json"
+        cases_path = dataset_dir / "edge_case_cases.json"
+    else:
+        resumes_path = dataset_dir / "resumes.json"
+        jobs_path = dataset_dir / "job_descriptions.json"
+        histories_path = dataset_dir / "histories.json"
+        cases_path = dataset_dir / "cases.json"
 
     resumes = ResumeFixtureFile.model_validate(_load_json(resumes_path)).fixtures
     job_descriptions = JobDescriptionFixtureFile.model_validate(
@@ -127,8 +133,8 @@ def _load_fixtures(dataset_dir: Path) -> EvalFixtures:
     )
 
 
-def load_eval_cases(dataset_dir: Path = DATASET_DIR) -> List[ResolvedEvalCase]:
-    fixtures = _load_fixtures(dataset_dir)
+def load_eval_cases(dataset_dir: Path = DATASET_DIR, edge_cases: bool = False) -> List[ResolvedEvalCase]:
+    fixtures = _load_fixtures(dataset_dir, edge_cases)
     resolved_cases: List[ResolvedEvalCase] = []
 
     for case in fixtures.cases:
