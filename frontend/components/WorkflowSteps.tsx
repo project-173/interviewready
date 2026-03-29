@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { StructuralAssessment, ContentAnalysisReport, AlignmentReport } from '../types';
+import { AlignmentReport, ContentStrengthReport, ResumeSchema, ResumeCriticReport } from '../types';
 
 export const UploadStep: React.FC<{ onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void }> = ({ onUpload }) => (
   <div className="animate-in fade-in slide-in-from-bottom-2 duration-400">
@@ -20,132 +20,146 @@ export const UploadStep: React.FC<{ onUpload: (e: React.ChangeEvent<HTMLInputEle
   </div>
 );
 
-export const CriticStep: React.FC<{ report: StructuralAssessment; onApprove: () => void }> = ({ report, onApprove }) => (
-  <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 space-y-6">
-    <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-      <h3 className="text-lg font-semibold">Structural Audit</h3>
-      <div className="flex items-center gap-2">
-        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Score</span>
-        <span className="bg-slate-900 text-white text-sm font-bold px-2.5 py-1 rounded shadow-sm">{report.score}</span>
-      </div>
-    </div>
-    
-    <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl">
-      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5">AI Summary</h4>
-      <p className="text-[13px] text-slate-700 italic leading-relaxed">"{report.readability}"</p>
-    </div>
+export const CriticStep: React.FC<{ report: ResumeCriticReport; resume?: ResumeSchema | null; onApprove: () => void }> = ({ report, resume, onApprove }) => {
+  const issues = Array.isArray(report.issueList) ? report.issueList : [];
+  const score = typeof report.score === 'number' ? Math.round(report.score) : null;
+  const summary = typeof report.summary === 'string' && report.summary.trim()
+    ? report.summary
+    : 'Resume processed successfully.';
+  const severityClass = (severity: string) => {
+    if (severity === 'HIGH') return 'bg-red-50 text-red-700 border-red-200';
+    if (severity === 'MEDIUM') return 'bg-amber-50 text-amber-700 border-amber-200';
+    return 'bg-slate-100 text-slate-600 border-slate-200';
+  };
 
-    <div className="space-y-3">
-      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Formatting Recommendations</h4>
-      <div className="space-y-2">
-        {(report.formattingRecommendations || []).map((rec, i) => (
-          <div key={i} className="flex items-start gap-3 p-3 bg-white border border-slate-200 rounded-lg text-xs text-slate-600 transition-colors hover:border-slate-300">
-            <div className="mt-0.5 w-1.5 h-1.5 rounded-full bg-slate-400 flex-none"></div>
-            {rec}
-          </div>
-        ))}
-      </div>
-    </div>
+  return (
+    <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 space-y-6">
+      <ReportHeader title="Resume Critique" summary={summary} score={score} />
 
-    {report.suggestions && report.suggestions.length > 0 && (
       <div className="space-y-3">
-        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Content Suggestions</h4>
+        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Issue List</h4>
         <div className="space-y-2">
-          {(report.suggestions || []).map((suggestion, i) => (
-            <div key={i} className="flex items-start gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-slate-600 transition-colors hover:border-blue-300">
-              <div className="mt-0.5 w-1.5 h-1.5 rounded-full bg-blue-400 flex-none"></div>
-              {suggestion}
+          {issues.length === 0 && (
+            <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs text-slate-500">
+              No critical issues detected. Proceed when ready.
             </div>
-          ))}
-        </div>
-      </div>
-    )}
-
-    <button onClick={onApprove} className="w-full bg-slate-900 text-white text-[13px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 active:scale-[0.98] transition-all">
-      Run Content Strength Analysis
-    </button>
-  </div>
-);
-
-export const ContentStep: React.FC<{ report: ContentAnalysisReport; onApprove: () => void }> = ({ report, onApprove }) => (
-  <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 space-y-8">
-    <div>
-      <h3 className="text-lg font-semibold text-slate-900 mb-1">Content Analysis</h3>
-      <p className="text-[12px] text-slate-500">{report.summary}</p>
-    </div>
-    
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div className="p-6 bg-white border border-slate-200 rounded-2xl flex flex-col items-center">
-        <div className="relative w-24 h-24 flex items-center justify-center">
-            <svg className="w-full h-full transform -rotate-90">
-              <circle cx="48" cy="48" r="40" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-slate-100" />
-              <circle cx="48" cy="48" r="40" stroke="currentColor" strokeWidth="8" fill="transparent" 
-                  strokeDasharray={251.2} 
-                  strokeDashoffset={251.2 * (report.hallucinationRisk)} 
-                  className="text-red-500 transition-all duration-1000" />
-            </svg>
-            <span className="absolute text-xl font-bold">{Math.round((1 - report.hallucinationRisk) * 100)}%</span>
-        </div>
-        <span className="mt-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Faithfulness Score</span>
-      </div>
-
-      <div className="p-6 bg-white border border-slate-200 rounded-2xl">
-        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Key Achievements</h4>
-         <div className="space-y-3">
-          {(report.achievements || []).slice(0, 3).map((ach, i) => (
-            <div key={i} className="text-[11px] text-slate-600 border-l-2 border-slate-200 pl-3">
-              <p className="font-medium text-slate-900">{ach?.description}</p>
-              <div className="flex gap-2 mt-1">
-                <span className={`text-[9px] uppercase font-bold ${ach?.impact === 'HIGH' ? 'text-emerald-600' : 'text-amber-600'}`}>{ach?.impact} Impact</span>
-                {ach?.quantifiable && <span className="text-[9px] uppercase font-bold text-blue-600">Quantified</span>}
+          )}
+          {issues.map((issue, i) => (
+            <div key={i} className="p-3 bg-white border border-slate-200 rounded-lg space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-900">{issue.type?.toUpperCase?.() || 'ISSUE'}</span>
+                <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded border ${severityClass(issue.severity)}`}>
+                  {issue.severity}
+                </span>
               </div>
+              <p className="text-[12px] text-slate-600 leading-relaxed">{issue.description}</p>
+              {(() => {
+                const resolved = resolveResumeLocation(resume, issue.location);
+                return (
+                  <div className="space-y-1.5 text-[10px] text-slate-400">
+                    <div>
+                      Section: <span className="font-medium text-slate-600">{capitalizeFirst(resolved.topLevel || 'unknown')}</span>
+                    </div>
+                    {resolved.isValid ? (
+                      <div className="text-slate-500">
+                        Evidence: <span className="text-slate-700">
+                          {resolved.usedSectionAsEvidence
+                            ? capitalizeFirst(resolved.display || '')
+                            : resolved.display}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-amber-600">Evidence not found in resume.</div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           ))}
         </div>
       </div>
-    </div>
 
-    <div className="space-y-3">
-       <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Extracted Skills & Evidence</h4>
-       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-         {(report.skills || []).slice(0, 6).map((skill, i) => (
-           <div key={i} className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
-             <div className="flex justify-between items-start mb-1">
-               <span className="text-[11px] font-bold text-slate-900">{skill?.name}</span>
-               <span className="text-[9px] px-1.5 py-0.5 bg-white border border-slate-200 rounded text-slate-500">{skill?.category}</span>
+      <button onClick={onApprove} className="w-full bg-slate-900 text-white text-[13px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 active:scale-[0.98] transition-all">
+        Run Content Strength Analysis
+      </button>
+    </div>
+  );
+};
+
+export const ContentStep: React.FC<{ report: ContentStrengthReport; resume?: ResumeSchema | null; onApprove: () => void }> = ({ report, resume, onApprove }) => {
+  const suggestions = Array.isArray(report.suggestions) ? report.suggestions : [];
+  const score = typeof report.score === 'number' ? Math.round(report.score) : null;
+  const summary = typeof report.summary === 'string' && report.summary.trim()
+    ? report.summary
+    : 'Content analysis complete.';
+  const evidenceClass = (level: string) => {
+    if (level === 'HIGH') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (level === 'MEDIUM') return 'bg-amber-50 text-amber-700 border-amber-200';
+    return 'bg-slate-100 text-slate-600 border-slate-200';
+  };
+
+  return (
+    <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 space-y-8">
+      <ReportHeader title="Content Strength" summary={summary} score={score} />
+      
+      <div className="space-y-3">
+         <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Revision Suggestions</h4>
+         <div className="space-y-3">
+           {suggestions.length === 0 && (
+             <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs text-slate-500">
+               No suggestions returned. Proceed when ready.
              </div>
-             <p className="text-[10px] text-slate-500 line-clamp-2 italic">"{skill?.evidence}"</p>
-           </div>
-         ))}
-       </div>
-    </div>
-
-    <div className="space-y-3">
-       <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Phrasing Suggestions</h4>
-       <div className="space-y-2">
-         {(report.suggestions || []).slice(0, 2).map((sug, i) => (
-           <div key={i} className="p-4 bg-amber-50/30 border border-amber-100 rounded-xl">
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-               <div>
-                 <p className="text-[9px] font-bold text-amber-600 uppercase mb-1">Original</p>
-                 <p className="text-[11px] text-slate-500 line-through">{sug?.original}</p>
+           )}
+           {suggestions.map((sug, i) => (
+             <div key={i} className="p-4 bg-white border border-slate-200 rounded-xl space-y-3">
+               <div className="flex items-center justify-between">
+                 <span className="text-[11px] font-semibold text-slate-900">{sug.type?.replace?.('_', ' ')?.toUpperCase?.() || 'SUGGESTION'}</span>
+                 <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded border ${evidenceClass(sug.evidenceStrength)}`}>
+                   {sug.evidenceStrength}
+                 </span>
                </div>
-               <div>
-                 <p className="text-[9px] font-bold text-emerald-600 uppercase mb-1">Suggested</p>
-                 <p className="text-[11px] text-slate-900 font-medium">{sug?.suggested}</p>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div>
+                   <p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Original</p>
+                   <p className="text-[11px] text-slate-500 line-through">{sug.original}</p>
+                 </div>
+                 <div>
+                   <p className="text-[9px] font-bold text-emerald-600 uppercase mb-1">Suggested</p>
+                   <p className="text-[11px] text-slate-900 font-medium">{sug.suggested}</p>
+                 </div>
                </div>
+               {(() => {
+                 const resolved = resolveResumeLocation(resume, sug.location);
+                 return (
+                   <div className="space-y-1.5 text-[10px] text-slate-400">
+                    <div>
+                      Section: <span className="font-medium text-slate-600">{capitalizeFirst(resolved.topLevel || 'unknown')}</span>
+                    </div>
+                     {resolved.isValid ? (
+                       <div className="text-slate-500">
+                         Evidence: <span className="text-slate-700">
+                           {resolved.usedSectionAsEvidence
+                             ? capitalizeFirst(resolved.display || '')
+                             : resolved.display}
+                         </span>
+                       </div>
+                     ) : (
+                       <div className="text-amber-600">Evidence not found in resume.</div>
+                     )}
+                   </div>
+                 );
+               })()}
              </div>
-             <p className="mt-3 text-[10px] text-slate-600 bg-white/50 p-2 rounded border border-amber-100/50">{sug?.rationale}</p>
-           </div>
-         ))}
-       </div>
-    </div>
+           ))}
+         </div>
+      </div>
 
-    <button onClick={onApprove} className="w-full bg-slate-900 text-white text-[13px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 transition-all">
-      Proceed to Job Alignment
-    </button>
-  </div>
-);
+      <button onClick={onApprove} className="w-full bg-slate-900 text-white text-[13px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 transition-all">
+        Proceed to Job Alignment
+      </button>
+    </div>
+  );
+};
 
 export const AlignmentStep: React.FC<{ 
   jd: string; 
@@ -278,6 +292,9 @@ export const InterviewModeSelectionStep: React.FC<{
 );
 
 import { InterviewMessage, InterviewMode } from '../types';
+import { resolveResumeLocation } from '@/utils/resolve-resume-location';
+import { capitalizeFirst } from '@/utils/text';
+import { ReportHeader } from './ReportHeader';
 
 export const InterviewStep: React.FC<{ 
   history: InterviewMessage[]; 
