@@ -2,10 +2,7 @@ name: Deploy to Google Cloud Run (Optimized)
 
 on:
   push:
-    branches:
-      - main
-      - sit
-      - fix-cicd-backendqualitygates
+    branches: [main, sit]
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -75,6 +72,7 @@ jobs:
       - name: Run interview security and governance tests
         run: |
           python -m pytest backend/tests/test_interview_coach.py backend/tests/test_orchestration_governance.py
+          severity: CRITICAL,HIGH
 
   build-backend:
     name: Build & Push Backend
