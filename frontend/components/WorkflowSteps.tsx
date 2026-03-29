@@ -307,7 +307,6 @@ export const InterviewStep: React.FC<{
 
   // Refs to track current state inside stale closures (WebSocket handlers, timers, VAD)
   const aiTurnActiveRef = React.useRef(false);
-  const awaitingTurnCompletionRef = React.useRef(false);
   const isSpeakingRef = React.useRef(false);
   const isVoiceActiveRef = React.useRef(false);
   const isRecordingRef = React.useRef(false);
@@ -377,7 +376,6 @@ export const InterviewStep: React.FC<{
     mediaStreamRef.current = null;
     isRecordingRef.current = false;
     isStartingRecordingRef.current = false;
-    awaitingTurnCompletionRef.current = false;
     isSendingAudioRef.current = false;
     hasDetectedSpeechRef.current = false;
     isVoiceActiveRef.current = false;
@@ -488,7 +486,6 @@ export const InterviewStep: React.FC<{
               if (msg.type === 'interrupted') {
                 console.log('[VOICE_FRONTEND] Interruption signal from relay');
                 playbackQueueRef.current = [];
-                awaitingTurnCompletionRef.current = false;
                 isVoiceActiveRef.current = false;
                 setIsVoiceActive(false);
                 if (playbackContextRef.current?.state === 'running') {
@@ -505,7 +502,6 @@ export const InterviewStep: React.FC<{
               // Handle Turn Completion
               if (msg.type === 'turn_complete') {
                 aiTurnActiveRef.current = false;
-                awaitingTurnCompletionRef.current = false;
                 isSendingAudioRef.current = true;
                 if (playbackQueueRef.current.length === 0) {
                   isSpeakingRef.current = false;
@@ -724,10 +720,9 @@ export const InterviewStep: React.FC<{
     try {
       isStartingRecordingRef.current = true;
       const attemptId = ++recordingAttemptRef.current;
-      awaitingTurnCompletionRef.current = false;
       hasDetectedSpeechRef.current = false;
       isVoiceActiveRef.current = false;
-      isSendingAudioRef.current = mode === 'CHAT';
+      isSendingAudioRef.current = mode === 'VOICE' || mode === 'CHAT';
       setIsVoiceActive(false);
       console.log('[VOICE_DEBUG] Requesting microphone access');
       const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -856,7 +851,7 @@ export const InterviewStep: React.FC<{
       processorRef.current = workletNode;
       isRecordingRef.current = true;
       isStartingRecordingRef.current = false;
-      isSendingAudioRef.current = mode === 'CHAT';
+      isSendingAudioRef.current = mode === 'VOICE' || mode === 'CHAT';
       setIsRecording(true);
 
       // Organic VAD Logic
@@ -890,11 +885,6 @@ export const InterviewStep: React.FC<{
             teardownRecording(false);
             return;
           }
-          if (awaitingTurnCompletionRef.current) {
-            animationFrameRef.current = requestAnimationFrame(checkSilence);
-            return;
-          }
-          
           // If AI started speaking, we keep the mic open for "Organic" feel
           // but we can dampen it or ignore VAD events locally.
           // Gemini server-side VAD handles the turn taking.
@@ -928,35 +918,20 @@ export const InterviewStep: React.FC<{
                 hasDetectedSpeechRef.current = true;
                 isVoiceActiveRef.current = true;
                 setIsVoiceActive(true);
-                isSendingAudioRef.current = true;
-
                 // 🔥 BARGE-IN (interrupt AI)
                 if (isSpeakingRef.current) {
                     console.log("[VOICE] Barge-in detected");
                     playbackQueueRef.current = [];
                     isSpeakingRef.current = false;
                     setIsSpeaking(false);
-                    isSendingAudioRef.current = true;
                     // Native SDK handles interruption through incoming audio automatically.
                 }
 
             } else {
-                if (Date.now() > speechGateUntil) {
-                    isSendingAudioRef.current = false;
-                    if (isVoiceActiveRef.current) {
-                        isVoiceActiveRef.current = false;
-                        setIsVoiceActive(false);
-                    }
-                }
                 if (
-                    hasDetectedSpeechRef.current &&
-                    Date.now() - lastSpeakTime > USER_TURN_END_SILENCE_MS &&
-                    !aiTurnActiveRef.current
+                    isVoiceActiveRef.current &&
+                    Date.now() > speechGateUntil
                 ) {
-                    console.log("[VOICE] Silence → waiting for backend turn completion");
-                    awaitingTurnCompletionRef.current = true;
-                    isSendingAudioRef.current = false;
-                    hasDetectedSpeechRef.current = false;
                     isVoiceActiveRef.current = false;
                     setIsVoiceActive(false);
                 }
