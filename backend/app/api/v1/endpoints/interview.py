@@ -23,19 +23,25 @@ async def interview_live_websocket(
 ):
     """Handle a real-time Multimodal Live interview session with Gemini."""
 
+    # ACCEPT immediately to prevent 403 Forbidden handshake rejections from FastAPI/Uvicorn
+    await websocket.accept()
+    logger.info(f"[VOICE_BACKEND] WebSocket accepted for session {session_id}")
+
     user_id = "dev-user"
 
     try:
         context = get_session_context(session_id=session_id, user_id=user_id)
     except Exception:
+        logger.warning(f"Session context retrieval failed for {session_id}")
+        # Send error via JSON instead of abrupt close
+        await websocket.send_json({"error": "Invalid session context"})
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     if not context:
+        await websocket.send_json({"error": "Session not found"})
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
-
-    await websocket.accept()
     await websocket.send_json(
         {
             "type": "textStream",

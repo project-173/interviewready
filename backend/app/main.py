@@ -47,9 +47,18 @@ frontend_url = "https://interviewready-frontend-266623940622.asia-southeast1.run
 if frontend_url not in origins:
     origins.append(frontend_url)
 
+# Add backend itself to origins for WebSocket handshake consistency
+backend_url = "https://interviewready-backend-266623940622.asia-southeast1.run.app"
+if backend_url not in origins:
+    origins.append(backend_url)
+
+# RELAXED CORS for debugging 403 errors in production
+# In production, we'll try to use "*" if explicit list fails, but FastAPI requires explicit list with credentials=True
+# So we'll stick to our list but ensure it's comprehensive.
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"] if settings.APP_ENV != "prod" else origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
