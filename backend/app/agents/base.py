@@ -44,7 +44,7 @@ class BaseAgentProtocol(Protocol):
 class BaseAgent(ABC, BaseAgentProtocol):
     """Abstract base agent implementation."""
 
-    MOCK_RESPONSES_FILE = Path(__file__).resolve().parents[2] / "mock_responses.json"
+    MOCK_RESPONSES_FILE = Path(__file__).resolve().parents[1] / "mock_responses.json"
     _mock_responses_cache: Optional[Dict[str, Any]] = None
 
     def __init__(self, gemini_service: "GeminiService", system_prompt: str, name: str):
