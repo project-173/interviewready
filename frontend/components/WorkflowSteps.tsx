@@ -247,62 +247,83 @@ export const AlignmentStep: React.FC<{
   );
 };
 
-export const AlignmentReportStep: React.FC<{ report: AlignmentReport; onStartInterview: () => void }> = ({ report, onStartInterview }) => (
-  <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 space-y-6">
-    <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-      <h3 className="text-lg font-semibold">Match Report</h3>
-      <span className="text-2xl font-bold text-slate-900">{report.fitScore}%</span>
-    </div>
-    
-    <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
-       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Experience Match</p>
-       <p className="text-xs text-slate-700 leading-relaxed font-medium italic">"{report.experienceMatch}"</p>
-    </div>
+export const AlignmentReportStep: React.FC<{
+  report: AlignmentReport;
+  resume?: ResumeSchema | null;
+  onStartInterview: () => void;
+}> = ({ report, resume, onStartInterview }) => {
+  const resolveEvidence = (paths: string[]) =>
+    paths
+      .map((path) => {
+        const resolved = resolveResumeLocation(resume, path);
+        return resolved.isValid && resolved.display ? resolved.display : "";
+      })
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
 
-    <div className="space-y-3">
-      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Reasoning</h4>
-      <p className="text-[12px] text-slate-600 leading-relaxed">{report.reasoning}</p>
-    </div>
+  const matchedSkills = resolveEvidence(report.skillsMatch || []);
+  const experienceEvidence = resolveEvidence(report.experienceMatch || []);
+  const missingSkills = Array.isArray(report.missingSkills) ? report.missingSkills : [];
 
-    <div className="grid grid-cols-1 gap-3">
-       <div className="p-3.5 bg-white border border-slate-200 rounded-xl">
-          <p className="text-[9px] font-bold text-slate-400 uppercase mb-2 tracking-widest">Matched Skills</p>
-          <div className="flex flex-wrap gap-1">
-            {(report.skillsMatch || []).slice(0, 8).map((k, i) => (
-              <span key={i} className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200 font-medium">{k}</span>
-            ))}
-          </div>
-       </div>
-       <div className="p-3.5 bg-white border border-slate-200 rounded-xl">
-          <p className="text-[9px] font-bold text-slate-400 uppercase mb-2 tracking-widest">Missing Skills</p>
-          <div className="flex flex-wrap gap-1">
-            {(report.missingSkills || []).slice(0, 8).map((k, i) => (
-              <span key={i} className="text-[10px] bg-red-50 text-red-600 px-2 py-0.5 rounded border border-red-100 font-medium">{k}</span>
-            ))}
-          </div>
-       </div>
-    </div>
-
-    {/* Extract grounding sources and list them on the web app as per Google Search grounding rules */}
-    {report.sources && report.sources.length > 0 && (
-      <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
-        <p className="text-[9px] font-bold text-slate-400 uppercase mb-2 tracking-widest">Market Context Sources</p>
-        <div className="space-y-1.5">
-          {report.sources.map((s, i) => (
-            <a key={i} href={s.uri} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-[10px] text-blue-600 hover:text-blue-800 transition-colors font-medium truncate">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
-              {s.title}
-            </a>
-          ))}
+  return (
+    <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 space-y-6">
+      <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+        <div>
+          <h3 className="text-lg font-semibold">Job Alignment Report</h3>
+          <p className="text-[11px] text-slate-500">Match based on resume and job description.</p>
         </div>
       </div>
-    )}
-    
-    <button onClick={onStartInterview} className="w-full bg-slate-900 text-white text-[13px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 transition-all">
-      Launch Mock Interview
-    </button>
-  </div>
-);
+      
+      <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Summary</p>
+        <p className="text-xs text-slate-700 leading-relaxed font-medium">
+          {report.summary || 'No summary provided yet.'}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3">
+        <div className="p-3.5 bg-white border border-slate-200 rounded-xl">
+          <p className="text-[9px] font-bold text-slate-400 uppercase mb-2 tracking-widest">Matched Skills</p>
+          <div className="flex flex-wrap gap-1">
+            {matchedSkills.slice(0, 8).map((k, i) => (
+              <span key={i} className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200 font-medium">
+                {k}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="p-3.5 bg-white border border-slate-200 rounded-xl">
+          <p className="text-[9px] font-bold text-slate-400 uppercase mb-2 tracking-widest">Missing Skills</p>
+          <div className="flex flex-wrap gap-1">
+            {missingSkills.slice(0, 8).map((k, i) => (
+              <span key={i} className="text-[10px] bg-red-50 text-red-600 px-2 py-0.5 rounded border border-red-100 font-medium">
+                {k}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="p-3.5 bg-white border border-slate-200 rounded-xl">
+        <p className="text-[9px] font-bold text-slate-400 uppercase mb-2 tracking-widest">Experience Evidence</p>
+        <div className="flex flex-wrap gap-1">
+          {experienceEvidence.length > 0 ? (
+            experienceEvidence.slice(0, 8).map((item, i) => (
+              <span key={i} className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200 font-medium">
+                {item}
+              </span>
+            ))
+          ) : (
+            <span className="text-[10px] text-slate-400">No experience evidence was identified.</span>
+          )}
+        </div>
+      </div>
+      
+      <button onClick={onStartInterview} className="w-full bg-slate-900 text-white text-[13px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 transition-all">
+        Launch Mock Interview
+      </button>
+    </div>
+  );
+};
 
 export const InterviewModeSelectionStep: React.FC<{
   onSelect: (mode: InterviewMode) => void;

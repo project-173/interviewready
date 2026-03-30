@@ -95,10 +95,8 @@ export interface ContentStrengthReport {
 export interface AlignmentReport {
   skillsMatch: string[];
   missingSkills: string[];
-  experienceMatch: string;
-  fitScore: number;
-  reasoning: string;
-  sources?: { title: string; uri: string }[];
+  experienceMatch: string[];
+  summary: string;
 }
 
 export enum WorkflowStatus {

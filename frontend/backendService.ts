@@ -54,6 +54,9 @@ interface InterviewCoachPayload {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+const asStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+
 const parseInterviewCoachPayload = (payload: unknown): InterviewCoachPayload | null => {
   if (typeof payload === 'string') {
     try {
@@ -252,13 +255,16 @@ class BackendService {
     const response = await this.callChatEndpoint(request);
     
     try {
-      let data = response.payload;
-      if (!data || typeof data !== 'object') {
+      let data: unknown = response.payload;
+      if (!isRecord(data)) {
         data = JSON.parse(response.content || '{}');
       }
+      const parsed = isRecord(data) ? data : {};
       return {
-        ...data,
-        sources: data.sources || []
+        skillsMatch: asStringArray(parsed.skillsMatch),
+        missingSkills: asStringArray(parsed.missingSkills),
+        experienceMatch: asStringArray(parsed.experienceMatch),
+        summary: typeof parsed.summary === 'string' ? parsed.summary : ''
       };
     } catch (error) {
       console.error('Failed to parse alignment response:', error);

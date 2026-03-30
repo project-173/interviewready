@@ -574,7 +574,13 @@ const handleUploadSubmit = async (file: File | null) => {
         <ContentStep report={state.contentReport} resume={state.currentResume} onApprove={approveContent} />
       )}
       {(state.status === WorkflowStatus.ALIGNING_JD) && <AlignmentStep jd={state.jobDescription} onChangeJD={(val) => setState(prev => ({ ...prev, jobDescription: val }))} onAnalyze={runAlignment} isLoading={false} />}
-      {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterviewSelection} />}
+      {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && (
+        <AlignmentReportStep
+          report={state.alignmentReport}
+          resume={state.currentResume}
+          onStartInterview={startInterviewSelection}
+        />
+      )}
       {(state.status === WorkflowStatus.SELECTING_INTERVIEW_MODE) && <InterviewModeSelectionStep onSelect={startInterview} />}
       {(state.status === WorkflowStatus.INTERVIEWING || state.status === WorkflowStatus.DEBUG_VOICE || state.status === WorkflowStatus.COMPLETED) && (
         <InterviewStep 
