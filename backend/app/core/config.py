@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     MOCK_INTERVIEW_COACH_AGENT: bool = False
 
     # Extractor HITL configuration
-    EXTRACTOR_AUTO_PROCEED_THRESHOLD: float = 0.9
+    EXTRACTOR_AUTO_PROCEED_THRESHOLD: float = 0.2
     EXTRACTOR_HITL_TIMEOUT_MINUTES: int = 30
     EXTRACTOR_HITL_FALLBACK: str = "proceed"  # proceed | fail | queue
 

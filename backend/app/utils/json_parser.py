@@ -22,27 +22,21 @@ def parse_json_payload(
         return direct
 
     fenced_match = re.search(
-        r"```(?:json)?\s*(\{[\s\S]*\}|\[[\s\S]*\])\s*```",
+        r"```(?:json)?\s*([\s\S]*?)\s*```",
         cleaned,
         flags=re.IGNORECASE,
     )
     if fenced_match:
-        parsed = _safe_load(fenced_match.group(1).strip(), allow_array=allow_array)
+        fenced_text = fenced_match.group(1).strip()
+        parsed = _safe_load(fenced_text, allow_array=allow_array)
+        if parsed is None:
+            parsed = _parse_balanced_json(fenced_text, allow_array=allow_array)
         if parsed is not None:
             return parsed
 
-    object_match = re.search(r"\{[\s\S]*\}", cleaned)
-    if object_match:
-        parsed = _safe_load(object_match.group(0).strip(), allow_array=False)
-        if parsed is not None:
-            return parsed
-
-    if allow_array:
-        array_match = re.search(r"\[[\s\S]*\]", cleaned)
-        if array_match:
-            parsed = _safe_load(array_match.group(0).strip(), allow_array=True)
-            if parsed is not None:
-                return parsed
+    parsed = _parse_balanced_json(cleaned, allow_array=allow_array)
+    if parsed is not None:
+        return parsed
 
     return None
 
@@ -61,7 +55,7 @@ def _safe_load(
     allow_array: bool,
 ) -> dict[str, Any] | list[Any] | None:
     try:
-        parsed = json.loads(candidate)
+        parsed = json.loads(candidate, strict=False)
     except (TypeError, ValueError):
         return None
 
@@ -69,4 +63,64 @@ def _safe_load(
         return parsed
     if allow_array and isinstance(parsed, list):
         return parsed
+    return None
+
+
+def _parse_balanced_json(
+    text: str, *, allow_array: bool
+) -> dict[str, Any] | list[Any] | None:
+    """Parse the first balanced JSON object/array substring from text."""
+    if not text:
+        return None
+
+    start_indices: list[int] = []
+    for idx, ch in enumerate(text):
+        if ch == "{":
+            start_indices.append(idx)
+        elif allow_array and ch == "[":
+            start_indices.append(idx)
+
+    for start in start_indices:
+        extracted = _extract_from_start(text, start)
+        if not extracted:
+            continue
+        parsed = _safe_load(extracted, allow_array=allow_array)
+        if parsed is not None:
+            return parsed
+
+    return None
+
+
+def _extract_from_start(text: str, start: int) -> str | None:
+    stack: list[str] = []
+    in_string = False
+    escape = False
+
+    for idx in range(start, len(text)):
+        ch = text[idx]
+
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+            continue
+
+        if ch == "{":
+            stack.append("}")
+        elif ch == "[":
+            stack.append("]")
+        elif ch in ("}", "]"):
+            if not stack or ch != stack[-1]:
+                return None
+            stack.pop()
+            if not stack:
+                return text[start : idx + 1]
+
     return None
