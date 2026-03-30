@@ -60,15 +60,6 @@ export const CriticStep: React.FC<{ report: ResumeCriticReport; resume?: ResumeS
                     <div>
                       Section: <span className="font-medium text-slate-600">{capitalizeFirst(resolved.topLevel || 'unknown')}</span>
                     </div>
-                    {resolved.isValid && (
-                      <div className="text-slate-500">
-                        Evidence: <span className="text-slate-700 line-clamp-5">
-                          {resolved.usedSectionAsEvidence
-                            ? capitalizeFirst(resolved.display || '')
-                            : resolved.display}
-                        </span>
-                      </div>
-                    )}
                   </div>
                 );
               })()}
@@ -133,15 +124,6 @@ export const ContentStep: React.FC<{ report: ContentStrengthReport; resume?: Res
                     <div>
                       Section: <span className="font-medium text-slate-600">{capitalizeFirst(resolved.topLevel || 'unknown')}</span>
                     </div>
-                     {resolved.isValid && (
-                       <div className="text-slate-500">
-                         Evidence: <span className="text-slate-700">
-                           {resolved.usedSectionAsEvidence
-                             ? capitalizeFirst(resolved.display || '')
-                             : resolved.display}
-                         </span>
-                       </div>
-                     )}
                    </div>
                  );
                })()}

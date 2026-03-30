@@ -30,7 +30,6 @@ RESUME_SCHEMA = """
     "url": "https://company.com",
     "startDate": "2013-01-01",
     "endDate": "2014-01-01",
-    "summary": "Description…",
     "highlights": [
       "Started the company"
     ]
@@ -60,13 +59,7 @@ RESUME_SCHEMA = """
     "url": "https://certificate.com"
   }],
   "skills": [{
-    "name": "Web Development",
-    "level": "Master",
-    "keywords": [
-      "HTML",
-      "CSS",
-      "JavaScript"
-    ]
+    "name": "Web Development"
   }],
   "projects": [{
     "name": "Project",

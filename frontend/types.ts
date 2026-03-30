@@ -7,7 +7,6 @@ export interface Work {
   url?: string;
   startDate?: string;
   endDate?: string;
-  summary?: string;
   highlights?: string[];
 }
 
@@ -38,8 +37,6 @@ export interface Certificate {
 
 export interface Skill {
   name?: string;
-  level?: string;
-  keywords?: string[];
 }
 
 export interface Project {

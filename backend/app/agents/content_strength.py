@@ -35,7 +35,7 @@ class ContentStrengthAgent(BaseAgent):
         - LOW: vague or generic
 
         LOCATION FORMAT: use JSON path notation matching the resume schema
-        e.g. work[0].highlights[1], skills[2].keywords, basics.summary, projects[0].description
+        e.g. work[0].highlights[1], skills[2].keywords, projects[0].description
 
         OUTPUT: valid JSON only. No markdown, no text outside the object, no null values.
 

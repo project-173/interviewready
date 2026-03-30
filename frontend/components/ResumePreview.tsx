@@ -121,11 +121,6 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
                   <p className="text-xs font-semibold text-slate-500 mb-4">
                     {item.name || "Company"}
                   </p>
-                  {item.summary && (
-                    <p className="text-[13px] text-slate-600 leading-relaxed mb-4">
-                      {item.summary}
-                    </p>
-                  )}
                   {item.highlights && item.highlights.length > 0 && (
                     <ul className="space-y-2.5">
                       {item.highlights.map((highlight, idx) => (
@@ -202,17 +197,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
                     <h4 className="text-sm font-bold text-slate-900">
                       {skill.name || "Skill"}
                     </h4>
-                    {skill.level && (
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">
-                        {skill.level}
-                      </span>
-                    )}
                   </div>
-                  {skill.keywords && skill.keywords.length > 0 && (
-                    <div className="text-[11px] text-slate-500">
-                      {skill.keywords.join(", ")}
-                    </div>
-                  )}
                 </div>
               ))
             ) : (

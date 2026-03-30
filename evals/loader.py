@@ -198,6 +198,10 @@ def build_session_context(
     )
     if case.context_shared_memory:
         context.shared_memory = dict(case.context_shared_memory)
+    if context.shared_memory is None:
+        context.shared_memory = {}
+    if "reference_date" not in context.shared_memory:
+        context.shared_memory["reference_date"] = date.today().isoformat()
     return context
 
 

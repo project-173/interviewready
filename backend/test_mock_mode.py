@@ -78,7 +78,6 @@ def test_agents_with_inline_mock() -> bool:
                 Work(
                     name="Sample Company",
                     position="Sample Role",
-                    summary="Sample resume text for testing",
                     highlights=["Improved performance", "Delivered features"],
                 )
             ]

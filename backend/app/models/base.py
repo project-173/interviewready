@@ -12,19 +12,6 @@ class Work(BaseModel):
     url: Optional[str] = None
     startDate: Optional[str] = None
     endDate: Optional[str] = None
-    summary: Optional[str] = None
-    highlights: List[str] = Field(default_factory=list)
-
-
-class Volunteer(BaseModel):
-    """Volunteer entry (JSON Resume: volunteer)."""
-
-    organization: Optional[str] = None
-    position: Optional[str] = None
-    url: Optional[str] = None
-    startDate: Optional[str] = None
-    endDate: Optional[str] = None
-    summary: Optional[str] = None
     highlights: List[str] = Field(default_factory=list)
 
 
@@ -58,44 +45,10 @@ class Certificate(BaseModel):
     issuer: Optional[str] = None
     url: Optional[str] = None
 
-
-class Publication(BaseModel):
-    """Publication entry (JSON Resume: publications)."""
-
-    name: Optional[str] = None
-    publisher: Optional[str] = None
-    releaseDate: Optional[str] = None
-    url: Optional[str] = None
-    summary: Optional[str] = None
-
-
 class Skill(BaseModel):
     """Skill entry (JSON Resume: skills)."""
 
     name: Optional[str] = None
-    level: Optional[str] = None
-    keywords: List[str] = Field(default_factory=list)
-
-
-class Language(BaseModel):
-    """Language entry (JSON Resume: languages)."""
-
-    language: Optional[str] = None
-    fluency: Optional[str] = None
-
-
-class Interest(BaseModel):
-    """Interest entry (JSON Resume: interests)."""
-
-    name: Optional[str] = None
-    keywords: List[str] = Field(default_factory=list)
-
-
-class Reference(BaseModel):
-    """Reference entry (JSON Resume: references)."""
-
-    name: Optional[str] = None
-    reference: Optional[str] = None
 
 
 class Project(BaseModel):
