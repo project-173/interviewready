@@ -179,25 +179,6 @@ const AppContent: React.FC = () => {
           <div className="flex-1 overflow-y-auto">
             <ResumePreview resume={state.currentResume} />
           </div>
-
-          {state.history.length > 1 && state.status === WorkflowStatus.IDLE && (
-            <div className="absolute top-6 right-6 group">
-              <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm w-64 max-h-[300px] overflow-y-auto">
-                 <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-3">Recent Uploads</h4>
-                 <div className="space-y-1.5">
-                   {state.history.map((h, index) => (
-                     <button 
-                       key={index}
-                       onClick={() => setState(prev => ({ ...prev, currentResume: h, status: WorkflowStatus.CRITIQUING }))}
-                       className="w-full p-2.5 rounded-lg text-left text-[11px] font-medium text-slate-600 hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-all truncate"
-                     >
-                        Resume {index + 1}
-                     </button>
-                   ))}
-                 </div>
-              </div>
-            </div>
-          )}
         </main>
       </div>
 
@@ -560,7 +541,6 @@ const handleUploadSubmit = async (file: File | null) => {
 
   return (
     <>
-      <a onClick={() => console.log(state)}>Check state</a>
       {(state.status === WorkflowStatus.IDLE || state.status === WorkflowStatus.EXTRACTING) && (
         <UploadStep
           onUploadSubmit={handleUploadSubmit}
