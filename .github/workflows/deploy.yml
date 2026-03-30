@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - sit
+      - job-alignment-hallucination
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
