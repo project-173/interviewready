@@ -14,6 +14,7 @@ from ..models.agent import AgentResponse
 from ..models.session import SessionContext
 from ..models.agent import AgentInput
 from ..security.llm_guard_scanner import get_llm_guard_scanner
+from ..utils.json_parser import parse_json_object
 
 
 class InterviewCoachAgent(BaseAgent):
@@ -329,8 +330,16 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         state: dict,
         feedback: str,
         question: str,
+        reason: str = "",
     ) -> str:
-        """Return a deterministic safe re-ask when adversarial content is detected."""
+        """Return a deterministic safe re-ask when adversarial content is detected.
+        
+        Args:
+            state: Current interview state
+            feedback: User-facing feedback message
+            question: The question to re-ask
+            reason: Technical reason for the block (for logging/metadata, not shown to user)
+        """
         response = {
             "current_question_number": min(
                 state["current_question_index"] + 1,
@@ -347,6 +356,76 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             "next_challenge": "Answer the question directly without meta-instructions or attempts to change system behavior.",
         }
         return json.dumps(response)
+
+    def _is_service_error_response(self, text: str) -> bool:
+        """Detect temporary Gemini service errors from raw model output."""
+        if not text or not isinstance(text, str):
+            return False
+
+        lowered = text.lower()
+        return any(
+            keyword in lowered
+            for keyword in (
+                "error in gemini:",
+                "resource_exhausted",
+                "exceeded your current quota",
+                "quota exceeded",
+                "service unavailable",
+                "temporarily unavailable",
+                "429",
+            )
+        )
+
+    def _build_service_error_response(
+        self,
+        state: dict,
+        question: str,
+        error_details: str = "",
+    ) -> str:
+        """Return a safe structured response when Gemini is unavailable."""
+        response = {
+            "current_question_number": min(
+                state["current_question_index"] + 1,
+                state["total_questions"],
+            ),
+            "total_questions": state["total_questions"],
+            "interview_type": "behavioral",
+            "question": question
+            or "The interview service is temporarily unavailable. Please try again shortly.",
+            "keywords": ["service", "retry"],
+            "tip": "Try again in a few moments once the AI service is available.",
+            "feedback": (
+                "We encountered a temporary AI service issue while generating your interview coaching. "
+                "Please retry in a few moments."
+            ),
+            "answer_score": 0,
+            "can_proceed": False,
+            "next_challenge": "Retry once the AI service is available.",
+        }
+        return json.dumps(response)
+
+    def _build_evaluator_fallback(self, raw_result: str = "", error: Optional[Exception] = None) -> dict:
+        """Return a safe fallback evaluation result when the evaluator output is invalid."""
+        if error is not None:
+            logger.warning(
+                "Evaluator returned invalid or malformed output",
+                error=str(error),
+                raw_result=raw_result[:200],
+            )
+        else:
+            logger.warning(
+                "Evaluator returned invalid or malformed output",
+                raw_result=raw_result[:200],
+            )
+
+        return {
+            "answer_score": 0.0,
+            "can_proceed": False,
+            "feedback": (
+                "Your response could not be evaluated because the AI evaluator returned an invalid response. "
+                "This is not your fault — it\'s a technical issue on our end. Please try rephrasing your answer with more specific details about your actions and results."
+            ),
+        }
 
     def _build_interview_prompt(
         self,
@@ -451,28 +530,36 @@ Evaluate only this answer. Base the score on relevance to the question, alignmen
     ) -> dict:
         """Evaluate the latest interview answer with an LLM-backed evaluator."""
         evaluator_prompt = self._build_evaluator_prompt(input_data, context, user_answer)
-        if self.USE_MOCK_RESPONSE:
-            raw_result = self.gemini_service._generate_mock_response(
-                self.EVALUATOR_SYSTEM_PROMPT,
-                user_answer,
-            )
-        else:
-            raw_result = self._call_gemini_with_system_prompt(
-                evaluator_prompt,
-                context,
-                self.EVALUATOR_SYSTEM_PROMPT,
-            )
-        parsed = json.loads(raw_result)
+        raw_result = ""
+        try:
+            if self.USE_MOCK_RESPONSE:
+                raw_result = self.gemini_service._generate_mock_response(
+                    self.EVALUATOR_SYSTEM_PROMPT,
+                    user_answer,
+                )
+            else:
+                raw_result = self._call_gemini_with_system_prompt(
+                    evaluator_prompt,
+                    context,
+                    self.EVALUATOR_SYSTEM_PROMPT,
+                )
+        except Exception as exc:
+            return self._build_evaluator_fallback("", exc)
+
+        parsed = parse_json_object(raw_result)
+        if not parsed:
+            return self._build_evaluator_fallback(raw_result)
+
         answer_score = parsed.get("answer_score")
         can_proceed = parsed.get("can_proceed")
         feedback = parsed.get("feedback")
 
         if not isinstance(answer_score, (int, float)):
-            raise ValueError("Interview evaluator did not return a numeric answer_score")
+            return self._build_evaluator_fallback(raw_result)
         if not isinstance(can_proceed, bool):
-            raise ValueError("Interview evaluator did not return a boolean can_proceed")
+            return self._build_evaluator_fallback(raw_result)
         if not isinstance(feedback, str) or not feedback.strip():
-            raise ValueError("Interview evaluator did not return feedback text")
+            return self._build_evaluator_fallback(raw_result)
 
         return {
             "answer_score": round(float(answer_score), 2),
@@ -623,10 +710,16 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                         user_answer
                     )
                     if not input_is_safe:
+                        reason_str = "; ".join(prompt_injection_issues) if prompt_injection_issues else "security_check_failed"
+                        user_feedback = (
+                            f"Your response was blocked for security reasons: {reason_str.replace('heuristic:', '').replace('scanner:', '')}. "
+                            f"Please answer the interview question directly with a specific real-world example using the STAR method (Situation, Task, Action, Result)."
+                        )
                         precomputed_result = self._build_security_reask_response(
                             state,
-                            "Your last reply looked like an attempt to change system behavior rather than answer the interview question. Please answer the question directly with a relevant example.",
+                            user_feedback,
                             state["asked_questions"][-1] if state["asked_questions"] else "",
+                            reason=reason_str,
                         )
                         method_used = "security_block_reask"
                         model_answer_score = 0.0
@@ -637,13 +730,34 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                             user_answer=sanitized_user_answer,
                         )
                     else:
-                        evaluation_result = self._evaluate_interview_answer(
-                            input_data,
-                            context,
-                            user_answer,
-                        )
-                        model_answer_score = evaluation_result["answer_score"]
-                        model_can_proceed = evaluation_result["can_proceed"]
+                        try:
+                            evaluation_result = self._evaluate_interview_answer(
+                                input_data,
+                                context,
+                                user_answer,
+                            )
+                            model_answer_score = evaluation_result["answer_score"]
+                            model_can_proceed = evaluation_result["can_proceed"]
+                        except Exception as eval_exc:
+                            error_msg = str(eval_exc)
+                            logger.warning(
+                                "Interview evaluator failed, using safe fallback response",
+                                session_id=session_id,
+                                error=error_msg,
+                            )
+                            fallback_feedback = (
+                                "Your response could not be evaluated because: The AI evaluator returned an invalid response. "
+                                "This is not your fault—it's a technical issue on our end. "
+                                "Please try rephrasing your answer with more specific details about your actions and results."
+                            )
+                            evaluation_result = {
+                                "answer_score": 0.0,
+                                "can_proceed": False,
+                                "feedback": fallback_feedback,
+                            }
+                            model_answer_score = 0.0
+                            model_can_proceed = False
+                            method_used = "evaluator_fallback"
                         input_text = self._build_interview_prompt(
                             input_data,
                             context,
@@ -673,10 +787,16 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 
         try:
             if prompt_injection_issues:
+                reason_str = "; ".join(prompt_injection_issues) if prompt_injection_issues else "security_check_failed"
+                user_feedback = (
+                    f"Your response was blocked for security reasons: {reason_str.replace('heuristic:', '').replace('scanner:', '')}. "
+                    f"Please answer the interview question directly with a specific example."
+                )
                 result = precomputed_result or self._build_security_reask_response(
                     state,
-                    "Please answer the interview question directly with a relevant example.",
+                    user_feedback,
                     state["asked_questions"][-1] if state["asked_questions"] else "",
+                    reason=reason_str,
                 )
             elif isinstance(input_text, bytes):
                 # Handle audio input
@@ -779,86 +899,118 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             )
 
             # Parse the JSON response and handle progression logic
-            try:
-                response_json = json.loads(result)
-                if response_json.get("interview_complete", False):
-                    if isinstance(input_data, AgentInput) and is_follow_up and user_answer:
-                        self._store_answer_and_advance(user_answer, context)
-                    self._set_interview_complete(context)
-                    state = self._get_interview_state(context)
-                    logger.debug(
-                        "Interview completed - AI generated completion summary",
+            while True:
+                try:
+                    response_json = json.loads(result)
+                    break
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Failed to parse InterviewCoachAgent response as JSON",
                         session_id=session_id,
+                        result_preview=result[:200],
                     )
-                elif isinstance(input_data, AgentInput):
-                    if is_follow_up and evaluation_result is not None:
-                        response_json["answer_score"] = evaluation_result["answer_score"]
-                        response_json["can_proceed"] = evaluation_result["can_proceed"]
-                        response_json["feedback"] = evaluation_result["feedback"]
-                        model_answer_score = evaluation_result["answer_score"]
-                        model_can_proceed = evaluation_result["can_proceed"]
-                        if not evaluation_result["can_proceed"] and state["asked_questions"]:
-                            response_json["question"] = state["asked_questions"][-1]
-                        result = json.dumps(response_json)
-                    else:
-                        model_answer_score = response_json.get("answer_score")
-                        model_can_proceed = response_json.get("can_proceed")
-
-                    if is_follow_up and user_answer and model_can_proceed:
-                        self._store_answer_and_advance(user_answer, context)
-
-                    state = self._get_interview_state(context)
-                    if (
-                        is_follow_up
-                        and user_answer
-                        and model_can_proceed
-                        and state["current_question_index"] >= state["total_questions"]
-                    ):
-                        self._set_interview_complete(context)
-                        result, method_used = self._generate_summary_response(
-                            input_data, context
+                    if self._is_service_error_response(result):
+                        logger.warning(
+                            "InterviewCoachAgent detected Gemini service error and will return a safe service outage response",
+                            session_id=session_id,
+                            result_preview=result[:200],
                         )
-                        response_json = json.loads(result)
-                        state = self._get_interview_state(context)
-
-                    if not response_json.get("interview_complete", False):
-                        response_json["current_question_number"] = min(
-                            state["current_question_index"] + 1,
-                            state["total_questions"],
+                        result = self._build_service_error_response(
+                            state,
+                            state["asked_questions"][-1] if state["asked_questions"] else "",
+                            result,
                         )
-                        response_json["total_questions"] = state["total_questions"]
+                        method_used = "service_error_fallback"
+                        continue
+                    # Fallback to a safe mock response when the model output is invalid or unsafe.
+                    fallback_key = self._get_dynamic_mock_key(
+                        context,
+                        is_follow_up,
+                        model_can_proceed if model_can_proceed is not None else True,
+                    )
+                    fallback_result = self.get_mock_response_by_key(fallback_key)
+                    if fallback_result is None:
+                        fallback_result = self.get_mock_response_by_key(self.MOCK_RESPONSE_KEY)
+                    if fallback_result is None:
+                        raise ValueError("InterviewCoachAgent returned non-JSON output and fallback failed")
+                    logger.warning(
+                        "InterviewCoachAgent using fallback mock response after invalid model output",
+                        session_id=session_id,
+                        fallback_key=fallback_key,
+                    )
+                    result = fallback_result
 
-                        # Hide scoring and coaching metadata on the initial interview prompt.
-                        if (
-                            not is_follow_up
-                            and state["current_question_index"] == 0
-                            and response_json["current_question_number"] == 1
-                        ):
-                            for hidden_field in (
-                                "tip",
-                                "answer_score",
-                                "can_proceed",
-                                "next_challenge",
-                            ):
-                                response_json.pop(hidden_field, None)
-
-                    if (
-                        response_json.get("question")
-                        and response_json.get("current_question_number", state["current_question_index"] + 1)
-                        == state["current_question_index"] + 1
-                        and model_can_proceed is not False
-                    ):
-                        self._store_question_if_new(response_json["question"], context)
-                    result = json.dumps(response_json)
-                    if state["current_question_index"] >= state["total_questions"]:
-                        self._set_interview_complete(context)
-            except json.JSONDecodeError:
-                logger.warning(
-                    "Failed to parse InterviewCoachAgent response as JSON",
+            if response_json.get("interview_complete", False):
+                if isinstance(input_data, AgentInput) and is_follow_up and user_answer:
+                    self._store_answer_and_advance(user_answer, context)
+                self._set_interview_complete(context)
+                state = self._get_interview_state(context)
+                logger.debug(
+                    "Interview completed - AI generated completion summary",
                     session_id=session_id,
-                    result_preview=result[:200],
                 )
-                raise ValueError("InterviewCoachAgent returned non-JSON output")
+            elif isinstance(input_data, AgentInput):
+                if is_follow_up and evaluation_result is not None:
+                    response_json["answer_score"] = evaluation_result["answer_score"]
+                    response_json["can_proceed"] = evaluation_result["can_proceed"]
+                    response_json["feedback"] = evaluation_result["feedback"]
+                    model_answer_score = evaluation_result["answer_score"]
+                    model_can_proceed = evaluation_result["can_proceed"]
+                    if not evaluation_result["can_proceed"] and state["asked_questions"]:
+                        response_json["question"] = state["asked_questions"][-1]
+                    result = json.dumps(response_json)
+                else:
+                    model_answer_score = response_json.get("answer_score")
+                    model_can_proceed = response_json.get("can_proceed")
+
+                if is_follow_up and user_answer and model_can_proceed:
+                    self._store_answer_and_advance(user_answer, context)
+
+                state = self._get_interview_state(context)
+                if (
+                    is_follow_up
+                    and user_answer
+                    and model_can_proceed
+                    and state["current_question_index"] >= state["total_questions"]
+                ):
+                    self._set_interview_complete(context)
+                    result, method_used = self._generate_summary_response(
+                        input_data, context
+                    )
+                    response_json = json.loads(result)
+                    state = self._get_interview_state(context)
+
+                if not response_json.get("interview_complete", False):
+                    response_json["current_question_number"] = min(
+                        state["current_question_index"] + 1,
+                        state["total_questions"],
+                    )
+                    response_json["total_questions"] = state["total_questions"]
+
+                    # Hide scoring and coaching metadata on the initial interview prompt.
+                    if (
+                        not is_follow_up
+                        and state["current_question_index"] == 0
+                        and response_json["current_question_number"] == 1
+                    ):
+                        for hidden_field in (
+                            "tip",
+                            "answer_score",
+                            "can_proceed",
+                            "next_challenge",
+                        ):
+                            response_json.pop(hidden_field, None)
+
+                if (
+                    response_json.get("question")
+                    and response_json.get("current_question_number", state["current_question_index"] + 1)
+                    == state["current_question_index"] + 1
+                    and model_can_proceed is not False
+                ):
+                    self._store_question_if_new(response_json["question"], context)
+                result = json.dumps(response_json)
+                if state["current_question_index"] >= state["total_questions"]:
+                    self._set_interview_complete(context)
 
             # Build decision trace for auditability
             input_type = "audio" if isinstance(input_text, bytes) else "text"

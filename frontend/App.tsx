@@ -25,6 +25,9 @@ import {
   InterviewModeSelectionStep
 } from './components/WorkflowSteps';
 
+const isInterviewCompleteResponse = (text: string) =>
+  text.toLowerCase().includes('interview complete');
+
 const AppContent: React.FC = () => {
   const [state, setState] = useState<SharedState>(() => {
     const saved = localStorage.getItem('interview_ready_state');
@@ -132,11 +135,21 @@ const AppContent: React.FC = () => {
         <aside className="w-[450px] border-r border-slate-200 bg-white flex flex-col z-20 overflow-hidden">
           <div className="flex-1 overflow-y-auto p-8 space-y-8 scrollbar-thin scrollbar-thumb-slate-200">
             {error && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3 text-red-700 animate-in fade-in slide-in-from-top-1">
-                <div className="mt-0.5 text-red-500">
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" /></svg>
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start justify-between gap-3 text-red-700 animate-in fade-in slide-in-from-top-1">
+                <div className="flex items-start gap-3 flex-1">
+                  <div className="mt-0.5 text-red-500">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" /></svg>
+                  </div>
+                  <div className="text-xs font-medium">{error}</div>
                 </div>
-                <div className="text-xs font-medium">{error}</div>
+                <button
+                  type="button"
+                  onClick={() => setError(null)}
+                  aria-label="Close notification"
+                  className="text-red-500 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-200 rounded-full"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
               </div>
             )}
 
@@ -362,8 +375,13 @@ const WorkflowController: React.FC<{
         state.jobDescription,
         updatedHistory,
       );
+      const interviewComplete = isInterviewCompleteResponse(responseText);
       updateProgress(100, 1);
-      setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
+      setState(prev => ({
+        ...prev,
+        interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }],
+        status: interviewComplete ? WorkflowStatus.COMPLETED : prev.status,
+      }));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -387,6 +405,7 @@ const WorkflowController: React.FC<{
       
       const response = await backendService.callChatEndpoint(request);
       const responseText = backendService.formatInterviewCoachPayload(response.payload ?? response.content);
+      const interviewComplete = isInterviewCompleteResponse(responseText);
       
       setState(prev => {
         const newHistory = prev.interviewHistory.map((msg, i) => 
@@ -394,7 +413,11 @@ const WorkflowController: React.FC<{
             ? { ...msg, text: (response as any).transcription || '[Audio response]' } 
             : msg
         );
-        return { ...prev, interviewHistory: [...newHistory, { role: 'agent', text: responseText }] };
+        return {
+          ...prev,
+          interviewHistory: [...newHistory, { role: 'agent', text: responseText }],
+          status: interviewComplete ? WorkflowStatus.COMPLETED : prev.status,
+        };
       });
     } catch (err: any) {
       setError(err.message || 'Failed to process audio');
@@ -442,7 +465,7 @@ const WorkflowController: React.FC<{
       {(state.status === WorkflowStatus.ALIGNING_JD) && <AlignmentStep jd={state.jobDescription} onChangeJD={(val) => setState(prev => ({ ...prev, jobDescription: val }))} onAnalyze={runAlignment} isLoading={false} />}
       {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterviewSelection} />}
       {(state.status === WorkflowStatus.SELECTING_INTERVIEW_MODE) && <InterviewModeSelectionStep onSelect={startInterview} />}
-      {(state.status === WorkflowStatus.INTERVIEWING || state.status === WorkflowStatus.DEBUG_VOICE) && (
+      {(state.status === WorkflowStatus.INTERVIEWING || state.status === WorkflowStatus.DEBUG_VOICE || state.status === WorkflowStatus.COMPLETED) && (
         <InterviewStep 
           history={state.interviewHistory} 
           onSend={handleInterviewMessage} 
@@ -451,6 +474,7 @@ const WorkflowController: React.FC<{
           chatEndRef={chatEndRef} 
           mode={state.status === WorkflowStatus.DEBUG_VOICE ? 'VOICE' : (state.interviewMode || 'CHAT')} 
           sessionId={backendService.getSessionId()} 
+          isComplete={state.status === WorkflowStatus.COMPLETED}
           onExit={() => setState(prev => ({ ...prev, status: WorkflowStatus.SELECTING_INTERVIEW_MODE }))}
           onLiveEvent={handleLiveEvent}
         />

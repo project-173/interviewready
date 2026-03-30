@@ -279,12 +279,14 @@ export const InterviewStep: React.FC<{
   onSend: (msg: string) => void;
   onSendAudio: (audio: Uint8Array) => void;
   isLoading: boolean;
+  isComplete?: boolean;
   chatEndRef: React.RefObject<HTMLDivElement>;
   mode: InterviewMode;
   sessionId: string;
   onExit?: () => void;
   onLiveEvent?: (event: { type: string; text?: string }) => void;
-}> = ({ history, onSend, onSendAudio, isLoading, chatEndRef, mode, sessionId, onExit, onLiveEvent }) => {
+}> = ({ history, onSend, onSendAudio, isLoading, isComplete = false, chatEndRef, mode, sessionId, onExit, onLiveEvent }) => {
+  const [message, setMessage] = React.useState('');
   const [isRecording, setIsRecording] = React.useState(false);
   const [isSpeaking, setIsSpeaking] = React.useState(false);
   const [isVoiceActive, setIsVoiceActive] = React.useState(false);
@@ -1172,31 +1174,62 @@ export const InterviewStep: React.FC<{
         <div ref={chatEndRef} />
       </div>
 
+      {isComplete && (
+        <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+          Interview complete. Review your summary above and click Exit to leave the mock interview.
+        </div>
+      )}
+
       <form
-        className="flex gap-2 pt-4 border-t border-slate-100"
+        className="flex flex-col gap-3 pt-4 border-t border-slate-100"
         onSubmit={(e) => {
           e.preventDefault();
-          const input = (e.target as any).message;
-          if (!input.value.trim() || isLoading) return;
-          onSend(input.value);
-          input.value = '';
+          if (isLoading || isComplete || !message.trim()) return;
+          onSend(message.trim());
+          setMessage('');
         }}
       >
-        <input
+        <textarea
           name="message"
           autoFocus
           autoComplete="off"
+          rows={5}
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              if (!isLoading && !isComplete && message.trim()) {
+                onSend(message.trim());
+                setMessage('');
+              }
+            }
+          }}
           maxLength={4000}
-          placeholder="Draft your response..."
-          className="flex-1 px-4 py-2.5 rounded-lg bg-white border border-slate-200 text-xs focus:ring-1 focus:ring-slate-900 focus:outline-none transition-all placeholder:text-slate-400"
+          placeholder={isComplete ? 'Interview is complete. Exit to return to the interview menu.' : 'Draft your response (Shift+Enter for newline, Enter to send)...'}
+          disabled={isLoading || isComplete}
+          className="flex-1 min-h-[140px] max-h-40 overflow-y-auto resize-y px-4 py-3 rounded-xl bg-white border border-slate-200 text-sm leading-relaxed focus:ring-1 focus:ring-slate-900 focus:outline-none transition-all placeholder:text-slate-400"
         />
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="bg-slate-900 text-white px-4 rounded-lg hover:bg-slate-800 disabled:opacity-50 flex items-center justify-center transition-all"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-        </button>
+
+        <div className="flex items-center justify-between gap-3">
+          {onExit && (
+            <button
+              type="button"
+              onClick={onExit}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-all"
+            >
+              Exit Interview
+            </button>
+          )}
+
+          <button
+            type="submit"
+            disabled={isLoading || isComplete}
+            className="ml-auto bg-slate-900 text-white px-4 py-2 rounded-lg hover:bg-slate-800 disabled:opacity-50 flex items-center justify-center transition-all"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+          </button>
+        </div>
       </form>
     </div>
   );
