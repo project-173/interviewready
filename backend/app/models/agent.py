@@ -14,6 +14,8 @@ class AgentResponse(BaseModel):
     content: Optional[str] = None
     reasoning: Optional[str] = None  # Explainability
     confidence_score: Optional[float] = None  # Confidence Indicator
+    needs_review: Optional[bool] = None
+    low_confidence_fields: Optional[List[str]] = Field(default_factory=list)
     decision_trace: Optional[List[str]] = Field(default_factory=list)  # Auditability
     sharp_metadata: Optional[Dict[str, Any]] = Field(
         default_factory=dict
@@ -25,6 +27,9 @@ class ChatApiResponse(BaseModel):
 
     agent: Optional[str] = None
     payload: Optional[Dict[str, Any] | List[Any] | str] = None
+    confidence_score: Optional[float] = None
+    needs_review: Optional[bool] = None
+    low_confidence_fields: Optional[List[str]] = Field(default_factory=list)
 
 
 class InterviewMessage(BaseModel):

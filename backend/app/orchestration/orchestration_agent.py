@@ -9,6 +9,7 @@ from langgraph.graph import END, StateGraph
 from langfuse import Langfuse, observe, propagate_attributes
 
 from app.agents.base import BaseAgentProtocol
+from app.core.config import settings
 from app.core.logging import logger
 from app.governance.sharp_governance_service import SharpGovernanceService
 from app.models.agent import (
@@ -185,8 +186,41 @@ class OrchestrationAgent:
                 )
                 parsed = json.loads(response.content or "{}")
                 resume = Resume.model_validate(parsed)
+
+                sharp_metadata = response.sharp_metadata or {}
+
+                self._update_memory(
+                    context,
+                    extractor_confidence_score=response.confidence_score,
+                    extractor_low_confidence_fields=response.low_confidence_fields,
+                    extractor_needs_review=response.needs_review,
+                    extractor_validation_errors=sharp_metadata.get(
+                        "validation_errors", []
+                    ),
+                )
+
+                logger.info(
+                    "ExtractorAgent normalization complete",
+                    session_id=getattr(context, "session_id", "unknown"),
+                    confidence_score=response.confidence_score,
+                    needs_review=response.needs_review,
+                    low_confidence_fields=response.low_confidence_fields,
+                )
+
+                if response.needs_review:
+                    return self._failure(
+                    "Failed to extract meaningful information from resume file.",
+                    str(e),
+                    context,
+                    needs_review=True
+                )
             except Exception as e:
-                return self._failure("Failed to parse resume file.", str(e), context)
+                return self._failure(
+                    "Failed to parse resume file.",
+                    str(e),
+                    context,
+                    needs_review=True
+                )
 
             doc = self._build_resume_doc(resume, "resumeFile")
             self._update_memory(context, current_resume=resume.model_dump())
@@ -198,18 +232,33 @@ class OrchestrationAgent:
             context,
         )
 
-    def _failure(self, reason: str, details: str, context: SessionContext):
+    def _failure(
+        self,
+        reason: str,
+        details: str,
+        context: SessionContext,
+        needs_review: bool = False,
+    ):
+        metadata = {}
+        if needs_review:
+            metadata.update(
+                {
+                    "needs_review": True
+                }
+            )
         plan = ActionPlan(
             summary="Resume normalization failed.",
             actions=[details],
             priority="HIGH",
             no_change=False,
+            metadata=metadata,
         )
         return AgentResponse(
             agent_name="NormalizeStage",
             content=json.dumps(plan.model_dump()),
             reasoning=reason,
             confidence_score=0.0,
+            needs_review=needs_review,
             decision_trace=context.decision_trace or [],
         )
 

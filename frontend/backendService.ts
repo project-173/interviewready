@@ -24,6 +24,9 @@ interface ChatResponse {
   content?: string;
   reasoning?: string;
   confidence_score?: number;
+  metadata?: {
+    needs_review?: boolean;
+  };
   decision_trace?: string[];
   sharp_metadata?: Record<string, any>;
 }

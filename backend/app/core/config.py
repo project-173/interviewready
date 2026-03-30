@@ -66,6 +66,20 @@ class Settings(BaseSettings):
     MOCK_CONTENT_STRENGTH_AGENT: bool = False
     MOCK_JOB_ALIGNMENT_AGENT: bool = False
     MOCK_INTERVIEW_COACH_AGENT: bool = False
+
+    # Extractor HITL configuration
+    EXTRACTOR_AUTO_PROCEED_THRESHOLD: float = 0.9
+    EXTRACTOR_HITL_TIMEOUT_MINUTES: int = 30
+    EXTRACTOR_HITL_FALLBACK: str = "proceed"  # proceed | fail | queue
+
+    # Extractor confidence weighting
+    EXTRACTOR_FIELD_WEIGHTS: dict = {
+        "required": 2.0,
+        "important": 1.5,
+        "optional": 1.0,
+    }
+    EXTRACTOR_UNCERTAINTY_WEIGHT: float = 0.0
+    EXTRACTOR_UNCERTAINTY_VALIDATION_COMPLETE: bool = False
     
     class Config:
         env_file = ".env"

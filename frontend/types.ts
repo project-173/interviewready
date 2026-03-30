@@ -148,6 +148,9 @@ export interface SharedState {
   alignmentReport: AlignmentReport | null;
   interviewHistory: InterviewMessage[];
   interviewMode?: InterviewMode;
+  extractionReview?: {
+    needsReview: boolean;
+  } | null;
 }
 
 export type ResumeLookupResult = {

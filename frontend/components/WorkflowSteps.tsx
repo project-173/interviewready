@@ -2,23 +2,97 @@ import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { AlignmentReport, ContentStrengthReport, ResumeSchema, ResumeCriticReport } from '../types';
 
-export const UploadStep: React.FC<{ onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void }> = ({ onUpload }) => (
-  <div className="animate-in fade-in slide-in-from-bottom-2 duration-400">
-    <div className="mb-8">
-      <h3 className="text-xl font-semibold text-slate-900 mb-1.5">Resume Discovery</h3>
-      <p className="text-[13px] text-slate-500 leading-relaxed">Let's extract your professional DNA. Upload your resume to start the optimization engine.</p>
-    </div>
-    
-    <label className="flex flex-col items-center justify-center border border-slate-200 rounded-xl p-12 cursor-pointer hover:bg-slate-50/50 hover:border-slate-300 transition-all group relative overflow-hidden">
-      <div className="w-12 h-12 bg-white border border-slate-100 rounded-lg flex items-center justify-center mb-4 shadow-sm group-hover:scale-105 transition-transform">
-        <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+export const UploadStep: React.FC<{
+  onUploadSubmit: (file: File | null) => void; // null = use manual resume from preview panel
+  reviewNotice?: {
+    needsReview: boolean;
+  } | null;
+}> = ({ onUploadSubmit, reviewNotice }) => {
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+
+  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadedFile(file);
+  };
+
+  const handleDeleteFile = () => {
+    setUploadedFile(null);
+  };
+
+  const handleAnalyze = () => {
+    onUploadSubmit(uploadedFile);
+  };
+
+  return (
+    <div className="animate-in fade-in slide-in-from-bottom-2 duration-400">
+      <div className="mb-8">
+        <h3 className="text-xl font-semibold text-slate-900 mb-1.5">
+          Resume Discovery
+        </h3>
+        <p className="text-[13px] text-slate-500 leading-relaxed">
+          Upload a resume or use your edited resume preview. Analysis only runs when you trigger it.
+        </p>
       </div>
-      <span className="text-xs font-semibold text-slate-900 mb-1">Upload Resume</span>
-      <span className="text-[11px] text-slate-400">PDF, TXT, or MD up to 10MB</span>
-      <input type="file" className="hidden" onChange={onUpload} accept=".pdf,.txt,.md" />
-    </label>
-  </div>
-);
+
+      {reviewNotice?.needsReview && (
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12px] text-amber-800">
+          <div className="text-[11px] font-semibold uppercase tracking-widest">
+            Low Extraction Confidence
+          </div>
+          <p className="mt-1 text-[11px] text-amber-700">
+            You can remove the file and rely on your manually edited resume instead.
+          </p>
+        </div>
+      )}
+
+      <label className="flex flex-col items-center justify-center border border-slate-200 rounded-xl p-12 cursor-pointer hover:bg-slate-50/50 hover:border-slate-300 transition-all group">
+        <div className="w-12 h-12 bg-white border border-slate-100 rounded-lg flex items-center justify-center mb-4 shadow-sm group-hover:scale-105 transition-transform">
+          <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+          </svg>
+        </div>
+        <span className="text-xs font-semibold text-slate-900 mb-1">
+          Upload Resume
+        </span>
+        <span className="text-[11px] text-slate-400">
+          PDF, TXT, or MD up to 10MB
+        </span>
+        <input
+          type="file"
+          className="hidden"
+          onChange={handleUpload}
+          accept=".pdf,.txt,.md"
+        />
+      </label>
+
+      {uploadedFile && (
+        <div className="mt-4 flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg">
+          <span className="text-[12px] text-slate-700 font-medium truncate">
+            {uploadedFile.name}
+          </span>
+          <button
+            onClick={handleDeleteFile}
+            className="text-[11px] text-red-500 hover:text-red-700 font-semibold"
+          >
+            Remove
+          </button>
+        </div>
+      )}
+
+      {/* CTA */}
+      <div className="mt-6">
+        <button
+          onClick={handleAnalyze}
+          className="w-full bg-slate-900 text-white text-[12px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 transition-all"
+        >
+          Analyze Resume
+        </button>
+      </div>
+    </div>
+  );
+};
 
 export const CriticStep: React.FC<{ report: ResumeCriticReport; resume?: ResumeSchema | null; onApprove: () => void }> = ({ report, resume, onApprove }) => {
   const issues = Array.isArray(report.issues) ? report.issues : [];

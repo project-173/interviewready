@@ -72,9 +72,11 @@ async def chat_endpoint(
                 internal_response = await run_in_threadpool(
                     orchestrator.orchestrate, chat_request, context
                 )
+                payload = _extract_api_payload(internal_response)
+                payload = _attach_payload_metadata(payload, internal_response)
                 result = ChatApiResponse(
                     agent=internal_response.agent_name,
-                    payload=_extract_api_payload(internal_response),
+                    payload=payload
                 )
                 langfuse.update_current_span(
                     output={
@@ -116,3 +118,24 @@ def _parse_json_payload(content: str) -> dict[str, Any] | list[Any] | None:
     except Exception as exc:
         logger.warning(f"Failed to parse JSON payload in chat endpoint: {exc}", content_preview=content[:100])
     return None
+
+
+def _attach_payload_metadata(
+    payload: dict[str, Any] | list[Any] | str,
+    response: AgentResponse,
+) -> dict[str, Any] | list[Any] | str:
+    """Attach response metadata to payload when payload is a JSON object."""
+    if not isinstance(payload, dict):
+        return payload
+
+    metadata = dict(payload.get("metadata") or {})
+    metadata.update(
+        {
+            "confidence_score": response.confidence_score,
+            "needs_review": response.needs_review,
+            "low_confidence_fields": response.low_confidence_fields or [],
+        }
+    )
+    merged = dict(payload)
+    merged["metadata"] = metadata
+    return merged

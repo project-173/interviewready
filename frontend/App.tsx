@@ -40,7 +40,8 @@ const AppContent: React.FC = () => {
       criticReport: null,
       contentReport: null,
       alignmentReport: null,
-      interviewHistory: []
+      interviewHistory: [],
+      extractionReview: null
     };
   });
 
@@ -62,7 +63,8 @@ const AppContent: React.FC = () => {
         criticReport: null,
         contentReport: null,
         alignmentReport: null,
-        interviewHistory: []
+        interviewHistory: [],
+        extractionReview: null
       });
       setError(null);
     }
@@ -213,8 +215,13 @@ const WorkflowController: React.FC<{
   chatEndRef: React.RefObject<HTMLDivElement>;
 }> = ({ state, setState, setError, chatEndRef }) => {
   const { startLoading, updateProgress, stopLoading } = useLoading();
+  const [manualResumeText, setManualResumeText] = useState('');
+  const [manualResumeError, setManualResumeError] = useState<string | null>(null);
 
   const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+  const isRecord = (value: unknown): value is Record<string, any> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
 
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -229,18 +236,27 @@ const WorkflowController: React.FC<{
     });
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+const handleUploadSubmit = async (file: File | null) => {
+  setError(null);
+  setManualResumeError(null);
 
-    startLoading('Analyzing your resume...', ['Uploading file', 'Extracting content', 'Analyzing structure', 'Generating insights']);
-    setError(null);
+  // CASE 1: File provided → extract → critic
+  if (file) {
+    startLoading('Analyzing your resume...', [
+      'Uploading file',
+      'Extracting content',
+      'Analyzing structure',
+      'Generating insights'
+    ]);
+
     try {
       if (file.type === 'application/pdf') {
         updateProgress(25, 0);
+
         const base64 = await fileToBase64(file);
 
         updateProgress(50, 1);
+
         const request: ChatRequest = {
           intent: 'RESUME_CRITIC',
           resumeData: null,
@@ -248,37 +264,127 @@ const WorkflowController: React.FC<{
           messageHistory: [],
           resumeFile: { data: base64, fileType: 'pdf' }
         };
-        
+
         updateProgress(75, 2);
+
         const response = await backendService.callChatEndpoint(request);
         const parsedResume = await backendService.fetchCurrentResume();
-        const critiqueData =
-          response.payload && typeof response.payload === 'object' && !Array.isArray(response.payload)
-            ? response.payload
-            : {};
 
         let responseData;
         try {
           responseData = response.payload || JSON.parse(response.content || '{}');
-        } catch (error) {
-          console.error('Failed to parse backend response:', error);
+        } catch {
           throw new Error('Invalid response from backend');
         }
 
-        console.log('responseData', responseData);
+        const payloadMetadata =
+          isRecord(response.payload) && isRecord((response.payload as any).metadata)
+            ? (response.payload as any).metadata
+            : null;
+
+        const needsReview = Boolean(payloadMetadata?.needs_review);
 
         updateProgress(90, 3);
+
+        if (needsReview) {
+          setState(prev => ({
+            ...prev,
+            currentResume: parsedResume || prev.currentResume,
+            history: parsedResume ? [...prev.history, parsedResume] : prev.history,
+            criticReport: null,
+            status: WorkflowStatus.IDLE,
+            extractionReview: {
+              needsReview: true,
+            }
+          }));
+
+          updateProgress(100, 3);
+          return;
+        }
+
         setState(prev => ({
           ...prev,
           currentResume: parsedResume || prev.currentResume,
           history: parsedResume ? [...prev.history, parsedResume] : prev.history,
           criticReport: responseData,
-          status: WorkflowStatus.AWAITING_CRITIC_APPROVAL
+          status: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
+          extractionReview: null,
         }));
+
         updateProgress(100, 3);
       }
     } catch (err: any) {
       setError(err.message || "Failed to process resume");
+    } finally {
+      stopLoading();
+    }
+
+    return;
+  }
+
+  // CASE 2: No file → use resume from preview panel
+  if (!state.currentResume) {
+    setError('No resume available. Please upload or edit your resume.');
+    return;
+  }
+
+  startLoading('Analyzing your resume...', [
+    'Validating resume',
+    'Analyzing structure',
+    'Generating insights'
+  ]);
+
+  try {
+    updateProgress(50, 1);
+
+    const report = await backendService.resumeCriticAgent(state.currentResume);
+
+    updateProgress(100, 2);
+
+    setState(prev => ({
+      ...prev,
+      criticReport: report,
+      status: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
+      extractionReview: null,
+    }));
+  } catch (err: any) {
+    setError(err.message || 'Failed to analyze resume');
+  } finally {
+    stopLoading();
+  }
+};
+
+  const submitManualResume = async () => {
+    setManualResumeError(null);
+    let parsed: any;
+    try {
+      parsed = JSON.parse(manualResumeText);
+    } catch (error) {
+      setManualResumeError('Manual resume data must be valid JSON.');
+      return;
+    }
+
+    if (!parsed || typeof parsed !== 'object') {
+      setManualResumeError('Manual resume data must be a JSON object.');
+      return;
+    }
+
+    startLoading('Analyzing your resume...', ['Validating manual input', 'Analyzing structure', 'Generating insights']);
+    try {
+      updateProgress(35, 0);
+      const report = await backendService.resumeCriticAgent(parsed);
+      updateProgress(100, 2);
+      setState(prev => ({
+        ...prev,
+        currentResume: parsed,
+        history: [...prev.history, parsed],
+        criticReport: report,
+        status: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
+        extractionReview: null,
+      }));
+      setManualResumeText('');
+    } catch (err: any) {
+      setManualResumeError(err.message || 'Failed to process manual resume data.');
     } finally {
       stopLoading();
     }
@@ -455,7 +561,12 @@ const WorkflowController: React.FC<{
   return (
     <>
       <a onClick={() => console.log(state)}>Check state</a>
-      {(state.status === WorkflowStatus.IDLE || state.status === WorkflowStatus.EXTRACTING) && <UploadStep onUpload={handleFileUpload} />}
+      {(state.status === WorkflowStatus.IDLE || state.status === WorkflowStatus.EXTRACTING) && (
+        <UploadStep
+          onUploadSubmit={handleUploadSubmit}
+          reviewNotice={state.extractionReview}
+        />
+      )}
       {(state.status === WorkflowStatus.CRITIQUING || state.status === WorkflowStatus.AWAITING_CRITIC_APPROVAL) && state.criticReport && (
         <CriticStep report={state.criticReport} resume={state.currentResume} onApprove={approveCritic} />
       )}
