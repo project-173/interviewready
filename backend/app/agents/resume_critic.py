@@ -17,7 +17,7 @@ from ..models.session import SessionContext
 
 class ResumeCriticAgent(BaseAgent):
     """Agent for analyzing resume structure, ATS compatibility, and impact."""
-    USE_MOCK_RESPONSE = True
+    USE_MOCK_RESPONSE = settings.MOCK_RESUME_CRITIC_AGENT
     MOCK_RESPONSE_KEY = "ResumeCriticAgent"
 
     SYSTEM_PROMPT = (
@@ -31,7 +31,7 @@ class ResumeCriticAgent(BaseAgent):
 
          ISSUE TYPES:
         - ats: keyword gaps, formatting that breaks parsers, missing standard sections
-        - structure: section ordering, length, whitespace, inconsistent formatting
+        - structure: section ordering, length, whitespace, inconsistent formatting. Only evaluate displayed resume structure that user sees, not JSON structure.
         - impact: missing metrics, weak or passive language at a section level
         - readability: clarity, overcrowding, inconsistent tense or style
 
