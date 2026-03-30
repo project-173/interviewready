@@ -249,7 +249,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                 return invalid_keys.get(question_num, "InterviewCoachAgent_Q5_Invalid")
             if question_num < state["total_questions"]:
                 return f"InterviewCoachAgent_Q{question_num + 1}"
-            return "InterviewCoachAgent_Q5"
+            return "InterviewCoachAgent_Summary"
         if question_num == 1:
             return "InterviewCoachAgent"
         if question_num <= state["total_questions"]:
