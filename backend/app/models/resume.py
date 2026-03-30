@@ -13,7 +13,7 @@ from .base import (
 
 
 class Resume(BaseModel):
-    """JSON Resume-compatible model (basics excluded)."""
+    """JSON Resume-compatible model."""
 
     work: List[Work] = Field(default_factory=list)
     education: List[Education] = Field(default_factory=list)

@@ -71,7 +71,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
               Resume Preview
             </h2>
             <div className="flex gap-4 mt-2 text-xs font-medium text-slate-400">
-              <span>JSON Resume (basics excluded)</span>
+              <span>JSON Resume</span>
             </div>
           </div>
           <button className="text-[11px] font-bold text-slate-500 border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all flex items-center gap-2 shadow-sm">

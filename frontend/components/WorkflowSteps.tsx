@@ -62,7 +62,7 @@ export const CriticStep: React.FC<{ report: ResumeCriticReport; resume?: ResumeS
                     </div>
                     {resolved.isValid && (
                       <div className="text-slate-500">
-                        Evidence: <span className="text-slate-700">
+                        Evidence: <span className="text-slate-700 line-clamp-5">
                           {resolved.usedSectionAsEvidence
                             ? capitalizeFirst(resolved.display || '')
                             : resolved.display}
