@@ -12,7 +12,7 @@ from app.models.session import SessionContext
 class DummyGeminiService:
     """Dummy Gemini service for testing."""
 
-    def generate_response(self, system_prompt: str, user_input: str, context=None) -> str:
+    def generate_response(self, system_prompt: str, user_input: str) -> str:
         return '{"current_question_number": 1, "question": "Test question"}'
 
 
@@ -31,8 +31,8 @@ def test_invalid_answers():
             "asked_questions": [],
             "user_answers": [],
             "interview_active": True,
-            "total_questions": 5
-        }
+            "total_questions": 5,
+        },
     )
 
     print("Testing InterviewCoachAgent mock responses for invalid answers...\n")
@@ -51,14 +51,20 @@ def test_invalid_answers():
         context.shared_memory["current_question_index"] = question_index
 
         # Simulate invalid answer (is_follow_up=True, is_valid=False)
-        mock_key = agent._get_dynamic_mock_key(context, is_follow_up=True, is_valid=False)
-        print(f"Question {question_index + 1} invalid answer -> Mock key: {mock_key} (expected: {expected_key})")
+        mock_key = agent._get_dynamic_mock_key(
+            context, is_follow_up=True, is_valid=False
+        )
+        print(
+            f"Question {question_index + 1} invalid answer -> Mock key: {mock_key} (expected: {expected_key})"
+        )
 
         # Verify the mock response exists
         response_str = agent.get_mock_response_by_key(mock_key)
         if response_str:
             response = json.loads(response_str)
-            print(f"  ✓ Response found - Question: {response.get('question', 'N/A')[:50]}...")
+            print(
+                f"  ✓ Response found - Question: {response.get('question', 'N/A')[:50]}..."
+            )
             print(f"  ✓ Feedback: {response.get('feedback', 'N/A')[:50]}...")
         else:
             print(f"  ✗ No response found for key: {mock_key}")
@@ -69,16 +75,21 @@ def test_invalid_answers():
     print("Testing normal question progression:")
     for question_index in range(5):
         context.shared_memory["current_question_index"] = question_index
-        mock_key = agent._get_dynamic_mock_key(context, is_follow_up=False, is_valid=True)
+        mock_key = agent._get_dynamic_mock_key(
+            context, is_follow_up=False, is_valid=True
+        )
         response_str = agent.get_mock_response_by_key(mock_key)
         if response_str:
             response = json.loads(response_str)
-            q_num = response.get('current_question_number', 'N/A')
-            print(f"  Question {question_index + 1} -> Mock key: {mock_key}, Response Q#: {q_num}")
+            q_num = response.get("current_question_number", "N/A")
+            print(
+                f"  Question {question_index + 1} -> Mock key: {mock_key}, Response Q#: {q_num}"
+            )
         else:
             print(f"  ✗ No response for Question {question_index + 1}")
 
     print("\nTest completed!")
+
 
 if __name__ == "__main__":
     test_invalid_answers()

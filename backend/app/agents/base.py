@@ -98,9 +98,9 @@ class BaseAgent(ABC, BaseAgentProtocol):
                 return parsed
         except Exception as e:
             logger.warning(
-                "Failed to load mock responses file", 
+                "Failed to load mock responses file",
                 path=str(cls.MOCK_RESPONSES_FILE),
-                error=str(e)
+                error=str(e),
             )
 
         cls._mock_responses_cache = {}
@@ -183,7 +183,6 @@ class BaseAgent(ABC, BaseAgentProtocol):
                             response = self.mock_service.generate_response(
                                 system_prompt=self.system_prompt,
                                 user_input=input_text,
-                                context=context,
                             )
                         else:
                             # Use real Gemini service
@@ -195,7 +194,6 @@ class BaseAgent(ABC, BaseAgentProtocol):
                             response = self.gemini_service.generate_response(
                                 system_prompt=self.system_prompt,
                                 user_input=input_text,
-                                context=context,
                             )
 
                         span.update(output=response)

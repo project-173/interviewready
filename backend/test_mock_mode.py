@@ -19,7 +19,7 @@ from app.models.session import SessionContext
 class DummyGeminiService:
     """Fallback Gemini service for tests."""
 
-    def generate_response(self, system_prompt: str, user_input: str, context=None) -> str:
+    def generate_response(self, system_prompt: str, user_input: str) -> str:
         if "Resume Critic" in system_prompt:
             return json.dumps(
                 {

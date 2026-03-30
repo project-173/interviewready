@@ -95,17 +95,17 @@ Provide a JSON response with:
         try:
             usage_details: Optional[Dict[str, int]] = None
             if hasattr(self.gemini_service, "generate_response_with_usage"):
-                response, usage_details = self.gemini_service.generate_response_with_usage(
-                    system_prompt=system_prompt,
-                    user_input=judge_input,
-                    context=None,
-                    temperature=self.temperature,
+                response, usage_details = (
+                    self.gemini_service.generate_response_with_usage(
+                        system_prompt=system_prompt,
+                        user_input=judge_input,
+                        temperature=self.temperature,
+                    )
                 )
             else:
                 response = self.gemini_service.generate_response(
                     system_prompt=system_prompt,
                     user_input=judge_input,
-                    context=None,
                     temperature=self.temperature,
                 )
 
@@ -357,7 +357,7 @@ Provide your evaluation as valid JSON."""
                 metadata["session_id"] = session_id
             if run_name:
                 metadata["run_name"] = run_name
-            
+
             self.langfuse.create_score(
                 name="judge_quality_score",
                 value=evaluation.quality_score,
