@@ -4,8 +4,18 @@ import {
   WorkflowStatus,
   ChatRequest,
   InterviewMode,
-  InterviewMessage
+  InterviewMessage,
+  Resume
 } from './types';
+
+const DEFAULT_RESUME: Resume = {
+  work: [],
+  education: [],
+  awards: [],
+  certificates: [],
+  skills: [],
+  projects: []
+};
 import {
   contentStrengthAgent, 
   alignmentAgent,
@@ -33,7 +43,7 @@ const AppContent: React.FC = () => {
     const saved = localStorage.getItem('interview_ready_state');
     if (saved) return JSON.parse(saved);
     return {
-      currentResume: null,
+      currentResume: DEFAULT_RESUME,
       history: [],
       jobDescription: '',
       status: WorkflowStatus.IDLE,
@@ -56,7 +66,7 @@ const AppContent: React.FC = () => {
     if (confirm('Reset current progress? This will clear all data and start over.')) {
       localStorage.removeItem('interview_ready_state');
       setState({
-        currentResume: null,
+        currentResume: DEFAULT_RESUME,
         history: [],
         jobDescription: '',
         status: WorkflowStatus.IDLE,

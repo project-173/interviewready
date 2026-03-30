@@ -15,6 +15,7 @@ export const UploadStep: React.FC<{
     if (!file) return;
 
     setUploadedFile(file);
+    onUploadSubmit(file);
   };
 
   const handleDeleteFile = () => {
@@ -81,15 +82,17 @@ export const UploadStep: React.FC<{
         </div>
       )}
 
-      {/* CTA */}
-      <div className="mt-6">
-        <button
-          onClick={handleAnalyze}
-          className="w-full bg-slate-900 text-white text-[12px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 transition-all"
-        >
-          Analyze Resume
-        </button>
-      </div>
+      {/* CTA - only show when no file uploaded */}
+      {!uploadedFile && (
+        <div className="mt-6">
+          <button
+            onClick={() => onUploadSubmit(null)}
+            className="w-full bg-slate-900 text-white text-[12px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 transition-all"
+          >
+            Analyze Resume
+          </button>
+        </div>
+      )}
     </div>
   );
 };

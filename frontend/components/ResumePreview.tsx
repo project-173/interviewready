@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Resume } from "../types";
 
 interface ResumePreviewProps {
-  resume: Resume | null;
+  resume: Resume;
 }
 
 const formatRange = (start?: string, end?: string): string => {
@@ -27,7 +27,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
     []
   );
 
-  if (!resume) {
+    if (!resume) {
     return (
       <div className="h-full flex flex-col items-center justify-center text-slate-400 p-8 text-center bg-white">
         <div className="w-16 h-16 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-center mb-4">
