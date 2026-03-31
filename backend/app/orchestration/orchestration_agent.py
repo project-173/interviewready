@@ -37,7 +37,7 @@ except ImportError:  # pragma: no cover
 from app.agents.base import BaseAgentProtocol
 from app.core.config import settings
 from app.core.logging import logger
-from app.governance import SharpGovernanceService
+from app.governance import FairnessService, SharpGovernanceService
 from app.models.agent import (
     ActionPlan,
     AnalysisArtifact,
@@ -77,9 +77,11 @@ class OrchestrationAgent:
         self,
         agent_list: list[BaseAgentProtocol],
         governance: SharpGovernanceService,
+        fairness_service: FairnessService | None = None,
     ):
         self.agent_list = {a.get_name(): a for a in agent_list}
         self.governance = governance
+        self.fairness_service = fairness_service
         self.workflow = self._build_workflow()
 
     def get_agents(self) -> dict[str, BaseAgentProtocol]:
@@ -172,6 +174,10 @@ class OrchestrationAgent:
         )
 
         audited = self.governance.audit(response, input_text)
+        if self.fairness_service is not None:
+            fairness_metadata = self.fairness_service.scan(state.input, audited)
+            audited.sharp_metadata = audited.sharp_metadata or {}
+            audited.sharp_metadata["fairness"] = fairness_metadata
         self._update_context(context, audited, agent_name)
 
         state.response = audited

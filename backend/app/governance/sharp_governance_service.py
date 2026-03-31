@@ -1,7 +1,7 @@
-"""SHARP governance service - Lightweight keyword and pattern-based checks.
+"""SHARP governance service ported from Java implementation.
 
-Uses simple, fast heuristics for bias and hallucination detection.
-Langfuse handles post-hoc evaluation and scoring.
+Now integrated with AI-based bias detection, hallucination evaluation,
+and explainability services for more robust governance.
 """
 
 from __future__ import annotations
@@ -22,6 +22,11 @@ except ImportError:  # pragma: no cover
 
 from app.core.config import settings
 from app.models.agent import AgentResponse
+from app.governance.bias_detection_service import BiasDetectionService
+from app.governance.hallucination_evaluation_service import (
+    HallucinationEvaluationService,
+)
+from app.governance.explainability_service import ExplainabilityService
 
 langfuse = Langfuse()
 
@@ -58,31 +63,11 @@ class GovernanceFlags:
 
 
 class SharpGovernanceService:
-    """Lightweight audit and risk evaluation service for agent responses.
+    """Audit and risk evaluation service for agent responses.
 
-    Uses keyword and pattern-based checks with Langfuse for scoring.
+    Now integrated with AI-based services for more robust bias detection,
+    hallucination evaluation, and explainability.
     """
-
-    # Lightweight bias keywords and patterns
-    BIAS_KEYWORDS = {
-        "age": [
-            "young", "energetic", "fresh", "native", "digital native",
-            "old", "senior", "retired", "millennial", "boomer", "gen z"
-        ],
-        "gender": [
-            "he", "she", "him", "her", "guy", "girl", "man", "woman",
-            "mother", "father", "wife", "husband"
-        ],
-        "race": [
-            "caucasian", "asian", "african", "hispanic", "white", "black"
-        ],
-        "religion": [
-            "christian", "muslim", "jewish", "hindu", "buddhist", "atheist"
-        ],
-        "disability": [
-            "disabled", "wheelchair", "blind", "deaf", "mental illness"
-        ],
-    }
 
     def __init__(self) -> None:
         self._agent_validators: dict[
@@ -92,13 +77,17 @@ class SharpGovernanceService:
             "ContentStrengthAgent": self._validate_content_strength_agent,
             "InterviewCoachAgent": self._validate_interview_coach_agent,
         }
+        # Initialize AI-based governance services
+        self.bias_detector = BiasDetectionService()
+        self.hallucination_evaluator = HallucinationEvaluationService()
+        self.explainability_service = ExplainabilityService()
 
     def audit(
         self,
         response: AgentResponse,
         original_input: str | None = None,
     ) -> AgentResponse:
-        """Audit response and attach governance metadata using lightweight checks."""
+        """Audit response and attach governance metadata using AI services."""
         metadata = dict(response.sharp_metadata or {})
         self._ensure_governance_container(metadata)
 
@@ -113,7 +102,7 @@ class SharpGovernanceService:
             int(time.time() * 1000),
         )
 
-        # Lightweight hallucination check
+        # Use AI-based hallucination evaluation
         hallucination_check = self._check_hallucination(response, original_input)
         self._set_governance_field(
             metadata,
@@ -121,7 +110,7 @@ class SharpGovernanceService:
             hallucination_check,
         )
 
-        # Lightweight bias check
+        # Use AI-based bias detection
         bias_result = self._check_bias(response, original_input)
         metadata["bias_check"] = bias_result
 
@@ -132,6 +121,10 @@ class SharpGovernanceService:
             confidence_check,
         )
 
+        # Generate explainability insights
+        explanation = self._generate_decision_explanation(response, original_input)
+        metadata["explainability"] = explanation
+
         validator = self._agent_validators.get(response.agent_name or "")
         if validator:
             validator(response, metadata, original_input)
@@ -141,7 +134,7 @@ class SharpGovernanceService:
             flags.append(GovernanceFlags.HALLUCINATION_RISK)
         if not confidence_check:
             flags.append(GovernanceFlags.LOW_CONFIDENCE)
-        if bias_result.get("risk_score", 0.0) > 0.3:  # Lower threshold for lightweight
+        if bias_result.get("risk_score", 0.0) > 0.6:
             flags.append(GovernanceFlags.BIAS_REVIEW_REQUIRED)
 
         if flags:
@@ -181,7 +174,6 @@ class SharpGovernanceService:
         self._set_governance_field(metadata, GovernanceFieldNames.AUDIT_FLAGS, flags)
 
     def _publish_governance_trace(self, metadata: dict[str, Any]) -> None:
-        """Publish governance metadata to Langfuse for scoring."""
         try:
             langfuse.update_current_span(
                 metadata={
@@ -198,47 +190,85 @@ class SharpGovernanceService:
         response: AgentResponse,
         original_input: str | None,
     ) -> dict[str, Any]:
-        """Lightweight keyword-based bias detection."""
+        """Check for bias signals using AI-based detection."""
         if not response.content:
             return {"risk_score": 0.0, "bias_signals": []}
 
-        content_lower = (response.content or "").lower()
-        input_lower = (original_input or "").lower()
+        # Scan response content for bias
+        response_bias = self.bias_detector.scan(response.content or "", context="response")
 
-        # Find bias keywords in response
-        response_biases = self._find_bias_keywords(content_lower)
-        input_biases = self._find_bias_keywords(input_lower) if original_input else {}
+        # If we have original input (e.g., job description), also scan that
+        input_bias = {}
+        if original_input:
+            input_bias = self.bias_detector.scan(original_input, context="input")
 
         # Combine results
-        all_biases = {}
-        for category, found in response_biases.items():
-            all_biases[category] = all_biases.get(category, 0) + len(found)
-        for category, found in input_biases.items():
-            all_biases[category] = all_biases.get(category, 0) + len(found)
+        result = {
+            "response_bias": response_bias,
+            "input_bias": input_bias,
+            "risk_score": max(
+                response_bias.get("risk_score", 0.0),
+                input_bias.get("risk_score", 0.0),
+            ),
+            "protected_attributes": list(
+                set(
+                    response_bias.get("protected_attributes_found", [])
+                    + input_bias.get("protected_attributes_found", [])
+                )
+            ),
+            "bias_signals": list(
+                set(
+                    response_bias.get("bias_signals_detected", [])
+                    + input_bias.get("bias_signals_detected", [])
+                )
+            ),
+        }
+        return result
 
-        # Calculate risk: 0.1 per category found (max 0.7 for multiple)
-        risk_score = min(len(all_biases) * 0.1, 0.7)
+    def _generate_decision_explanation(
+        self,
+        response: AgentResponse,
+        original_input: str | None,
+    ) -> dict[str, Any]:
+        """Generate explainability insights for the decision."""
+        context = {}
+        if original_input:
+            context["input"] = original_input[:500]  # Truncate for safety
+        if response.reasoning:
+            context["reasoning"] = response.reasoning
 
-        bias_signals = []
-        for category, count in all_biases.items():
-            bias_signals.append(f"{category} ({count} keywords)")
+        # Use explainability service to attribute decision
+        explanation = self.explainability_service.attribute_decision(
+            decision_output=response.content or "",
+            input_context=context,
+            agent_name=response.agent_name,
+        )
+
+        # Also generate a human-readable explanation
+        readable_explanation = self.explainability_service.generate_explanation(
+            decision=response.content or "",
+            attributions=explanation.get("attributions", []),
+            agent_name=response.agent_name,
+            audience="reviewer",
+        )
 
         return {
-            "response_bias": {"keywords": response_biases},
-            "input_bias": {"keywords": input_biases},
-            "risk_score": risk_score,
-            "protected_attributes": list(all_biases.keys()),
-            "bias_signals": bias_signals,
+            "attribution": explanation,
+            "explanation": readable_explanation,
+            "transparency_score": explanation.get("transparency_score", 0.0),
         }
 
-    def _find_bias_keywords(self, text: str) -> dict[str, list[str]]:
-        """Find bias keywords in text. Returns dict of category -> found keywords."""
-        found = {}
-        for category, keywords in self.BIAS_KEYWORDS.items():
-            found_keywords = [kw for kw in keywords if kw in text]
-            if found_keywords:
-                found[category] = found_keywords
-        return found
+    def _publish_governance_trace(self, metadata: dict[str, Any]) -> None:
+        try:
+            langfuse.update_current_span(
+                metadata={
+                    GovernanceFieldNames.GOVERNANCE: metadata[
+                        GovernanceFieldNames.GOVERNANCE
+                    ]
+                }
+            )
+        except Exception:
+            pass
 
     def _validate_interview_coach_agent(
         self,
@@ -280,6 +310,28 @@ class SharpGovernanceService:
             self._append_flag(metadata, GovernanceFlags.BIAS_REVIEW_REQUIRED)
             self._append_flag(metadata, GovernanceFlags.REQUIRES_HUMAN_REVIEW)
 
+        # Use AI-based bias detection on interview context if available
+        if original_input:
+            bias_check = self.bias_detector.scan(original_input, context="interview")
+            if bias_check.get("risk_score", 0.0) > 0.5:
+                self._set_governance_field(
+                    metadata,
+                    GovernanceFieldNames.AUDIT,
+                    GovernanceAuditStatus.FLAGGED,
+                )
+                self._append_flag(metadata, GovernanceFlags.BIAS_REVIEW_REQUIRED)
+                self._append_flag(metadata, GovernanceFlags.REQUIRES_HUMAN_REVIEW)
+                metadata["ai_bias_detection"] = bias_check
+
+    def contains_quantifiable_claim(self, text: str | None) -> bool:
+        """Return true when text contains measurable claims."""
+        if not text:
+            return False
+        return any(
+            re.search(pattern, text, flags=re.IGNORECASE)
+            for pattern in settings.GOVERNANCE_QUANTIFIABLE_PATTERNS
+        )
+
     def calculate_hallucination_risk(
         self,
         original: str | None,
@@ -311,20 +363,25 @@ class SharpGovernanceService:
         response: AgentResponse,
         original_input: str | None,
     ) -> bool:
-        """Lightweight hallucination check using heuristics."""
+        """Check hallucination risk using AI-based semantic evaluation."""
         if not original_input:
             return True
 
-        # Use existing heuristic method
-        risk = self.calculate_hallucination_risk(original_input, response.content)
+        # Use AI-based hallucination evaluation
+        result = self.hallucination_evaluator.evaluate_hallucination_risk(
+            source=original_input,
+            generated=response.content,
+        )
 
-        # Store hallucination risk in metadata
+        # Store hallucination risk in metadata for audit
         sharp_metadata = response.sharp_metadata or {}
-        sharp_metadata[GovernanceFieldNames.HALLUCINATION_RISK] = risk
+        sharp_metadata[GovernanceFieldNames.HALLUCINATION_RISK] = result.get(
+            "hallucination_risk", 0.0
+        )
         response.sharp_metadata = sharp_metadata
 
         # Pass if risk below threshold
-        return risk < settings.GOVERNANCE_HALLUCINATION_RISK_THRESHOLD
+        return result.get("hallucination_risk", 0.0) < settings.GOVERNANCE_HALLUCINATION_RISK_THRESHOLD
 
     def _check_confidence_threshold(self, response: AgentResponse) -> bool:
         score = response.confidence_score
