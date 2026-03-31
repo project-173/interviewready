@@ -127,9 +127,8 @@ class AlignmentReport(BaseModel):
 
     skillsMatch: Optional[List[str]] = Field(default_factory=list)
     missingSkills: Optional[List[str]] = Field(default_factory=list)
-    experienceMatch: Optional[str] = None
-    fitScore: Optional[int] = None
-    reasoning: Optional[str] = None
+    experienceMatch: Optional[List[str]] = Field(default_factory=list)
+    summary: Optional[str] = None
 
 
 class ContentSkill(BaseModel):

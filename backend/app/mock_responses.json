@@ -61,16 +61,18 @@
     },
     "JobAlignmentAgent": {
         "skillsMatch": [
-            "Python",
-            "SQL",
-            "Machine Learning"
+            "skills[0].name", 
+            "skills[1].name"
         ],
         "missingSkills": [
             "Kubernetes",
             "AWS"
         ],
-        "experienceMatch": "good",
-        "fitScore": 75,
+        "experienceMatch": [
+            "work[0].highlights[0]", 
+            "work[1].highlights[3]", 
+            "projects[0].highlights[1]"
+        ],
         "reasoning": "Candidate has strong technical foundation matching core requirements"
     },
     "InterviewCoachAgent": {

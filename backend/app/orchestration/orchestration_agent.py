@@ -210,7 +210,7 @@ class OrchestrationAgent:
                 if response.needs_review:
                     return self._failure(
                     "Failed to extract meaningful information from resume file.",
-                    str(e),
+                    "Failed to extract meaningful information from resume file.",
                     context,
                     needs_review=True
                 )
