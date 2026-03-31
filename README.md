@@ -1038,6 +1038,19 @@ uv run python -m evals.run_evals --sync-langfuse-dataset "interviewready-regular
 uv run python -m evals.run_evals --edge-cases --sync-langfuse-dataset "interviewready-edge-cases"
 ```
 
+## Documentation
+
+Comprehensive project documentation is available in the [`docs/`](docs/) directory:
+
+| Document | Description |
+|----------|-------------|
+| [`docs/SYSTEM_ARCHITECTURE.md`](docs/SYSTEM_ARCHITECTURE.md) | Logical and physical architecture, infrastructure, data flow, and technology justification |
+| [`docs/AGENT_DESIGN.md`](docs/AGENT_DESIGN.md) | Internal logic, reasoning patterns, memory mechanisms, prompt design, and inter-agent communication for each agent |
+| [`docs/RESPONSIBLE_AI.md`](docs/RESPONSIBLE_AI.md) | Fairness, bias mitigation, explainability, HITL, privacy, and governance framework (SHARP) |
+| [`docs/SECURITY_RISK_REGISTER.md`](docs/SECURITY_RISK_REGISTER.md) | AI security risk register covering prompt injection, hallucination, data leakage, and mitigation strategies |
+| [`docs/MLSECOPS_PIPELINE.md`](docs/MLSECOPS_PIPELINE.md) | MLSecOps / LLMSecOps pipeline design: CI/CD, automated AI security tests, model versioning, monitoring, and logging |
+| [`docs/PRD.md`](docs/PRD.md) | Product Requirements Document |
+
 ## Deployment
 
 ### Local Development
@@ -1048,4 +1061,4 @@ docker-compose up --build --build-arg VITE_API_BASE_URL=localhost:8080
 - Backend: `http://localhost:8080`
 
 ### Production Deployment
-Automated deployment to GCP Cloud Run via GitHub Actions. See `.github/workflows/gcp-deploy.yaml` for configuration details.
+Automated deployment to GCP Cloud Run via GitHub Actions. See `.github/workflows/deploy.yml` for configuration details.
