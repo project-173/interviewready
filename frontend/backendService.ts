@@ -51,6 +51,19 @@ interface InterviewCoachPayload {
   final_feedback?: string;
 }
 
+interface InterviewCoachResponse {
+  text: string;
+  confidence_score?: number;
+  reasoning?: string;
+  decision_trace?: string[];
+  improvement_suggestion?: string;
+  answer_score?: number;
+  can_proceed?: boolean;
+  bias_warnings?: string[];
+  governance_flags?: string[];
+  requires_human_review?: boolean;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -109,6 +122,31 @@ export const formatInterviewCoachPayload = (payload: unknown): string => {
   ];
 
   return lines.filter(Boolean).join('\n\n');
+};
+
+const extractTransparencyMetadata = (response: ChatResponse): Omit<InterviewCoachResponse, 'text'> => {
+  const metadata = response.sharp_metadata || {};
+  const payload = parseInterviewCoachPayload(response.payload ?? response.content);
+  
+  // Extract bias flags from audit_flags
+  const biasWarnings = (metadata.bias_flags || []).map((flag: string) => flag.replace('bias_detected_', ''));
+  
+  // Extract governance flags (excluding bias flags)
+  const governanceFlags = ((metadata.audit_flags || []) as string[])
+    .filter((flag: string) => !flag.startsWith('bias_detected_') && flag !== 'bias_detected_in_job_description')
+    .map((flag: string) => flag.replace('_', ' '));
+  
+  return {
+    confidence_score: response.confidence_score || payload?.confidence_score,
+    reasoning: response.reasoning,
+    decision_trace: response.decision_trace,
+    improvement_suggestion: payload?.next_challenge || payload?.feedback,
+    answer_score: payload?.answer_score,
+    can_proceed: payload?.can_proceed,
+    bias_warnings: biasWarnings.length > 0 ? biasWarnings : undefined,
+    governance_flags: governanceFlags.length > 0 ? governanceFlags : undefined,
+    requires_human_review: metadata.requires_human_review || metadata.human_review_recommended,
+  };
 };
 
 class BackendService {
@@ -276,7 +314,7 @@ class BackendService {
     resume: Resume | null | undefined,
     jobDescription: string,
     history: { role: 'user' | 'agent'; text: string }[]
-  ): Promise<string> {
+  ): Promise<InterviewCoachResponse> {
     const request: ChatRequest = {
       intent: 'INTERVIEW_COACH',
       jobDescription,
@@ -285,7 +323,13 @@ class BackendService {
     if (this.hasResumeContent(resume)) request.resumeData = resume;
 
     const response = await this.callChatEndpoint(request);
-    return formatInterviewCoachPayload(response.payload ?? response.content);
+    const formattedText = formatInterviewCoachPayload(response.payload ?? response.content);
+    const transparencyMetadata = extractTransparencyMetadata(response);
+    
+    return {
+      text: formattedText,
+      ...transparencyMetadata,
+    };
   }
 }
 

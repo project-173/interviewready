@@ -84,6 +84,15 @@ class SharpGovernanceService:
             metadata["governance_audit"] = "flagged"
             self._append_flag(metadata, "bias_review_required")
             self._append_flag(metadata, "requires_human_review")
+        
+        # Check for detected bias flags (age, gender, nationality, disability, family_status, religion)
+        bias_flags = metadata.get("bias_flags", [])
+        if bias_flags:
+            metadata["governance_audit"] = "flagged"
+            for bias_category in bias_flags:
+                self._append_flag(metadata, f"bias_detected_{bias_category}")
+            self._append_flag(metadata, "bias_detected_in_job_description")
+            self._append_flag(metadata, "requires_human_review")
 
     def contains_quantifiable_claim(self, text: str | None) -> bool:
         """Return true when text contains measurable claims."""

@@ -30,9 +30,86 @@ class InterviewCoachAgent(BaseAgent):
         "ssn": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
     }
     BIAS_PATTERNS = {
-        "age": re.compile(r"\b(young|recent graduate|digital native|energetic)\b", re.IGNORECASE),
-        "gender": re.compile(r"\b(he|she|him|her|male|female|manpower)\b", re.IGNORECASE),
-        "nationality": re.compile(r"\b(native english|american-born|citizens only)\b", re.IGNORECASE),
+        "age": re.compile(
+            r"\b(young|recent graduate|digital native|energetic|digital immigrant|works better in younger teams|"
+            r"gen z|millennial skills|boomer|old school|fresh blood|youthful|active lifestyle required|"
+            r"high energy|fast-paced environment|keep up with|cutting edge|modern approach|tech-savvy|"
+            r"digital natives|early career|career start|entry-level only|no grey hair|under 30|over 40|"
+            r"retirement age|senior citizen role)\b", 
+            re.IGNORECASE
+        ),
+        "gender": re.compile(
+            r"\b(he|she|him|her|male|female|manpower|prefer male|prefer female|girls?|guys?|rockstar developer|ninja|"
+            r"strong man|woman for the job|gentleman|young lady|stewardess|fireman|businessman|chairman|"
+            r"housewife|maternity friendly|men only|women only|female intuition|masculine|feminine|"
+            r"breast feeding facilities|childcare provider|boys' club|girls' night|brotherhood)\b",
+            re.IGNORECASE
+        ),
+        "nationality": re.compile(
+            r"\b(native english|american-born|citizens only|native speaker|foreign|immigrant|"
+            r"green card holder|english fluency required|accent not acceptable|american accent|"
+            r"no accent|local hire only|requires passport|international travel|visa sponsorship not available|"
+            r"must be local|domestic hire|national preference|eu citizens only|must speak without accent|"
+            r"mother tongue english|born in country|racial background|country of origin)\b",
+            re.IGNORECASE
+        ),
+        "disability": re.compile(
+            r"\b(able-bodied|physically fit|no disabilities|mental health|sanity|disabl|wheelchair accessible not required|"
+            r"must be able-bodied|athletic|mobility required|no mental health issues|no psychiatric history|"
+            r"no chronic illness|perfect health|physically demanding|acrobatic|gymnastics|"
+            r"must climb stairs|no accommodations|accessible facilities not needed|able to work standing|"
+            r"no ada accommodations|fully functional|perfect attendance required|never sick)\b",
+            re.IGNORECASE
+        ),
+        "family_status": re.compile(
+            r"\b(no children|married|single|pregnant|parental|childcare|family-friendly is a perk not requirement|"
+            r"must not have caring responsibilities|family man|mother figure|bachelor|spinster|"
+            r"no family obligations|family responsibilities conflict|childless|no dependents|"
+            r"must be available weekends|24/7 availability|on-call requirement|no time off for family|"
+            r"relocation required|willing to relocate|no school schedule conflicts|no childcare concerns|"
+            r"single focus required|married preference|domestic duties|child support)\b",
+            re.IGNORECASE
+        ),
+        "religion": re.compile(
+            r"\b(christian|jewish|muslim|hindu|buddhist|atheist|religious|church|mosque|synagogue|temple|"
+            r"faith-based|worship|prayer|sabbath|halal|kosher|religious holidays|no religious leave|"
+            r"prayer room not available|sunday work required|friday work required|"
+            r"religious attire not permitted|must observe christmas|no religious accommodations|"
+            r"secular workplace|faith requirement|spiritual alignment|belief system|"
+            r"pastoral care|chaplain|faith community|religious beliefs not accommodated)\b",
+            re.IGNORECASE
+        ),
+        "socioeconomic_status": re.compile(
+            r"\b(ivy league|prestigious university|first-generation|low income|poor background|"
+            r"affluent background|wealthy|private school|elite|upper-class|working-class|"
+            r"unprivileged|disadvantaged|elitist|bourgeois)\b",
+            re.IGNORECASE
+        ),
+        "sexual_orientation": re.compile(
+            r"\b(lgbtq|gay|lesbian|bisexual|straight preference|heterosexual requirement|"
+            r"same-sex partner|domestic partner|spouse equivalent|gay-friendly|"
+            r"sexual orientation|straight and narrow|traditional family|"
+            r"alternative lifestyle|sexual preference)\b",
+            re.IGNORECASE
+        ),
+        "genetic_information": re.compile(
+            r"\b(genetic test|family history|hereditary|dna test|genetic predisposition|"
+            r"genetic disorder|familial|inherited condition|genetic screening)\b",
+            re.IGNORECASE
+        ),
+        "appearance": re.compile(
+            r"\b(attractive|beautiful|handsome|pretty|ugly|fat|thin|slim|build|weight|"
+            r"height requirement|tall candidate|short people|appearance standards|"
+            r"photogenic|model look|physical appearance|must be presentable|"
+            r"dress code strict|cosmetic surgery|tattoo-free|piercing-free)\b",
+            re.IGNORECASE
+        ),
+        "veteran_status": re.compile(
+            r"\b(military service|veteran|non-veteran|active duty|military background|"
+            r"armed forces|prior service|military family|veteran preference not allowed|"
+            r"no military jobs|civilian only)\b",
+            re.IGNORECASE
+        ),
     }
     PROMPT_INJECTION_PATTERNS = [
         re.compile(r"ignore (all )?(previous|prior) instructions", re.IGNORECASE),
@@ -1166,6 +1243,26 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             if model_can_proceed is not None:
                 sharp_metadata["can_proceed"] = model_can_proceed
 
+            # Determine bias severity
+            bias_severity = "info"
+            if bias_flags:
+                if len(bias_flags) > 3 or any(cat in ["disability", "gender", "nationality"] for cat in bias_flags):
+                    bias_severity = "warning"
+                if len(bias_flags) > 5:
+                    bias_severity = "critical"
+
+            # Build improvement suggestions
+            improvement_suggestions = []
+            if bias_flags:
+                improvement_suggestions.append(
+                    f"This job description contains signals of potential bias ({', '.join(bias_flags[:3])}{'...' if len(bias_flags) > 3 else ''}). "
+                    "Consider using more inclusive language."
+                )
+            if security_findings:
+                improvement_suggestions.append(
+                    "Your response contained sensitive personal information which was redacted for privacy."
+                )
+
             response = AgentResponse(
                 agent_name=self.get_name(),
                 content=result,
@@ -1174,7 +1271,29 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                     "answer-quality heuristics, with explainable score and progression metadata."
                 ),
                 confidence_score=self.CONFIDENCE_SCORE,
+                confidence_explanation=(
+                    f"Confidence: {self.CONFIDENCE_SCORE:.0%}. Based on {method_used} with "
+                    f"structured {analysis_type} analysis and governance validation."
+                ),
                 decision_trace=decision_trace,
+                bias_flags=sorted(set(bias_flags)),
+                bias_severity=bias_severity,
+                governance_audit_status="passed" if not (security_findings or bias_flags or prompt_injection_issues) else "flagged",
+                governance_flags=sorted(set([
+                    flag for flag in [
+                        "prompt_injection_blocked" if prompt_injection_issues else None,
+                        "sensitive_content_detected" if security_findings else None,
+                        "bias_detected" if bias_flags else None,
+                        "requires_human_review" if bool(security_findings or bias_flags or prompt_injection_issues) else None,
+                    ] if flag
+                ])),
+                improvement_suggestions=improvement_suggestions,
+                answer_score=model_answer_score,
+                can_proceed=model_can_proceed,
+                next_challenge=(
+                    "Focus on providing specific examples with measurable impact." if model_can_proceed is False
+                    else "Prepare for the next behavioral question with similar focus."
+                ),
                 sharp_metadata=sharp_metadata,
             )
 

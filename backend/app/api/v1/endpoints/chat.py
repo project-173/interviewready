@@ -11,6 +11,7 @@ from app.api.v1.services import (
     get_or_create_session_context,
     get_orchestration_agent,
 )
+from app.api.v1.response_transformers import agent_response_to_api, enrich_agent_response_for_user
 from langfuse import Langfuse, observe, propagate_attributes
 
 langfuse = Langfuse()
@@ -18,6 +19,7 @@ from app.models import AgentResponse, ChatApiResponse, ChatRequest
 from app.utils.json_parser import parse_json_payload
 from app.core.limiter import limiter
 from app.core.config import settings
+from app.core.logging import logger
 
 router = APIRouter()
 
@@ -72,17 +74,44 @@ async def chat_endpoint(
                 internal_response = await run_in_threadpool(
                     orchestrator.orchestrate, chat_request, context
                 )
-                payload = _extract_api_payload(internal_response)
-                payload = _attach_payload_metadata(payload, internal_response)
+                
+                # Enrich response with user-facing explanations
+                enriched_response = enrich_agent_response_for_user(internal_response)
+                
+                # Transform to user-facing API response with transparency fields
+                api_response = agent_response_to_api(enriched_response, include_sharp_metadata=False)
+                
+                # Build final response with transparency fields
                 result = ChatApiResponse(
-                    agent=internal_response.agent_name,
-                    payload=payload
+                    agent=api_response.agent,
+                    payload=api_response.payload,
+                    confidence_score=api_response.confidence_score,
+                    confidence_explanation=api_response.confidence_explanation,
+                    reasoning=api_response.reasoning,
+                    improvement_suggestions=api_response.improvement_suggestions,
+                    needs_review=api_response.needs_review,
+                    low_confidence_fields=api_response.low_confidence_fields,
+                    # Bias & Governance transparency
+                    bias_flags=api_response.bias_flags,
+                    bias_severity=api_response.bias_severity,
+                    bias_description=api_response.bias_description,
+                    governance_audit_status=api_response.governance_audit_status,
+                    governance_flags=api_response.governance_flags,
+                    requires_human_review=api_response.requires_human_review,
+                    # Interview-specific
+                    answer_score=api_response.answer_score,
+                    can_proceed=api_response.can_proceed,
+                    next_challenge=api_response.next_challenge,
                 )
+                
                 langfuse.update_current_span(
                     output={
                         "success": True,
                         "agent": internal_response.agent_name,
                         "response_length": len(str(result.payload)),
+                        "confidence_score": api_response.confidence_score,
+                        "bias_flags_count": len(api_response.bias_flags),
+                        "governance_flags": api_response.governance_flags,
                     }
                 )
                 return result

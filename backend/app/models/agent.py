@@ -14,9 +14,19 @@ class AgentResponse(BaseModel):
     content: Optional[str] = None
     reasoning: Optional[str] = None  # Explainability
     confidence_score: Optional[float] = None  # Confidence Indicator
+    confidence_explanation: Optional[str] = None  # Why this confidence level?
     needs_review: Optional[bool] = None
     low_confidence_fields: Optional[List[str]] = Field(default_factory=list)
     decision_trace: Optional[List[str]] = Field(default_factory=list)  # Auditability
+    improvement_suggestions: Optional[List[str]] = Field(default_factory=list)  # User-facing recommendations
+    bias_flags: Optional[List[str]] = Field(default_factory=list)  # Detected bias categories
+    bias_severity: Optional[str] = "info"  # 'info', 'warning', 'critical'
+    bias_description: Optional[str] = None  # Human-readable bias description
+    governance_audit_status: Optional[str] = "passed"  # 'passed', 'flagged', 'blocked'
+    governance_flags: Optional[List[str]] = Field(default_factory=list)  # Specific flags
+    answer_score: Optional[int] = None  # For interview: 0-100
+    can_proceed: Optional[bool] = None  # For interview: advance or retry
+    next_challenge: Optional[str] = None  # For interview: what to focus on
     sharp_metadata: Optional[Dict[str, Any]] = Field(
         default_factory=dict
     )  # SHARP Compliance Data
@@ -28,8 +38,22 @@ class ChatApiResponse(BaseModel):
     agent: Optional[str] = None
     payload: Optional[Dict[str, Any] | List[Any] | str] = None
     confidence_score: Optional[float] = None
+    confidence_explanation: Optional[str] = None
+    reasoning: Optional[str] = None
+    improvement_suggestions: Optional[List[str]] = Field(default_factory=list)
     needs_review: Optional[bool] = None
     low_confidence_fields: Optional[List[str]] = Field(default_factory=list)
+    # Bias & Governance - User Transparency
+    bias_flags: Optional[List[str]] = Field(default_factory=list)
+    bias_severity: Optional[str] = "info"
+    bias_description: Optional[str] = None
+    governance_audit_status: Optional[str] = "passed"
+    governance_flags: Optional[List[str]] = Field(default_factory=list)
+    requires_human_review: Optional[bool] = False
+    # Interview-specific fields
+    answer_score: Optional[int] = None
+    can_proceed: Optional[bool] = None
+    next_challenge: Optional[str] = None
 
 
 class InterviewMessage(BaseModel):

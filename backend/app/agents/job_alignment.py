@@ -1,6 +1,7 @@
 """Job Alignment Agent implementation."""
 
 import json
+import re
 import time
 from typing import List, Dict, Any
 
@@ -20,6 +21,90 @@ class JobAlignmentAgent(BaseAgent):
 
     USE_MOCK_RESPONSE = settings.MOCK_JOB_ALIGNMENT_AGENT
     MOCK_RESPONSE_KEY = "JobAlignmentAgent"
+
+    # Bias detection patterns (same as InterviewCoachAgent)
+    BIAS_PATTERNS = {
+        "age": re.compile(
+            r"\b(young|recent graduate|digital native|energetic|digital immigrant|works better in younger teams|"
+            r"gen z|millennial skills|boomer|old school|fresh blood|youthful|active lifestyle required|"
+            r"high energy|fast-paced environment|keep up with|cutting edge|modern approach|tech-savvy|"
+            r"digital natives|early career|career start|entry-level only|no grey hair|under 30|over 40|"
+            r"retirement age|senior citizen role)\b",
+            re.IGNORECASE
+        ),
+        "gender": re.compile(
+            r"\b(he|she|him|her|male|female|manpower|prefer male|prefer female|girls?|guys?|rockstar developer|ninja|"
+            r"strong man|woman for the job|gentleman|young lady|stewardess|fireman|businessman|chairman|"
+            r"housewife|maternity friendly|men only|women only|female intuition|masculine|feminine|"
+            r"breast feeding facilities|childcare provider|boys' club|girls' night|brotherhood)\b",
+            re.IGNORECASE
+        ),
+        "nationality": re.compile(
+            r"\b(native english|american-born|citizens only|native speaker|foreign|immigrant|"
+            r"green card holder|english fluency required|accent not acceptable|american accent|"
+            r"no accent|local hire only|requires passport|international travel|visa sponsorship not available|"
+            r"must be local|domestic hire|national preference|eu citizens only|must speak without accent|"
+            r"mother tongue english|born in country|racial background|country of origin)\b",
+            re.IGNORECASE
+        ),
+        "disability": re.compile(
+            r"\b(able-bodied|physically fit|no disabilities|mental health|sanity|disabl|wheelchair accessible not required|"
+            r"must be able-bodied|athletic|mobility required|no mental health issues|no psychiatric history|"
+            r"no chronic illness|perfect health|physically demanding|acrobatic|gymnastics|"
+            r"must climb stairs|no accommodations|accessible facilities not needed|able to work standing|"
+            r"no ada accommodations|fully functional|perfect attendance required|never sick)\b",
+            re.IGNORECASE
+        ),
+        "family_status": re.compile(
+            r"\b(no children|married|single|pregnant|parental|childcare|family-friendly is a perk not requirement|"
+            r"must not have caring responsibilities|family man|mother figure|bachelor|spinster|"
+            r"no family obligations|family responsibilities conflict|childless|no dependents|"
+            r"must be available weekends|24/7 availability|on-call requirement|no time off for family|"
+            r"relocation required|willing to relocate|no school schedule conflicts|no childcare concerns|"
+            r"single focus required|married preference|domestic duties|child support)\b",
+            re.IGNORECASE
+        ),
+        "religion": re.compile(
+            r"\b(christian|jewish|muslim|hindu|buddhist|atheist|religious|church|mosque|synagogue|temple|"
+            r"faith-based|worship|prayer|sabbath|halal|kosher|religious holidays|no religious leave|"
+            r"prayer room not available|sunday work required|friday work required|"
+            r"religious attire not permitted|must observe christmas|no religious accommodations|"
+            r"secular workplace|faith requirement|spiritual alignment|belief system|"
+            r"pastoral care|chaplain|faith community|religious beliefs not accommodated)\b",
+            re.IGNORECASE
+        ),
+        "socioeconomic_status": re.compile(
+            r"\b(ivy league|prestigious university|first-generation|low income|poor background|"
+            r"affluent background|wealthy|private school|elite|upper-class|working-class|"
+            r"unprivileged|disadvantaged|elitist|bourgeois)\b",
+            re.IGNORECASE
+        ),
+        "sexual_orientation": re.compile(
+            r"\b(lgbtq|gay|lesbian|bisexual|straight preference|heterosexual requirement|"
+            r"same-sex partner|domestic partner|spouse equivalent|gay-friendly|"
+            r"sexual orientation|straight and narrow|traditional family|"
+            r"alternative lifestyle|sexual preference)\b",
+            re.IGNORECASE
+        ),
+        "genetic_information": re.compile(
+            r"\b(genetic test|family history|hereditary|dna test|genetic predisposition|"
+            r"genetic disorder|familial|inherited condition|genetic screening)\b",
+            re.IGNORECASE
+        ),
+        "appearance": re.compile(
+            r"\b(attractive|beautiful|handsome|pretty|ugly|fat|thin|slim|build|weight|"
+            r"height requirement|tall candidate|short people|appearance standards|"
+            r"photogenic|model look|physical appearance|must be presentable|"
+            r"dress code strict|cosmetic surgery|tattoo-free|piercing-free)\b",
+            re.IGNORECASE
+        ),
+        "veteran_status": re.compile(
+            r"\b(military service|veteran|non-veteran|active duty|military background|"
+            r"armed forces|prior service|military family|veteran preference not allowed|"
+            r"no military jobs|civilian only)\b",
+            re.IGNORECASE
+        ),
+    }
 
     SYSTEM_PROMPT = (
         """
@@ -135,6 +220,16 @@ class JobAlignmentAgent(BaseAgent):
         # Clamp to [0.20, 0.95] — avoid false certainty at either extreme
         return round(max(0.20, min(0.95, raw)), 3)
 
+    def _detect_bias_flags(self, text: str) -> List[str]:
+        """Detect potentially biased language in the job description."""
+        if not text:
+            return []
+        flags: List[str] = []
+        for category, pattern in self.BIAS_PATTERNS.items():
+            if pattern.search(text):
+                flags.append(category)
+        return sorted(set(flags))
+
     @observe(name="job_alignment_process", as_type="agent")
     def process(
         self, input_data: AgentInput, context: SessionContext
@@ -203,12 +298,21 @@ class JobAlignmentAgent(BaseAgent):
             experience_match: List[str] = structured_result.get("experienceMatch", [])
             summary: str = structured_result.get("summary", "")
 
+            # Detect bias in job description
+            job_description = input_data.job_description or ""
+            bias_flags = self._detect_bias_flags(job_description)
+
             confidence = self._compute_confidence(skills_match, missing_skills, experience_match)
             decision_trace = [
                 "Parsed LLM output",
                 f"Identified {len(skills_match)} matching skills",
                 f"Identified {len(missing_skills)} missing skills",
             ]
+            
+            if bias_flags:
+                decision_trace.append(
+                    f"Detected potential bias signals in job description: {', '.join(bias_flags)}"
+                )
 
             metadata = {
                 "skillsMatch": skills_match,
@@ -218,12 +322,37 @@ class JobAlignmentAgent(BaseAgent):
                 "agentVersion": "1.0",
             }
 
+            # Determine bias severity
+            bias_severity = "info"
+            if bias_flags:
+                if len(bias_flags) > 3 or any(cat in ["disability", "gender", "nationality"] for cat in bias_flags):
+                    bias_severity = "warning"
+                if len(bias_flags) > 5:
+                    bias_severity = "critical"
+
+            # Build improvement suggestions
+            improvement_suggestions = []
+            if bias_flags:
+                improvement_suggestions.append(
+                    f"This job description contains signals of potential bias ({', '.join(bias_flags[:3])}{'...' if len(bias_flags) > 3 else ''}). "
+                    "Consider using more inclusive language."
+                )
+
             return AgentResponse(
                 agent_name=self.get_name(),
                 content=json.dumps(structured_result, indent=2),
                 reasoning=summary,
                 confidence_score=confidence,
+                confidence_explanation=(
+                    f"Confidence {confidence:.0%} based on {len(skills_match)} matching skills, "
+                    f"{len(missing_skills)} missing skills, and {len(experience_match)} relevant experiences."
+                ),
                 decision_trace=decision_trace,
+                bias_flags=bias_flags,
+                bias_severity=bias_severity,
+                governance_audit_status="passed" if not bias_flags else "flagged",
+                governance_flags=["bias_detected"] if bias_flags else [],
+                improvement_suggestions=improvement_suggestions,
                 sharp_metadata=metadata,
             )
 

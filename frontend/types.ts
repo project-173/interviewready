@@ -134,6 +134,17 @@ export interface ChatRequest {
 export interface InterviewMessage {
   role: 'user' | 'agent';
   text: string;
+  // Transparency & Explainability Fields
+  confidence_score?: number;
+  reasoning?: string;
+  decision_trace?: string[];
+  improvement_suggestion?: string;
+  answer_score?: number;
+  can_proceed?: boolean;
+  // Governance & Bias Detection
+  bias_warnings?: string[];
+  governance_flags?: string[];
+  requires_human_review?: boolean;
 }
 
 export interface SharedState {
