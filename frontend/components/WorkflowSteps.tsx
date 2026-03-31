@@ -1,11 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import {
-  AlignmentReport,
-  ContentStrengthReport,
-  ResumeSchema,
-  ResumeCriticReport,
-} from "../types";
+import React, { useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import { AlignmentReport, ContentStrengthReport, ResumeSchema, ResumeCriticReport, InterviewMessage, InterviewMode } from '../types';
+import { resolveResumeLocation } from '@/utils/resolve-resume-location';
+import { capitalizeFirst } from '@/utils/text';
+import { ReportHeader } from './ReportHeader';
 
 export const UploadStep: React.FC<{
   onUploadSubmit: (file: File | null) => void; // null = use manual resume from preview panel
@@ -516,13 +514,8 @@ export const InterviewModeSelectionStep: React.FC<{
   </div>
 );
 
-import { InterviewMessage, InterviewMode } from "../types";
-import { resolveResumeLocation } from "@/utils/resolve-resume-location";
-import { capitalizeFirst } from "@/utils/text";
-import { ReportHeader } from "./ReportHeader";
-
-export const InterviewStep: React.FC<{
-  history: InterviewMessage[];
+export const InterviewStep: React.FC<{ 
+  history: InterviewMessage[]; 
   onSend: (msg: string) => void;
   onSendAudio: (audio: Uint8Array) => void;
   isLoading: boolean;
