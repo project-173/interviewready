@@ -254,7 +254,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             return "InterviewCoachAgent"
         if question_num <= state["total_questions"]:
             return f"InterviewCoachAgent_Q{question_num}"
-        return "InterviewCoachAgent_Summary"
+        return "InterviewCoachAgent_Q5"
 
     def _sanitize_text(self, text: str) -> tuple[str, list[str]]:
         """Redact direct identifiers before sending content to the model."""

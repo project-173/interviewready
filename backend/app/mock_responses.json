@@ -251,13 +251,13 @@
         ],
         "skills": [
             {
-                "name": "Python"
+                "name": "Python",
             },
             {
-                "name": "JavaScript"
+                "name": "JavaScript",
             },
             {
-                "name": "SQL"
+                "name": "SQL",
             }
         ],
         "projects": [
