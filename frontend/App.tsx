@@ -214,6 +214,15 @@ const WorkflowController: React.FC<{
   const isRecord = (value: unknown): value is Record<string, any> =>
     typeof value === 'object' && value !== null && !Array.isArray(value);
 
+  const getResponseMetadata = (response: any) => {
+    const payloadMetadata =
+      isRecord(response?.payload) && isRecord((response.payload as any).metadata)
+        ? (response.payload as any).metadata
+        : null;
+    const directMetadata = isRecord(response?.metadata) ? response.metadata : null;
+    return directMetadata ?? payloadMetadata;
+  };
+
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       if (file.size > MAX_FILE_SIZE) {
@@ -268,16 +277,19 @@ const handleUploadSubmit = async (file: File | null) => {
           throw new Error('Invalid response from backend');
         }
 
-        const payloadMetadata =
-          isRecord(response.payload) && isRecord((response.payload as any).metadata)
-            ? (response.payload as any).metadata
-            : null;
-
-        const needsReview = Boolean(payloadMetadata?.needs_review);
+        const metadata = getResponseMetadata(response);
+        const needsReview = Boolean(metadata?.review_required ?? metadata?.needs_review);
+        const reviewPayload =
+          metadata?.review_payload ||
+          (isRecord(response.payload) ? (response.payload as any).review_payload : null);
+        const checkpointId = metadata?.checkpoint_id;
 
         updateProgress(90, 3);
 
         if (needsReview) {
+          if (reviewPayload?.extracted_data) {
+            setManualResumeText(JSON.stringify(reviewPayload.extracted_data, null, 2));
+          }
           setState(prev => ({
             ...prev,
             currentResume: parsedResume || prev.currentResume,
@@ -286,6 +298,8 @@ const handleUploadSubmit = async (file: File | null) => {
             status: WorkflowStatus.IDLE,
             extractionReview: {
               needsReview: true,
+              checkpointId,
+              reviewPayload,
             }
           }));
 
@@ -301,6 +315,7 @@ const handleUploadSubmit = async (file: File | null) => {
           status: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
           extractionReview: null,
         }));
+        setManualResumeText('');
 
         updateProgress(100, 3);
       }
@@ -376,6 +391,94 @@ const handleUploadSubmit = async (file: File | null) => {
       setManualResumeText('');
     } catch (err: any) {
       setManualResumeError(err.message || 'Failed to process manual resume data.');
+    } finally {
+      stopLoading();
+    }
+  };
+
+  const submitReviewResume = async () => {
+    setManualResumeError(null);
+    const checkpointId = state.extractionReview?.checkpointId;
+    if (!checkpointId) {
+      setManualResumeError('Missing checkpoint id for review resume.');
+      return;
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(manualResumeText);
+    } catch (error) {
+      setManualResumeError('Review edits must be valid JSON.');
+      return;
+    }
+
+    if (!parsed || typeof parsed !== 'object') {
+      setManualResumeError('Review edits must be a JSON object.');
+      return;
+    }
+
+    startLoading('Applying your edits...', ['Validating updates', 'Re-running review', 'Continuing analysis']);
+    try {
+      updateProgress(35, 0);
+      const request: ChatRequest = {
+        intent: 'RESUME_CRITIC',
+        control: 'resume',
+        checkpointId,
+        resumeData: parsed,
+        jobDescription: '',
+        messageHistory: []
+      };
+
+      const response = await backendService.callChatEndpoint(request);
+      const parsedResume = await backendService.fetchCurrentResume();
+      const metadata = getResponseMetadata(response);
+      const needsReview = Boolean(metadata?.review_required ?? metadata?.needs_review);
+      const reviewPayload =
+        metadata?.review_payload ||
+        (isRecord(response.payload) ? (response.payload as any).review_payload : null);
+      const nextCheckpointId = metadata?.checkpoint_id || checkpointId;
+
+      updateProgress(70, 1);
+
+      if (needsReview) {
+        if (reviewPayload?.extracted_data) {
+          setManualResumeText(JSON.stringify(reviewPayload.extracted_data, null, 2));
+        }
+        setState(prev => ({
+          ...prev,
+          currentResume: parsedResume || prev.currentResume,
+          history: parsedResume ? [...prev.history, parsedResume] : prev.history,
+          criticReport: null,
+          status: WorkflowStatus.IDLE,
+          extractionReview: {
+            needsReview: true,
+            checkpointId: nextCheckpointId,
+            reviewPayload,
+          }
+        }));
+        updateProgress(100, 2);
+        return;
+      }
+
+      let responseData;
+      try {
+        responseData = response.payload || JSON.parse(response.content || '{}');
+      } catch {
+        throw new Error('Invalid response from backend');
+      }
+
+      updateProgress(100, 2);
+      setState(prev => ({
+        ...prev,
+        currentResume: parsedResume || prev.currentResume,
+        history: parsedResume ? [...prev.history, parsedResume] : prev.history,
+        criticReport: responseData,
+        status: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
+        extractionReview: null,
+      }));
+      setManualResumeText('');
+    } catch (err: any) {
+      setManualResumeError(err.message || 'Failed to process review edits.');
     } finally {
       stopLoading();
     }
@@ -555,6 +658,12 @@ const handleUploadSubmit = async (file: File | null) => {
         <UploadStep
           onUploadSubmit={handleUploadSubmit}
           reviewNotice={state.extractionReview}
+          reviewPayload={state.extractionReview?.reviewPayload}
+          manualResumeText={manualResumeText}
+          manualResumeError={manualResumeError}
+          onManualResumeChange={setManualResumeText}
+          onManualSubmit={submitManualResume}
+          onReviewSubmit={submitReviewResume}
         />
       )}
       {(state.status === WorkflowStatus.CRITIQUING || state.status === WorkflowStatus.AWAITING_CRITIC_APPROVAL) && state.criticReport && (

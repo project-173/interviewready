@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from langfuse import Langfuse, observe, propagate_attributes
 
@@ -22,7 +23,9 @@ from app.models.agent import (
 from app.models.agent import AgentInput, Intent
 from app.models.resume import Resume
 from app.models.session import SessionContext
+from app.orchestration.persistence import get_checkpoint_store
 from app.utils.json_parser import parse_json_payload
+from app.utils.validators import is_valid_date, is_valid_url
 
 langfuse = Langfuse()
 
@@ -36,10 +39,19 @@ INTENT_TO_AGENTS = {
 
 @dataclass
 class OrchestrationState:
-    input: AgentInput
+    request: ChatRequest
     context: SessionContext
     agent_sequence: list[str]
-    artifacts: list[AnalysisArtifact]
+    artifacts: list[AnalysisArtifact] = field(default_factory=list)
+    input: Optional[AgentInput] = None
+    resume: Optional[Resume] = None
+    resume_document: Optional[ResumeDocument] = None
+    needs_review: bool = False
+    review_payload: Optional[dict[str, Any]] = None
+    shared_memory: dict[str, Any] = field(default_factory=dict)
+    checkpoint_key: Optional[str] = None
+    halt: bool = False
+    review_attempts: int = 0
     index: int = 0
     response: Optional[AgentResponse] = None
 
@@ -54,6 +66,7 @@ class OrchestrationAgent:
     ):
         self.agent_list = {a.get_name(): a for a in agent_list}
         self.governance = governance
+        self.checkpoints = get_checkpoint_store()
         self.workflow = self._build_workflow()
 
     def get_agents(self) -> dict[str, BaseAgentProtocol]:
@@ -74,57 +87,247 @@ class OrchestrationAgent:
                 intent = self._parse_intent(request.intent)
                 if request.jobDescription:
                     context.job_description = request.jobDescription
-                normalized = self._normalize_or_fail(request, context)
-                if isinstance(normalized, AgentResponse):
-                    return normalized
 
-                resume, resume_doc = normalized
+                state = self._resolve_state(request, context, intent)
+                config = {"configurable": {"thread_id": session_id}}
 
-                agent_input = AgentInput(
-                    intent=intent,
-                    resume=resume,
-                    resume_document=resume_doc,
-                    job_description=request.jobDescription or "",
-                    message_history=request.messageHistory or [],
-                    audio_data=getattr(request, "audioData", None),
+                result = self.workflow.invoke(state, config=config)
+                final_state = result if isinstance(result, OrchestrationState) else None
+                response = (
+                    final_state.response
+                    if final_state is not None
+                    else result.get("response")
                 )
-
-                sequence = INTENT_TO_AGENTS[intent]
-
-                state = OrchestrationState(
-                    input=agent_input,
-                    context=context,
-                    agent_sequence=sequence,
-                    artifacts=[],
-                )
-
-                result = self.workflow.invoke(state)
-                response = result.get("response")
 
                 if not response:
                     raise RuntimeError("No response produced")
 
+                checkpoint_id = (
+                    final_state.checkpoint_key
+                    if final_state is not None
+                    else result.get("checkpoint_id")
+                )
+                review_payload = (
+                    final_state.review_payload
+                    if final_state is not None
+                    else result.get("review_payload")
+                )
+
+                self._attach_checkpoint_metadata(
+                    response, checkpoint_id, review_payload
+                )
+
+                if final_state is not None:
+                    context.shared_memory = final_state.shared_memory
+
                 logger.log_orchestration_complete(
-                    session_id, time.time() - start, sequence
+                    session_id, time.time() - start, state.agent_sequence
                 )
                 return response
+
+    def _resolve_state(
+        self, request: ChatRequest, context: SessionContext, intent: Intent
+    ) -> OrchestrationState:
+        control = getattr(request, "control", None)
+        checkpoint_id = getattr(request, "checkpointId", None)
+        session_id = getattr(context, "session_id", "unknown")
+        sequence = INTENT_TO_AGENTS[intent]
+
+        if control == "rewind":
+            if not checkpoint_id:
+                raise ValueError("checkpointId is required for rewind control")
+            record = self.checkpoints.rewind(session_id, checkpoint_id)
+            if record is None:
+                raise ValueError("Invalid checkpointId for rewind")
+            state = record.state
+            state.request = request
+            state.context = context
+            state.agent_sequence = sequence
+            state.response = None
+            state.input = None
+            state.halt = False
+            return state
+
+        if control == "resume":
+            record = None
+            if checkpoint_id:
+                record = self.checkpoints.get(session_id, checkpoint_id)
+            else:
+                record = self.checkpoints.latest(session_id)
+            if record is None:
+                raise ValueError("No checkpoint available to resume")
+            state = record.state
+            state.request = request
+            state.context = context
+            state.agent_sequence = sequence
+            state.review_attempts = max(state.review_attempts, 0) + 1
+            state.response = None
+            state.input = None
+            state.halt = False
+            state.needs_review = False
+            state.review_payload = None
+            if request.resumeData and self._has_content(request.resumeData):
+                state.resume = request.resumeData
+                state.resume_document = self._build_resume_doc(
+                    state.resume, "resumeData"
+                )
+                self._update_state_memory(
+                    state, current_resume=state.resume.model_dump()
+                )
+            return state
+
+        if control:
+            raise ValueError(f"Unsupported control operation: {control}")
+
+        return OrchestrationState(
+            request=request,
+            context=context,
+            agent_sequence=sequence,
+            shared_memory=dict(context.shared_memory or {}),
+        )
 
     # ---------- Workflow ----------
 
     def _build_workflow(self):
         graph = StateGraph(OrchestrationState)
+        graph.add_node("normalize", self._normalize_resume)
+        graph.add_node("hitl_review", self._hitl_review)
         graph.add_node("run_agent", self._run_agent)
-        graph.set_entry_point("run_agent")
+        graph.set_entry_point("normalize")
+        graph.add_conditional_edges(
+            "normalize",
+            self._route_after_normalize,
+            {"review": "hitl_review", "continue": "run_agent", "end": END},
+        )
         graph.add_conditional_edges(
             "run_agent",
             lambda s: "end" if s.index >= len(s.agent_sequence) else "continue",
             {"continue": "run_agent", "end": END},
         )
-        return graph.compile()
+        graph.add_edge("hitl_review", END)
+        return graph.compile(checkpointer=MemorySaver())
+
+    def _route_after_normalize(self, state: OrchestrationState) -> str:
+        if state.halt:
+            return "end"
+        if state.needs_review:
+            return "review"
+        return "continue"
+
+    def _normalize_resume(self, state: OrchestrationState) -> OrchestrationState:
+        request = state.request
+        context = state.context
+
+        resume = None
+        resume_doc = None
+        confidence_score = None
+        low_confidence_fields: list[str] = []
+        validation_errors: list[str] = []
+        needs_review = False
+
+        if state.resume and self._has_content(state.resume):
+            resume = state.resume
+            resume_doc = state.resume_document or self._build_resume_doc(
+                resume, "resumeData"
+            )
+            validation_errors = self._validate_resume_data(resume)
+            confidence_score = 1.0
+            needs_review = bool(validation_errors)
+        elif request.resumeData and self._has_content(request.resumeData):
+            resume = request.resumeData
+            resume_doc = self._build_resume_doc(resume, "resumeData")
+            validation_errors = self._validate_resume_data(resume)
+            confidence_score = 1.0
+            needs_review = bool(validation_errors)
+        elif request.resumeFile:
+            extractor = self._get_agent("ExtractorAgent")
+            try:
+                response = extractor.process(
+                    json.dumps(request.resumeFile.model_dump()), context
+                )
+                parsed = json.loads(response.content or "{}")
+                resume = Resume.model_validate(parsed)
+                resume_doc = self._build_resume_doc(resume, "resumeFile")
+                confidence_score = response.confidence_score or 0.0
+                low_confidence_fields = response.low_confidence_fields or []
+                sharp_metadata = response.sharp_metadata or {}
+                if isinstance(sharp_metadata, dict):
+                    validation_errors = list(
+                        sharp_metadata.get("validation_errors", [])
+                    )
+                needs_review = bool(response.needs_review) or bool(validation_errors)
+            except Exception as exc:
+                state.response = self._failure(
+                    "Failed to parse resume file.",
+                    str(exc),
+                    context,
+                    needs_review=True,
+                )
+                state.halt = True
+                return state
+        else:
+            state.response = self._failure(
+                "No resume provided.",
+                "Upload resume or provide resumeData.",
+                context,
+            )
+            state.halt = True
+            return state
+
+        if resume is None:
+            state.response = self._failure(
+                "Resume normalization failed.",
+                "Unable to parse resume input.",
+                context,
+                needs_review=True,
+            )
+            state.halt = True
+            return state
+
+        if resume_doc is None:
+            resume_doc = self._build_resume_doc(resume, "resumeData")
+
+        review_payload = None
+        if needs_review:
+            review_payload = {
+                "extracted_data": resume.model_dump(exclude_none=True),
+                "validation_errors": validation_errors,
+                "confidence_score": confidence_score,
+                "fields_requiring_attention": low_confidence_fields,
+            }
+
+        state.resume = resume
+        state.resume_document = resume_doc
+        state.needs_review = needs_review
+        state.review_payload = review_payload
+        state.input = self._build_agent_input(state)
+
+        self._update_state_memory(
+            state,
+            current_resume=resume.model_dump(exclude_none=True),
+            extractor_confidence_score=confidence_score,
+            extractor_low_confidence_fields=low_confidence_fields,
+            extractor_needs_review=needs_review,
+            extractor_validation_errors=validation_errors,
+            review_payload=review_payload,
+        )
+        self._record_checkpoint(state)
+
+        if needs_review:
+            state.response = self._build_review_response(state)
+        return state
+
+    def _hitl_review(self, state: OrchestrationState) -> OrchestrationState:
+        if state.response is None:
+            state.response = self._build_review_response(state)
+        return state
 
     def _run_agent(self, state: OrchestrationState) -> OrchestrationState:
         if state.index >= len(state.agent_sequence):
             return state
+
+        if state.input is None:
+            state.input = self._build_agent_input(state)
 
         agent_name = state.agent_sequence[state.index]
         agent = self._get_agent(agent_name)
@@ -150,8 +353,11 @@ class OrchestrationAgent:
 
         state.response = audited
         state.artifacts.append(self._build_artifact(audited, agent_name))
-        self._update_memory(context, artifacts=[artifact.model_dump() for artifact in state.artifacts])
+        self._update_state_memory(
+            state, artifacts=[artifact.model_dump() for artifact in state.artifacts]
+        )
         state.index += 1
+        self._record_checkpoint(state)
 
         return state
 
@@ -168,6 +374,85 @@ class OrchestrationAgent:
             raise RuntimeError(f"Missing agent: {name}")
         return self.agent_list[name]
 
+    def _build_agent_input(self, state: OrchestrationState) -> AgentInput:
+        request = state.request
+        intent = self._parse_intent(request.intent)
+        return AgentInput(
+            intent=intent,
+            resume=state.resume,
+            resume_document=state.resume_document,
+            job_description=request.jobDescription or "",
+            message_history=request.messageHistory or [],
+            audio_data=getattr(request, "audioData", None),
+        )
+
+    def _record_checkpoint(self, state: OrchestrationState) -> None:
+        session_id = getattr(state.context, "session_id", "unknown")
+        state.checkpoint_key = self.checkpoints.save(session_id, state)
+
+    def _attach_checkpoint_metadata(
+        self,
+        response: AgentResponse,
+        checkpoint_id: Optional[str],
+        review_payload: Optional[dict[str, Any]],
+    ) -> None:
+        if response.sharp_metadata is None:
+            response.sharp_metadata = {}
+        if checkpoint_id:
+            response.sharp_metadata["checkpoint_id"] = checkpoint_id
+        if review_payload:
+            response.sharp_metadata["review_payload"] = review_payload
+
+    def _build_review_response(self, state: OrchestrationState) -> AgentResponse:
+        payload = {
+            "review_payload": state.review_payload or {},
+            "metadata": {
+                "review_required": True,
+                "checkpoint_id": state.checkpoint_key,
+            },
+        }
+        return AgentResponse(
+            agent_name="HITL_REVIEW",
+            content=json.dumps(payload),
+            reasoning="HITL review required before continuing.",
+            confidence_score=state.review_payload.get("confidence_score")
+            if state.review_payload
+            else 0.0,
+            needs_review=True,
+            low_confidence_fields=(
+                state.review_payload.get("fields_requiring_attention", [])
+                if state.review_payload
+                else []
+            ),
+            decision_trace=state.context.decision_trace or [],
+            sharp_metadata={
+                "checkpoint_id": state.checkpoint_key,
+                "review_payload": state.review_payload,
+            },
+        )
+
+    def _update_state_memory(self, state: OrchestrationState, **kwargs) -> None:
+        memory = dict(state.shared_memory or {})
+        memory.update(kwargs)
+        state.shared_memory = memory
+        state.context.shared_memory = memory
+
+    def _validate_resume_data(self, resume: Resume) -> list[str]:
+        errors: list[str] = []
+        list_fields = ["work", "education", "certificates", "projects", "awards"]
+        date_fields = ["startDate", "endDate", "date"]
+
+        for field in list_fields:
+            items = getattr(resume, field, []) or []
+            for item in items:
+                url_value = getattr(item, "url", None)
+                if url_value and not is_valid_url(url_value):
+                    errors.append(f"{field}: url='{url_value}' (invalid)")
+                for attr_name in date_fields:
+                    attr_value = getattr(item, attr_name, None)
+                    if attr_value is not None and not is_valid_date(attr_value):
+                        errors.append(f"{field}: {attr_name}='{attr_value}'")
+        return errors
     def _normalize_or_fail(
         self, request: ChatRequest, context: SessionContext
     ) -> tuple[Resume, ResumeDocument] | AgentResponse:
@@ -263,11 +548,6 @@ class OrchestrationAgent:
         )
 
     # ---------- Utilities ----------
-
-    def _update_memory(self, context: SessionContext, **kwargs):
-        memory = dict(context.shared_memory or {})
-        memory.update(kwargs)
-        context.shared_memory = memory
 
     def _update_context(self, context: SessionContext, response, agent_name: str):
         trace = list(context.decision_trace or [])

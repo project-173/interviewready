@@ -30,6 +30,7 @@ class ChatApiResponse(BaseModel):
     confidence_score: Optional[float] = None
     needs_review: Optional[bool] = None
     low_confidence_fields: Optional[List[str]] = Field(default_factory=list)
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
 class InterviewMessage(BaseModel):
@@ -55,6 +56,8 @@ class ChatRequest(BaseModel):
         "ALIGNMENT",
         "INTERVIEW_COACH",
     ]
+    control: Optional[Literal["resume", "rewind"]] = None
+    checkpointId: Optional[str] = None
     resumeData: Optional[Resume] = None
     resumeFile: Optional[ResumeFile] = None
     jobDescription: Optional[str] = Field(default="", max_length=20000)

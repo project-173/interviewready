@@ -26,6 +26,9 @@ interface ChatResponse {
   confidence_score?: number;
   metadata?: {
     needs_review?: boolean;
+    checkpoint_id?: string;
+    review_payload?: any;
+    review_required?: boolean;
   };
   decision_trace?: string[];
   sharp_metadata?: Record<string, any>;
