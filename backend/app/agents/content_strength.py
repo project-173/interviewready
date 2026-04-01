@@ -29,10 +29,16 @@ class ContentStrengthAgent(BaseAgent):
         - Never imply greater scope or seniority than the original supports
         - If you cannot improve a field faithfully, omit it — do not include the suggestion
 
-        EVIDENCE STRENGTH:
+        EVIDENCE STRENGTH - choose one:
         - HIGH: quantified with specific numbers, percentages, or measurable outcomes
         - MEDIUM: specific and contextual, but not quantified
         - LOW: vague or generic
+
+        SUGGESTION TYPE (field name "type") - choose one:
+        - action_verb: weak or missing opening verb (led, built, reduced, owned)
+        - specificity: too vague; can be grounded using existing context
+        - structure: ordering, parallelism, or run-on phrasing issues
+        - redundancy: repeats information stated elsewhere
 
         LOCATION FORMAT: use JSON path notation matching the resume schema
         e.g. work[0].highlights[1], skills[2].keywords, projects[0].description
