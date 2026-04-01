@@ -10,75 +10,33 @@ HAS_LLM_GUARD = False
 HAS_SPACY = False
 _vault = None
 
+# Cached scanner instances (created once at startup)
+_prompt_injection_scanner = None
+_anonymizer_scanner = None
+_refusal_scanner = None
+_sensitive_scanner = None
 
-def _ensure_spacy_models() -> bool:
-    """Try to install missing spaCy models. Returns True if successful."""
-    models = ["en_core_web_sm"]  # Only English model needed for resume/interview app
 
-    for model in models:
-        try:
-            import spacy
-
-            spacy.load(model)
-            logger.info(f"SpaCy model already installed: {model}")
-            continue
-        except Exception:
-            pass
-
-        # Try multiple installation methods
-        installation_methods = [
-            # Method 1: Use pip to install from the direct URL (from pyproject.toml)
-            lambda: subprocess.run(
-                [sys.executable, "-m", "pip", "install", 
-                 "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            ),
-            # Method 2: Use spaCy download command
-            lambda: subprocess.run(
-                [sys.executable, "-m", "spacy", "download", model],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            ),
-            # Method 3: Use pip install with model name
-            lambda: subprocess.run(
-                [sys.executable, "-m", "pip", "install", f"{model}==3.8.0"],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            ),
-        ]
-
-        installed = False
-        for i, install_method in enumerate(installation_methods, 1):
-            try:
-                logger.info(f"Trying installation method {i} for spaCy model: {model}...")
-                result = install_method()
-                if result.returncode == 0:
-                    logger.info(f"Successfully installed spaCy model: {model} using method {i}")
-                    installed = True
-                    break
-                else:
-                    logger.warning(
-                        f"Method {i} failed for {model}: {result.stderr[:200] if result.stderr else 'Unknown error'}"
-                    )
-            except Exception as e:
-                logger.warning(f"Method {i} exception for {model}: {e}")
-
-        if not installed:
-            logger.error(f"All installation methods failed for spaCy model: {model}")
-
+def _preload_spacy_models() -> bool:
+    """Pre-load spaCy models at startup. Returns True if successful."""
     try:
         import spacy
 
+        # Pre-load both English and Chinese models
         spacy.load("en_core_web_sm")
+        logger.info("Pre-loaded spaCy model: en_core_web_sm")
+
+        spacy.load("zh_core_web_sm")
+        logger.info("Pre-loaded spaCy model: zh_core_web_sm")
+
         return True
-    except Exception:
-        logger.error(f"Failed to load spaCy model after installation attempts")
+    except Exception as e:
+        logger.warning(f"Failed to pre-load spaCy models: {e}")
         return False
 
+
+# Pre-load spaCy models at module import time
+_spacy_loaded = _preload_spacy_models()
 
 try:
     from llm_guard.input_scanners import PromptInjection, Anonymize
@@ -86,34 +44,21 @@ try:
     from llm_guard.vault import Vault as LLMGuardVault
 
     HAS_LLM_GUARD = True
+    HAS_SPACY = _spacy_loaded
 
-    try:
-        import spacy
-
-        try:
-            spacy.load("en_core_web_sm")
-            HAS_SPACY = True
-            logger.info("SpaCy en_core_web_sm model loaded successfully.")
-        except Exception:
-            logger.info("SpaCy model not found, attempting to install...")
-            if _ensure_spacy_models():
-                HAS_SPACY = True
-                logger.info("SpaCy model installed and loaded.")
-            else:
-                HAS_SPACY = False
-                logger.warning(
-                    "Could not install spaCy model. Anonymize and Sensitive scanners disabled."
-                )
-
-    except ImportError:
-        HAS_SPACY = False
+    if HAS_SPACY:
+        logger.info(
+            "SpaCy models pre-loaded successfully - Anonymize and Sensitive scanners ACTIVE."
+        )
+    else:
+        logger.warning(
+            "SpaCy models not available - Anonymize and Sensitive scanners DISABLED."
+        )
 
 except ImportError:
     HAS_LLM_GUARD = False
     HAS_SPACY = False
-
-# Force disable spacy-dependent scanners for RAM optimization
-HAS_SPACY = False
+    logger.warning("LLM Guard not installed. Security scanning disabled.")
 
 
 def get_vault() -> Optional["LLMGuardVault"]:
@@ -132,12 +77,44 @@ class LLMGuardScanner:
     """Scanner for detecting prompt injection and sensitive content."""
 
     def __init__(self):
+        global \
+            _prompt_injection_scanner, \
+            _anonymizer_scanner, \
+            _refusal_scanner, \
+            _sensitive_scanner, \
+            HAS_SPACY
+
         self.enabled = getattr(settings, "LLM_GUARD_ENABLED", True) and HAS_LLM_GUARD
+
         if not HAS_LLM_GUARD:
             logger.warning("LLM Guard not installed. Security scanning disabled.")
         elif not self.enabled:
             logger.info("LLM Guard disabled via configuration.")
         else:
+            logger.info("Initializing LLM Guard scanners...")
+
+            # Create PromptInjection scanner once at startup
+            _prompt_injection_scanner = PromptInjection()
+            logger.info("Created PromptInjection scanner at startup")
+
+            # Create Anonymize and Sensitive scanners once at startup (if spaCy available)
+            if HAS_SPACY:
+                vault = get_vault()
+                if vault:
+                    try:
+                        _anonymizer_scanner = Anonymize(vault=vault, language="en")
+                        _sensitive_scanner = Sensitive()
+                        logger.info(
+                            "Created Anonymize and Sensitive scanners at startup"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to create spaCy scanners: {e}")
+                        HAS_SPACY = False
+
+            # Create NoRefusal scanner once at startup
+            _refusal_scanner = NoRefusal()
+            logger.info("Created NoRefusal scanner at startup")
+
             logger.info("LLM Guard initialized for input/output scanning.")
             if HAS_SPACY:
                 logger.info("SpaCy loaded - Anonymize and Sensitive scanners ACTIVE.")
@@ -156,6 +133,7 @@ class LLMGuardScanner:
             Tuple of (is_safe, sanitized_prompt, list of issues)
         """
         global HAS_SPACY
+
         if not self.enabled:
             return True, prompt, [{"note": "scanner_disabled"}]
 
@@ -163,8 +141,8 @@ class LLMGuardScanner:
         sanitized = prompt
 
         try:
-            scanner = PromptInjection()
-            sanitized, is_valid, risk_score = scanner.scan(sanitized)
+            # Use cached PromptInjection scanner
+            sanitized, is_valid, risk_score = _prompt_injection_scanner.scan(sanitized)
 
             if not is_valid:
                 issue = {
@@ -177,47 +155,22 @@ class LLMGuardScanner:
                 )
                 return False, sanitized, [issue]
 
-            if HAS_SPACY:
+            # Use cached Anonymize scanner if available
+            if HAS_SPACY and _anonymizer_scanner:
                 try:
-                    vault = get_vault()
-                    if vault:
-                        try:
-                            anonymizer = Anonymize(vault=vault, language="en")
-                        except SystemExit:
-                            logger.warning(
-                                "SpaCy Anonymize scanner initialization failed with SystemExit, disabling spaCy scanners"
-                            )
-                            HAS_SPACY = False
-                            anonymizer = None
-                        
-                        if anonymizer is not None:
-                            sanitized, is_valid, risk_score = anonymizer.scan(sanitized)
-                            if not is_valid:
-                                issue = {
-                                    "scanner": "Anonymize",
-                                    "risk_score": risk_score,
-                                    "reason": "PII detected in input",
-                                }
-                                issues.append(issue)
-                except SystemExit:
-                    # Handle spaCy download failures that cause SystemExit
-                    logger.warning(
-                        "SpaCy Anonymize scanner failed with SystemExit, disabling spaCy scanners"
+                    sanitized, is_valid, risk_score = _anonymizer_scanner.scan(
+                        sanitized
                     )
-                    HAS_SPACY = False
+                    if not is_valid:
+                        issue = {
+                            "scanner": "Anonymize",
+                            "risk_score": risk_score,
+                            "reason": "PII detected in input",
+                        }
+                        issues.append(issue)
                 except Exception as e:
-                    if (
-                        "spacy" in str(e).lower()
-                        or "zh_core" in str(e).lower()
-                        or "download" in str(e).lower()
-                        or "model" in str(e).lower()
-                    ):
-                        logger.warning(
-                            f"SpaCy Anonymize scanner failed, disabling spaCy scanners: {e}"
-                        )
-                        HAS_SPACY = False
-                    else:
-                        raise
+                    logger.warning(f"Anonymize scanner failed: {e}")
+                    HAS_SPACY = False
 
             return True, sanitized, issues
 
@@ -235,6 +188,7 @@ class LLMGuardScanner:
             Tuple of (is_safe, sanitized_output, list of issues)
         """
         global HAS_SPACY
+
         if not self.enabled:
             return True, output, [{"note": "scanner_disabled"}]
 
@@ -242,8 +196,8 @@ class LLMGuardScanner:
         sanitized = output
 
         try:
-            refusal_scanner = NoRefusal()
-            sanitized, is_valid, risk_score = refusal_scanner.scan("", sanitized)
+            # Use cached NoRefusal scanner
+            sanitized, is_valid, risk_score = _refusal_scanner.scan("", sanitized)
             if not is_valid:
                 issues.append(
                     {
@@ -253,48 +207,23 @@ class LLMGuardScanner:
                     }
                 )
 
-            if HAS_SPACY:
+            # Use cached Sensitive scanner if available
+            if HAS_SPACY and _sensitive_scanner:
                 try:
-                    try:
-                        sensitive_scanner = Sensitive()
-                    except SystemExit:
-                        logger.warning(
-                            "SpaCy Sensitive scanner initialization failed with SystemExit, disabling spaCy scanners"
-                        )
-                        HAS_SPACY = False
-                        sensitive_scanner = None
-                    
-                    if sensitive_scanner is not None:
-                        sanitized, is_valid, risk_score = sensitive_scanner.scan(
-                            "", sanitized
-                        )
-                        if not is_valid:
-                            issues.append(
-                                {
-                                    "scanner": "Sensitive",
-                                    "risk_score": risk_score,
-                                    "reason": "Sensitive content detected",
-                                }
-                            )
-                except SystemExit:
-                    # Handle spaCy download failures that cause SystemExit
-                    logger.warning(
-                        "SpaCy Sensitive scanner failed with SystemExit, disabling spaCy scanners"
+                    sanitized, is_valid, risk_score = _sensitive_scanner.scan(
+                        "", sanitized
                     )
-                    HAS_SPACY = False
-                except Exception as e:
-                    if (
-                        "spacy" in str(e).lower()
-                        or "zh_core" in str(e).lower()
-                        or "download" in str(e).lower()
-                        or "model" in str(e).lower()
-                    ):
-                        logger.warning(
-                            f"SpaCy Sensitive scanner failed, disabling spaCy scanners: {e}"
+                    if not is_valid:
+                        issues.append(
+                            {
+                                "scanner": "Sensitive",
+                                "risk_score": risk_score,
+                                "reason": "Sensitive content detected",
+                            }
                         )
-                        HAS_SPACY = False
-                    else:
-                        raise
+                except Exception as e:
+                    logger.warning(f"Sensitive scanner failed: {e}")
+                    HAS_SPACY = False
 
             if issues:
                 logger.security_event(
