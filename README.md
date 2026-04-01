@@ -49,6 +49,15 @@ InterviewReady implements a **Multi-Agent Orchestration** architecture with spec
                      │
                      ▼
         ┌──────────────────────────┐
+        │   Resume Extraction      │
+        │   (ExtractorAgent)       │
+        │  - PDF parsing           │
+        │  - Structured data       │
+        │  - Confidence scoring    │
+        └────────────┬─────────────┘
+                     │
+                     ▼
+        ┌──────────────────────────┐
         │  Intent Classification   │
         │  (Orchestration Layer)   │
         └────────────┬─────────────┘
@@ -132,7 +141,7 @@ InterviewReady implements a **Multi-Agent Orchestration** architecture with spec
 │  │ResumeCritic  │  │ContentStrength   │  │JobAlignment  │    │
 │  └──────────────┘  └──────────────────┘  └──────────────┘    │
 │  ┌──────────────────────────┐  ┌──────────────────────────┐   │
-│  │InterviewCoach (Stateful) │  │Extractor (Normalization)│   │
+│  │InterviewCoach (Stateful) │  │ExtractorAgent            │   │
 │  └──────────────────────────┘  └──────────────────────────┘   │
 │                                                                 │
 └──────────────────────────────┬──────────────────────────────────┘
@@ -320,7 +329,34 @@ Frontend Response & Rendering
 
 ## 3. Agent System Design
 
-### 3.1 ResumeCriticAgent
+### 3.1 ExtractorAgent
+
+**Purpose & Responsibilities:**
+- Converts resume PDF files into structured JSON Resume model data using LLM-powered extraction
+- Parses PDF text content and maps it to standardized resume sections (work, education, skills, projects, awards, certificates)
+- Validates extracted data for URL format, date structure, and field completeness
+- Calculates confidence scores and identifies low-confidence fields requiring human review
+
+**Planning/Reasoning:**
+- Extracts text from PDF base64 payload using PDF parsing utilities
+- Applies structured LLM prompting with strict JSON output requirements
+- Validates URLs against source text to prevent hallucination
+- Scores confidence based on completeness, uncertainty, validation errors, and structure quality
+- Flags fields needing human review based on confidence thresholds
+
+**Memory Mechanisms:**
+- Session context preserves extracted resume data and confidence metrics
+- Decision trace records extraction decisions and validation outcomes
+- Langfuse traces maintain extraction audit trail with confidence scoring
+
+**Tools Used:**
+- Gemini LLM for intelligent text-to-structured-data extraction
+- PDF parsing utilities for text extraction from base64 content
+- JSON parser for structured output validation
+- Validation utilities for URL, date, and field integrity checks
+- Confidence scoring algorithm for quality assessment
+
+### 3.2 ResumeCriticAgent
 
 **Purpose & Responsibilities:**
 - Analyzes resume structure and ATS (Applicant Tracking System) readability
@@ -344,7 +380,7 @@ Frontend Response & Rendering
 - Text parsing utilities for resume section extraction
 - Governance Service for confidence validation
 
-### 3.2 ContentStrengthAgent
+### 3.3 ContentStrengthAgent
 
 **Purpose & Responsibilities:**
 - Evaluates skills, achievements, and content effectiveness
@@ -368,7 +404,7 @@ Frontend Response & Rendering
 - NLI (Natural Language Inference) utilities for logic consistency
 - JSON parser for structured output handling
 
-### 3.3 JobAlignmentAgent
+### 3.4 JobAlignmentAgent
 
 **Purpose & Responsibilities:**
 - Performs semantic matching between resume and job description
@@ -392,7 +428,7 @@ Frontend Response & Rendering
 - Text embedding and similarity utilities
 - Governance Service for confidence threshold validation
 
-### 3.4 InterviewCoachAgent (Stateful)
+### 3.5 InterviewCoachAgent (Stateful)
 
 **Purpose & Responsibilities:**
 - Simulates role-specific interview via multi-turn conversation
