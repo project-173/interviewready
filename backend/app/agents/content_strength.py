@@ -29,10 +29,16 @@ class ContentStrengthAgent(BaseAgent):
         - Never imply greater scope or seniority than the original supports
         - If you cannot improve a field faithfully, omit it — do not include the suggestion
 
-        EVIDENCE STRENGTH:
+        EVIDENCE STRENGTH - choose one:
         - HIGH: quantified with specific numbers, percentages, or measurable outcomes
         - MEDIUM: specific and contextual, but not quantified
         - LOW: vague or generic
+
+        SUGGESTION TYPE (field name "type") - choose one:
+        - action_verb: weak or missing opening verb (led, built, reduced, owned)
+        - specificity: too vague; can be grounded using existing context
+        - structure: ordering, parallelism, or run-on phrasing issues
+        - redundancy: repeats information stated elsewhere
 
         LOCATION FORMAT: use JSON path notation matching the resume schema
         e.g. work[0].highlights[1], skills[2].keywords, projects[0].description
@@ -189,13 +195,46 @@ class ContentStrengthAgent(BaseAgent):
             )
             raise
 
-    def _calculate_overall_confidence(self, result: Dict[str, Any]) -> int:
+    def _calculate_overall_confidence(self, result):
         suggestions = result.get("suggestions") or []
-        scores = [
-            self._EVIDENCE_WEIGHTS.get(s.get("evidenceStrength", "LOW"), 0.3)
-            for s in suggestions if isinstance(s, dict)
-        ]
-        return int(sum(scores) / len(scores) * 100) if scores else 0
+        if not suggestions:
+            return 0
+
+        scores = []
+        for s in suggestions:
+            if not isinstance(s, dict):
+                continue
+            ev = self._EVIDENCE_WEIGHTS.get(s.get("evidenceStrength", "LOW"), 0.3)
+            type_weight = {
+                "action_verb": 0.8,
+                "redundancy": 0.7,
+                "structure": 0.9,
+                "specificity": 1.2,
+            }.get(s.get("type", ""), 1.0)
+
+            scores.append(ev * type_weight)
+
+        if not scores:
+            return 0
+
+        avg = sum(scores) / len(scores)
+
+        # sample size adjustment
+        n = len(scores)
+        size_factor = 1 - (2.71828 ** (-n / 6))
+
+        # variance penalty
+        mean = avg
+        variance = sum((x - mean) ** 2 for x in scores) / len(scores)
+        variance_penalty = 1 - variance
+
+        # hallucination penalty
+        hallucination_risk = self._calculate_hallucination_risk(result)
+        hallucination_penalty = 1 - hallucination_risk
+
+        confidence = avg * size_factor * variance_penalty * hallucination_penalty
+
+        return int(max(0, min(confidence * 100, 100)))
     
     def _calculate_hallucination_risk(self, result: Dict[str, Any]) -> float:
         suggestions = result.get("suggestions") or []
