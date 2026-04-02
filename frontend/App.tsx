@@ -438,7 +438,7 @@ const handleUploadSubmit = async (file: File | null) => {
     setError(null);
     try {
       updateProgress(50, 0);
-      const openingQuestion = await backendService.interviewCoachAgent(
+      const response = await backendService.interviewCoachAgent(
         state.currentResume,
         state.jobDescription,
         [],
@@ -447,7 +447,19 @@ const handleUploadSubmit = async (file: File | null) => {
       setState(prev => ({
         ...prev,
         status: WorkflowStatus.INTERVIEWING,
-        interviewHistory: [{ role: 'agent', text: openingQuestion }],
+        interviewHistory: [{ 
+          role: 'agent', 
+          text: response.text,
+          confidence_score: response.confidence_score,
+          reasoning: response.reasoning,
+          decision_trace: response.decision_trace,
+          improvement_suggestion: response.improvement_suggestion,
+          answer_score: response.answer_score,
+          can_proceed: response.can_proceed,
+          bias_warnings: response.bias_warnings,
+          governance_flags: response.governance_flags,
+          requires_human_review: response.requires_human_review,
+        }],
       }));
     } catch (err: any) {
       setError(err.message);
@@ -467,16 +479,28 @@ const handleUploadSubmit = async (file: File | null) => {
     startLoading('Coach is thinking...', ['Analyzing your response', 'Generating feedback']);
     try {
       updateProgress(50, 0);
-      const responseText = await backendService.interviewCoachAgent(
+      const response = await backendService.interviewCoachAgent(
         state.currentResume,
         state.jobDescription,
         updatedHistory,
       );
-      const interviewComplete = isInterviewCompleteResponse(responseText);
+      const interviewComplete = isInterviewCompleteResponse(response.text);
       updateProgress(100, 1);
       setState(prev => ({
         ...prev,
-        interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }],
+        interviewHistory: [...updatedHistory, { 
+          role: 'agent', 
+          text: response.text,
+          confidence_score: response.confidence_score,
+          reasoning: response.reasoning,
+          decision_trace: response.decision_trace,
+          improvement_suggestion: response.improvement_suggestion,
+          answer_score: response.answer_score,
+          can_proceed: response.can_proceed,
+          bias_warnings: response.bias_warnings,
+          governance_flags: response.governance_flags,
+          requires_human_review: response.requires_human_review,
+        }],
         status: interviewComplete ? WorkflowStatus.COMPLETED : prev.status,
       }));
     } catch (err: any) {

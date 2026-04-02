@@ -4,6 +4,7 @@ import { AlignmentReport, ContentStrengthReport, ResumeSchema, ResumeCriticRepor
 import { resolveResumeLocation } from '@/utils/resolve-resume-location';
 import { capitalizeFirst } from '@/utils/text';
 import { ReportHeader } from './ReportHeader';
+import { TransparencyMetadata } from './TransparencyMetadata';
 
 export const UploadStep: React.FC<{
   onUploadSubmit: (file: File | null) => void; // null = use manual resume from preview panel
@@ -1554,6 +1555,7 @@ export const InterviewStep: React.FC<{
                   {msg.text}
                 </ReactMarkdown>
               </div>
+              <TransparencyMetadata message={msg} />
             </div>
           </div>
         ))}
