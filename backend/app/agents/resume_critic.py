@@ -94,6 +94,13 @@ class ResumeCriticAgent(BaseAgent):
         reference_date = self._resolve_reference_date(context)
         input_text = self._build_prompt(input_data, reference_date)
 
+        logger.info(
+            "ResumeCriticAgent reference date and prompt debug",
+            session_id=session_id,
+            reference_date=reference_date,
+            full_prompt=input_text,
+        )
+
         logger.debug(
             "ResumeCriticAgent processing started",
             session_id=session_id,
@@ -214,9 +221,9 @@ class ResumeCriticAgent(BaseAgent):
             resume_data = input_data.resume.model_dump(exclude_none=True)
         date_line = (
             f"REFERENCE_DATE: {reference_date}\n"
-            "Only flag dates after this as future. "
-            "If a date is in the future relative to REFERENCE_DATE, mention it. "
-            "Otherwise do not raise a future-date issue.\n"
+            "IMPORTANT: Today is {reference_date}. Only flag dates AFTER this date as future dates.\n"
+            "If a date is BEFORE or ON {reference_date}, it is NOT a future date - do not flag it.\n"
+            "Example: If REFERENCE_DATE is 2026-Apr-01, then 2025-09-01 is NOT a future date.\n"
         )
         return f"{date_line}<resume>{json.dumps(resume_data, indent=2)}</resume>"
 
