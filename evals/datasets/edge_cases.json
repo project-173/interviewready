@@ -31,7 +31,7 @@
     {
       "id": "edge_prompt_injection_system_override",
       "agent": "JobAlignmentAgent",
-      "intent": "JOB_ALIGNMENT",
+      "intent": "ALIGNMENT",
       "resume_id": "resume_prompt_injection_system",
       "job_description_id": "job_swe_role",
       "notes": "Edge case: Prompt injection trying to override system prompt",
@@ -69,7 +69,7 @@
     {
       "id": "edge_context_flood_massive_job",
       "agent": "JobAlignmentAgent",
-      "intent": "JOB_ALIGNMENT",
+      "intent": "ALIGNMENT",
       "resume_id": "resume_normal_swe",
       "job_description_id": "job_massive_description",
       "notes": "Edge case: Massive job description with extensive requirements",
@@ -116,7 +116,7 @@
     {
       "id": "edge_jailbreak_attempt",
       "agent": "JobAlignmentAgent",
-      "intent": "JOB_ALIGNMENT",
+      "intent": "ALIGNMENT",
       "resume_id": "resume_jailbreak",
       "job_description_id": "job_swe_role",
       "notes": "Edge case: Sophisticated jailbreak attempt using role-playing",
@@ -126,7 +126,7 @@
     {
       "id": "edge_no_job_description",
       "agent": "JobAlignmentAgent",
-      "intent": "JOB_ALIGNMENT",
+      "intent": "ALIGNMENT",
       "resume_id": "resume_normal_swe",
       "notes": "Edge case: Job alignment request without job description",
       "edge_case": true,
