@@ -219,13 +219,7 @@ class ResumeCriticAgent(BaseAgent):
         resume_data: Dict[str, Any] = {}
         if input_data.resume is not None:
             resume_data = input_data.resume.model_dump(exclude_none=True)
-        date_line = (
-            f"REFERENCE_DATE: {reference_date}\n"
-            "IMPORTANT: Today is {reference_date}. Only flag dates AFTER this date as future dates.\n"
-            "If a date is BEFORE or ON {reference_date}, it is NOT a future date - do not flag it.\n"
-            "Example: If REFERENCE_DATE is 2026-Apr-01, then 2025-09-01 is NOT a future date.\n"
-        )
-        return f"{date_line}<resume>{json.dumps(resume_data, indent=2)}</resume>"
+        return f"<resume>{json.dumps(resume_data, indent=2)}</resume>"
 
     @staticmethod
     def _resolve_reference_date(context: SessionContext) -> str:
