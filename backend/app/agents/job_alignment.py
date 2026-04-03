@@ -13,6 +13,7 @@ from ..models.agent import AgentResponse, AlignmentReport, AgentInput
 from ..models.session import SessionContext
 from ..utils.json_parser import parse_json_object
 from ..core.constants import ANTI_JAILBREAK_DIRECTIVE, RESUME_SCHEMA
+from ..utils.resume_location import filter_locations
 
 
 class JobAlignmentAgent(BaseAgent):
@@ -203,6 +204,24 @@ class JobAlignmentAgent(BaseAgent):
             experience_match: List[str] = structured_result.get("experienceMatch", [])
             summary: str = structured_result.get("summary", "")
 
+            resume_payload: Dict[str, Any] = {}
+            if input_data.resume is not None:
+                resume_payload = input_data.resume.model_dump(exclude_none=True)
+            elif input_data.resume_document is not None:
+                resume_payload = input_data.resume_document.model_dump(exclude_none=True)
+
+            removed_skills = 0
+            removed_experience = 0
+            if resume_payload:
+                filtered_skills = filter_locations(resume_payload, skills_match)
+                filtered_experience = filter_locations(resume_payload, experience_match)
+                removed_skills = len(skills_match) - len(filtered_skills)
+                removed_experience = len(experience_match) - len(filtered_experience)
+                skills_match = filtered_skills
+                experience_match = filtered_experience
+                structured_result["skillsMatch"] = skills_match
+                structured_result["experienceMatch"] = experience_match
+
             confidence = self._compute_confidence(skills_match, missing_skills, experience_match)
             decision_trace = [
                 "Parsed LLM output",
@@ -216,6 +235,10 @@ class JobAlignmentAgent(BaseAgent):
                 "experienceMatch": experience_match,
                 "summary": summary,
                 "agentVersion": "1.0",
+                "locationsFiltered": {
+                    "skillsMatch": removed_skills,
+                    "experienceMatch": removed_experience,
+                },
             }
 
             return AgentResponse(

@@ -13,6 +13,7 @@ from ..core.config import settings
 from ..core.constants import ANTI_JAILBREAK_DIRECTIVE, RESUME_SCHEMA
 from ..models.agent import AgentResponse, ResumeCriticReport, AgentInput
 from ..models.session import SessionContext
+from ..utils.resume_location import resume_location_exists
 
 class ResumeCriticAgent(BaseAgent):
     """Agent for analyzing resume structure, ATS compatibility, and impact."""
@@ -134,6 +135,23 @@ class ResumeCriticAgent(BaseAgent):
 
             structured_result = self.parse_and_validate(raw_critique, ResumeCriticReport).model_dump()
 
+            resume_payload: Dict[str, Any] = {}
+            if input_data.resume is not None:
+                resume_payload = input_data.resume.model_dump(exclude_none=True)
+
+            issues = structured_result.get("issues") or []
+            if resume_payload and isinstance(issues, list):
+                valid_issues = [
+                    issue
+                    for issue in issues
+                    if isinstance(issue, dict)
+                    and resume_location_exists(resume_payload, issue.get("location", ""))
+                ]
+                removed = len(issues) - len(valid_issues)
+                structured_result["issues"] = valid_issues
+            else:
+                removed = 0
+
             processing_time = time.time() - processing_start_time
             
             logger.debug("ResumeCriticAgent processing completed",
@@ -150,6 +168,7 @@ class ResumeCriticAgent(BaseAgent):
                 "analysis_type": "resume_critique",
                 "confidence_score": confidence,
                 "ats_compatibility_checked": True,
+                "locationsFiltered": removed,
             }
 
             response = AgentResponse(
