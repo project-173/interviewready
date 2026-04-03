@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "dataset_name": "job_alignment_edge_cases",
+  "agent": "JobAlignmentAgent",
+  "edge_cases": true,
+  "case_ids": [
+    "edge_prompt_injection_system_override",
+    "edge_context_flood_massive_job",
+    "edge_jailbreak_attempt",
+    "edge_no_job_description"
+  ]
+}

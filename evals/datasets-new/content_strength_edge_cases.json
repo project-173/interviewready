@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "dataset_name": "content_strength_edge_cases",
+  "agent": "ContentStrengthAgent",
+  "edge_cases": true,
+  "case_ids": [
+    "edge_irrelevant_recipe_resume",
+    "edge_mixed_languages"
+  ]
+}

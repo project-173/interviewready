@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "dataset_name": "resume_critic_edge_cases",
+  "agent": "ResumeCriticAgent",
+  "edge_cases": true,
+  "case_ids": [
+    "edge_no_resume_empty",
+    "edge_no_resume_missing_fields",
+    "edge_prompt_injection_ignore",
+    "edge_context_flood_long_resume",
+    "edge_malformed_json_resume",
+    "edge_special_characters",
+    "edge_contradictory_info"
+  ]
+}

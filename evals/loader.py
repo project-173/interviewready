@@ -106,9 +106,9 @@ def _load_json(path: Path) -> Any:
 
 def _load_fixtures(dataset_dir: Path, edge_cases: bool = False) -> EvalFixtures:
     if edge_cases:
-        resumes_path = dataset_dir / "edge_case_resumes.json"
-        jobs_path = dataset_dir / "edge_case_jobs.json"
-        histories_path = dataset_dir / "edge_case_histories.json"
+        resumes_path = dataset_dir / "edge_case_resumes_fixed.json"
+        jobs_path = dataset_dir / "edge_case_jobs_fixed.json"
+        histories_path = dataset_dir / "edge_case_histories_fixed.json"
         cases_path = dataset_dir / "edge_case_cases.json"
     else:
         resumes_path = dataset_dir / "resumes.json"

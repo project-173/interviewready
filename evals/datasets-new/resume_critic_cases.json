@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "dataset_name": "resume_critic_cases",
+  "agent": "ResumeCriticAgent",
+  "edge_cases": false,
+  "case_ids": [
+    "resume_critic_strong_swe",
+    "resume_critic_sparse_metrics",
+    "resume_critic_employment_gap",
+    "resume_critic_career_changer"
+  ]
+}

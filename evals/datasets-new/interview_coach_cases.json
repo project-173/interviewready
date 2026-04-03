@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "dataset_name": "interview_coach_cases",
+  "agent": "InterviewCoachAgent",
+  "edge_cases": false,
+  "case_ids": [
+    "interview_coach_t1",
+    "interview_coach_t5",
+    "interview_coach_t10",
+    "interview_coach_career_change_t1"
+  ]
+}

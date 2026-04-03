@@ -12,8 +12,39 @@ This package provides shared fixtures and loaders for:
 - `datasets/job_descriptions.json`
 - `datasets/histories.json`
 - `datasets/cases.json`
+- `datasets/edge_case_resumes_fixed.json`
+- `datasets/edge_case_jobs_fixed.json`
+- `datasets/edge_case_histories_fixed.json`
+- `datasets/edge_case_cases.json`
+- `datasets-new/*.json` (Langfuse dataset specs)
 
 Each fixture includes `notes` and `last_reviewed` for drift tracking.
+
+## Langfuse Datasets (8 total)
+The Langfuse datasets are defined in `datasets-new/` and map to subsets of the local fixtures:
+- `resume_critic_cases`
+- `resume_critic_edge_cases`
+- `content_strength_cases`
+- `content_strength_edge_cases`
+- `job_alignment_cases`
+- `job_alignment_edge_cases`
+- `interview_coach_cases`
+- `interview_coach_edge_cases`
+
+Create the datasets in Langfuse:
+```bash
+python evals/create_langfuse_datasets.py
+```
+
+Run experiments from Langfuse datasets:
+```bash
+python evals/run_langfuse_datasets.py --dataset resume_critic_cases
+```
+
+Run all 8 datasets:
+```bash
+python evals/run_langfuse_datasets.py
+```
 
 ## Run Naming
 Recommended run name format:

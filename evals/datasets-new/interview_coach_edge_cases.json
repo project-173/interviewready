@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "dataset_name": "interview_coach_edge_cases",
+  "agent": "InterviewCoachAgent",
+  "edge_cases": true,
+  "case_ids": [
+    "edge_irrelevant_code_snippets",
+    "edge_context_flood_long_history"
+  ]
+}

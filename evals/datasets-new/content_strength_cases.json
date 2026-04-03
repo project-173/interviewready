@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "dataset_name": "content_strength_cases",
+  "agent": "ContentStrengthAgent",
+  "edge_cases": false,
+  "case_ids": [
+    "content_strength_strong_swe",
+    "content_strength_sparse_metrics",
+    "content_strength_employment_gap",
+    "content_strength_overqualified"
+  ]
+}

@@ -221,6 +221,13 @@ def _make_evaluator(judge, run_name: str):
 
     def evaluator(*, input, output, **kwargs):
         try:
+            # Get usage details from judge service if available
+            usage_details = getattr(judge, '_last_usage_details', None)
+            cost_details = None
+            
+            if usage_details and hasattr(judge, '_build_cost_details'):
+                cost_details = judge._build_cost_details(usage_details)
+            
             evaluation = judge.evaluate(
                 agent_name=output.get("agent", "unknown"),
                 input_data=output.get("input_summary", ""),
@@ -231,12 +238,20 @@ def _make_evaluator(judge, run_name: str):
                 message_history=output.get("message_history"),
                 run_name=_build_run_name(output.get("agent", "unknown"), None),
             )
-            reason = (evaluation.reasoning or "")[:200]
+            reason = evaluation.reasoning or ""
             meta = {
                 "case_id": output.get("case_id"),
                 "agent": output.get("agent"),
                 "batch_run_name": run_name,
             }
+            
+            # Add cost details to metadata if available
+            if cost_details:
+                meta["cost_details"] = cost_details
+                meta["total_cost_usd"] = cost_details.get("total", 0.0)
+            if usage_details:
+                meta["usage_details"] = usage_details
+            
             return [
                 Evaluation(name="judge_quality_score", value=evaluation.quality_score, comment=reason, metadata=meta),
                 Evaluation(name="judge_accuracy_score", value=evaluation.accuracy_score, comment=reason, metadata=meta),

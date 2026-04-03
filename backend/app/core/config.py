@@ -53,8 +53,8 @@ class Settings(BaseSettings):
     LANGFUSE_LLM_AS_A_JUDGE_ENABLED: bool = True
 
     # Optional judge cost estimation (USD per 1K tokens)
-    JUDGE_PROMPT_COST_PER_1K_USD: Optional[float] = None
-    JUDGE_COMPLETION_COST_PER_1K_USD: Optional[float] = None
+    JUDGE_PROMPT_COST_PER_1K_USD: Optional[float] = 0.0003
+    JUDGE_COMPLETION_COST_PER_1K_USD: Optional[float] = 0.0025
 
     # Evals
     SKIP_EVAL_TESTS: bool = True

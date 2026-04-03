@@ -48,6 +48,7 @@ Provide a JSON response with:
         self.gemini_service = gemini_service
         self.langfuse = get_client()
         self.temperature = temperature
+        self._last_usage_details = None
 
     def evaluate(
         self,
@@ -102,12 +103,15 @@ Provide a JSON response with:
                         temperature=self.temperature,
                     )
                 )
+                # Store usage details for access by evaluator
+                self._last_usage_details = usage_details
             else:
                 response = self.gemini_service.generate_response(
                     system_prompt=system_prompt,
                     user_input=judge_input,
                     temperature=self.temperature,
                 )
+                self._last_usage_details = None
 
             evaluation = self._parse_judge_response(response)
 

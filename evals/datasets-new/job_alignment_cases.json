@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "dataset_name": "job_alignment_cases",
+  "agent": "JobAlignmentAgent",
+  "edge_cases": false,
+  "case_ids": [
+    "alignment_backend_strong",
+    "alignment_frontend_sparse",
+    "alignment_data_career_change",
+    "alignment_platform_senior"
+  ]
+}
