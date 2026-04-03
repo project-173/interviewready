@@ -56,7 +56,20 @@ const AppContent: React.FC = () => {
   });
 
   const [error, setError] = useState<string | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const initSession = async () => {
+      try {
+        await backendService.initialize();
+        setSessionReady(true);
+      } catch (err) {
+        setError(`Failed to initialize session: ${err}`);
+      }
+    };
+    initSession();
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('interview_ready_state', JSON.stringify(state));
@@ -165,14 +178,20 @@ const AppContent: React.FC = () => {
               </div>
             )}
 
-            <div className="relative">
-              <WorkflowController 
-                state={state} 
-                setState={setState} 
-                setError={setError}
-                chatEndRef={chatEndRef}
-              />
-            </div>
+            {!sessionReady ? (
+              <div className="flex items-center justify-center h-32">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-900"></div>
+              </div>
+            ) : (
+              <div className="relative">
+                <WorkflowController 
+                  state={state} 
+                  setState={setState} 
+                  setError={setError}
+                  chatEndRef={chatEndRef}
+                />
+              </div>
+            )}
           </div>
 
           <div className="p-4 border-t border-slate-200 bg-slate-50/50 flex items-center justify-between text-[10px] text-slate-400 font-medium uppercase tracking-tight">

@@ -16,6 +16,11 @@ from app.orchestration import OrchestrationAgent
 _session_store = SessionStore()
 
 
+def get_session_store() -> SessionStore:
+    """Return the session store instance."""
+    return _session_store
+
+
 @lru_cache(maxsize=1)
 def get_orchestration_agent() -> OrchestrationAgent:
     """Build and cache the orchestration agent graph and dependencies."""
