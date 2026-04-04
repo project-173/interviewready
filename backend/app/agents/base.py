@@ -2,9 +2,10 @@
 
 import json
 import time
+from functools import wraps
 from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import Protocol, Optional, Dict, Any, Union, List, TypeVar, Type
+from typing import Protocol, Optional, Dict, Any, Union, List, TypeVar, Type, Callable
 
 from app.utils.json_parser import parse_json_object
 from langfuse import Langfuse, propagate_attributes
@@ -115,12 +116,18 @@ class BaseAgent(ABC, BaseAgentProtocol):
             return json.dumps(value, indent=2)
         return None
 
-    def call_gemini(self, input_text: str, context: SessionContext) -> str:
+    def call_gemini(
+        self,
+        input_text: str,
+        context: SessionContext,
+        tools: Optional[List[Callable]] = None,
+    ) -> str:
         """Call Gemini API with system prompt and user input.
 
         Args:
             input_text: User input text
             context: Session context for additional information
+            tools: Optional list of Gemini tools/functions
 
         Returns:
             Gemini response text
@@ -130,6 +137,40 @@ class BaseAgent(ABC, BaseAgentProtocol):
         agent_name = self.get_name()
 
         user_id = getattr(context, "user_id", None)
+
+        def _wrap_tool(tool: Callable) -> Callable:
+            if not callable(tool):
+                return tool
+
+            tool_name = getattr(tool, "__name__", type(tool).__name__)
+
+            @wraps(tool)
+            def _wrapped(*args, **kwargs):
+                logger.debug(
+                    "Gemini tool call started",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    tool_name=tool_name,
+                    args_count=len(args),
+                    kwargs_keys=list(kwargs.keys()),
+                )
+                tool_start = time.time()
+                result = tool(*args, **kwargs)
+                tool_elapsed = time.time() - tool_start
+                logger.debug(
+                    "Gemini tool call completed",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    tool_name=tool_name,
+                    execution_time_ms=round(tool_elapsed * 1000, 2),
+                )
+                return result
+
+            return _wrapped
+
+        wrapped_tools = None
+        if tools:
+            wrapped_tools = [_wrap_tool(tool) for tool in tools]
 
         with langfuse.start_as_current_observation(
             as_type="span",
@@ -183,6 +224,7 @@ class BaseAgent(ABC, BaseAgentProtocol):
                             response = self.mock_service.generate_response(
                                 system_prompt=self.system_prompt,
                                 user_input=input_text,
+                                tools=wrapped_tools,
                             )
                         else:
                             # Use real Gemini service
@@ -194,7 +236,18 @@ class BaseAgent(ABC, BaseAgentProtocol):
                             response = self.gemini_service.generate_response(
                                 system_prompt=self.system_prompt,
                                 user_input=input_text,
+                                tools=wrapped_tools,
                             )
+
+                        if response is None:
+                            logger.warning(
+                                "Gemini response was None",
+                                session_id=session_id,
+                                agent_name=agent_name,
+                            )
+                            response = ""
+                        elif not isinstance(response, str):
+                            response = str(response)
 
                         span.update(output=response)
                         api_execution_time = time.time() - api_start_time

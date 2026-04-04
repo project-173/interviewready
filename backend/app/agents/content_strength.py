@@ -12,6 +12,7 @@ from ..core.config import settings
 from ..core.constants import ANTI_JAILBREAK_DIRECTIVE, RESUME_SCHEMA
 from ..models.agent import AgentResponse, ContentStrengthReport, AgentInput
 from ..models.session import SessionContext
+from ..utils.resume_location import resume_location_exists
 
 class ContentStrengthAgent(BaseAgent):
     """Agent for analyzing content strength, skills reasoning, and evidence evaluation."""
@@ -138,6 +139,23 @@ class ContentStrengthAgent(BaseAgent):
 
             structured_result = self.parse_and_validate(raw_content, ContentStrengthReport).model_dump()
 
+            resume_payload: Dict[str, Any] = {}
+            if input_data.resume is not None:
+                resume_payload = input_data.resume.model_dump(exclude_none=True)
+
+            suggestions = structured_result.get("suggestions") or []
+            if resume_payload and isinstance(suggestions, list):
+                valid_suggestions = [
+                    suggestion
+                    for suggestion in suggestions
+                    if isinstance(suggestion, dict)
+                    and resume_location_exists(resume_payload, suggestion.get("location", ""))
+                ]
+                removed = len(suggestions) - len(valid_suggestions)
+                structured_result["suggestions"] = valid_suggestions
+            else:
+                removed = 0
+
             processing_time = time.time() - processing_start_time
             
             logger.debug("ContentStrengthAgent processing completed",
@@ -161,6 +179,7 @@ class ContentStrengthAgent(BaseAgent):
             sharp_metadata = {
                 "hallucinationRisk": hallucination_risk,
                 "overallConfidence": overall_confidence,
+                "locationsFiltered": removed,
             }
 
             response = AgentResponse(

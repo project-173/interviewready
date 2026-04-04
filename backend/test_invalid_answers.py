@@ -12,7 +12,9 @@ from app.models.session import SessionContext
 class DummyGeminiService:
     """Dummy Gemini service for testing."""
 
-    def generate_response(self, system_prompt: str, user_input: str) -> str:
+    def generate_response(
+        self, system_prompt: str, user_input: str, tools: list | None = None
+    ) -> str:
         return '{"current_question_number": 1, "question": "Test question"}'
 
 
