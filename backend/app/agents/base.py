@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import Protocol, Optional, Dict, Any, Union, List, TypeVar, Type
+from typing import Protocol, Optional, Dict, Any, Union, List, TypeVar, Type, Callable
 
 from app.utils.json_parser import parse_json_object
 from langfuse import Langfuse, propagate_attributes
@@ -115,12 +115,18 @@ class BaseAgent(ABC, BaseAgentProtocol):
             return json.dumps(value, indent=2)
         return None
 
-    def call_gemini(self, input_text: str, context: SessionContext) -> str:
+    def call_gemini(
+        self,
+        input_text: str,
+        context: SessionContext,
+        tools: Optional[List[Callable]] = None,
+    ) -> str:
         """Call Gemini API with system prompt and user input.
 
         Args:
             input_text: User input text
             context: Session context for additional information
+            tools: Optional list of Gemini tools/functions
 
         Returns:
             Gemini response text
@@ -183,6 +189,7 @@ class BaseAgent(ABC, BaseAgentProtocol):
                             response = self.mock_service.generate_response(
                                 system_prompt=self.system_prompt,
                                 user_input=input_text,
+                                tools=tools,
                             )
                         else:
                             # Use real Gemini service
@@ -194,7 +201,18 @@ class BaseAgent(ABC, BaseAgentProtocol):
                             response = self.gemini_service.generate_response(
                                 system_prompt=self.system_prompt,
                                 user_input=input_text,
+                                tools=tools,
                             )
+
+                        if response is None:
+                            logger.warning(
+                                "Gemini response was None",
+                                session_id=session_id,
+                                agent_name=agent_name,
+                            )
+                            response = ""
+                        elif not isinstance(response, str):
+                            response = str(response)
 
                         span.update(output=response)
                         api_execution_time = time.time() - api_start_time
