@@ -246,3 +246,33 @@ def test_resume_control_skips_extractor_after_review() -> None:
     assert isinstance(input_payload, AgentInput)
     assert input_payload.resume
     assert input_payload.resume.work[0].name == "Edited Resume"
+
+
+def test_rewind_with_new_resume_file_reextracts() -> None:
+    governance = SharpGovernanceService()
+    extractor = StubExtractorAgent()
+    resume_agent = StubAgent("ResumeCriticAgent")
+    orchestrator = OrchestrationAgent(
+        [extractor, resume_agent],
+        governance=governance,
+    )
+    context = SessionContext(session_id="s-rewind", user_id="u-rewind")
+    request = ChatRequest(
+        intent="RESUME_CRITIC",
+        resumeFile=ResumeFile(data="fake-base64", fileType="pdf"),
+    )
+
+    first_response = orchestrator.orchestrate(request, context)
+    checkpoint_id = (first_response.sharp_metadata or {}).get("checkpoint_id")
+    assert checkpoint_id
+
+    rewind_request = ChatRequest(
+        intent="RESUME_CRITIC",
+        control="rewind",
+        checkpointId=checkpoint_id,
+        resumeFile=ResumeFile(data="new-fake-base64", fileType="pdf"),
+    )
+
+    orchestrator.orchestrate(rewind_request, context)
+
+    assert extractor.calls == 2

@@ -146,6 +146,7 @@ class OrchestrationAgent:
             state.response = None
             state.input = None
             state.halt = False
+            self._apply_resume_override(state, request)
             return state
 
         if control == "resume":
@@ -166,14 +167,7 @@ class OrchestrationAgent:
             state.halt = False
             state.needs_review = False
             state.review_payload = None
-            if request.resumeData and self._has_content(request.resumeData):
-                state.resume = request.resumeData
-                state.resume_document = self._build_resume_doc(
-                    state.resume, "resumeData"
-                )
-                self._update_state_memory(
-                    state, current_resume=state.resume.model_dump()
-                )
+            self._apply_resume_override(state, request)
             return state
 
         if control:
@@ -185,6 +179,35 @@ class OrchestrationAgent:
             agent_sequence=sequence,
             shared_memory=dict(context.shared_memory or {}),
         )
+
+    def _apply_resume_override(
+        self, state: OrchestrationState, request: ChatRequest
+    ) -> None:
+        if request.resumeData and self._has_content(request.resumeData):
+            state.resume = request.resumeData
+            state.resume_document = self._build_resume_doc(
+                state.resume, "resumeData"
+            )
+            self._update_state_memory(
+                state,
+                current_resume=state.resume.model_dump(exclude_none=True),
+            )
+            return
+
+        if request.resumeFile:
+            state.resume = None
+            state.resume_document = None
+            state.needs_review = False
+            state.review_payload = None
+            self._update_state_memory(
+                state,
+                current_resume=None,
+                extractor_confidence_score=None,
+                extractor_low_confidence_fields=None,
+                extractor_needs_review=None,
+                extractor_validation_errors=None,
+                review_payload=None,
+            )
 
     # ---------- Workflow ----------
 
