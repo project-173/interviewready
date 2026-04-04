@@ -1475,7 +1475,7 @@ export const InterviewStep: React.FC<{
 
   if (mode === "VOICE") {
     return (
-      <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-[calc(100vh-340px)] flex flex-col items-center justify-center space-y-12">
+      <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-[calc(100vh-150px)] flex flex-col items-center justify-center space-y-12">
         <div className="text-center space-y-4">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
             {isSpeaking ? (
@@ -1611,7 +1611,7 @@ export const InterviewStep: React.FC<{
   }
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-[calc(100vh-340px)] flex flex-col">
+    <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-[calc(100vh-150px)] flex flex-col">
       <div className="flex-1 overflow-y-auto space-y-4 pr-3 mb-4 scrollbar-thin scrollbar-thumb-slate-200">
         {history.map((msg, i) => (
           <div
