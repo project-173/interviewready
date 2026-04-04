@@ -2,6 +2,7 @@
 
 import json
 import time
+from functools import wraps
 from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Protocol, Optional, Dict, Any, Union, List, TypeVar, Type, Callable
@@ -137,6 +138,40 @@ class BaseAgent(ABC, BaseAgentProtocol):
 
         user_id = getattr(context, "user_id", None)
 
+        def _wrap_tool(tool: Callable) -> Callable:
+            if not callable(tool):
+                return tool
+
+            tool_name = getattr(tool, "__name__", type(tool).__name__)
+
+            @wraps(tool)
+            def _wrapped(*args, **kwargs):
+                logger.debug(
+                    "Gemini tool call started",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    tool_name=tool_name,
+                    args_count=len(args),
+                    kwargs_keys=list(kwargs.keys()),
+                )
+                tool_start = time.time()
+                result = tool(*args, **kwargs)
+                tool_elapsed = time.time() - tool_start
+                logger.debug(
+                    "Gemini tool call completed",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    tool_name=tool_name,
+                    execution_time_ms=round(tool_elapsed * 1000, 2),
+                )
+                return result
+
+            return _wrapped
+
+        wrapped_tools = None
+        if tools:
+            wrapped_tools = [_wrap_tool(tool) for tool in tools]
+
         with langfuse.start_as_current_observation(
             as_type="span",
             name=f"{agent_name}_llm_call",
@@ -189,7 +224,7 @@ class BaseAgent(ABC, BaseAgentProtocol):
                             response = self.mock_service.generate_response(
                                 system_prompt=self.system_prompt,
                                 user_input=input_text,
-                                tools=tools,
+                                tools=wrapped_tools,
                             )
                         else:
                             # Use real Gemini service
@@ -201,7 +236,7 @@ class BaseAgent(ABC, BaseAgentProtocol):
                             response = self.gemini_service.generate_response(
                                 system_prompt=self.system_prompt,
                                 user_input=input_text,
-                                tools=tools,
+                                tools=wrapped_tools,
                             )
 
                         if response is None:
