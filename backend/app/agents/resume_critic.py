@@ -97,7 +97,7 @@ class ResumeCriticAgent(BaseAgent):
         agent_name = self.get_name()
         processing_start_time = time.time()
 
-        input_text = self._build_prompt(input_data)
+        input_text = self._build_prompt(context)
 
         logger.debug(
             "ResumeCriticAgent processing started",
@@ -236,11 +236,9 @@ class ResumeCriticAgent(BaseAgent):
         return {}
 
     @staticmethod
-    def _build_prompt(input_data: AgentInput) -> str:
-        resume_data: Dict[str, Any] = {}
-        if input_data.resume is not None:
-            resume_data = input_data.resume.model_dump(exclude_none=True)
-        return f"<resume>{json.dumps(resume_data, indent=2)}</resume>"
+    def _build_prompt(context: SessionContext) -> str:
+        resume_data = context.resume_data or "{}"
+        return f"<resume>{resume_data}</resume>"
 
     @staticmethod
     def _resolve_reference_date(context: SessionContext) -> str:

@@ -44,7 +44,6 @@ class OrchestrationState:
     agent_sequence: list[str]
     artifacts: list[AnalysisArtifact] = field(default_factory=list)
     input: Optional[AgentInput] = None
-    resume: Optional[Resume] = None
     resume_document: Optional[ResumeDocument] = None
     needs_review: bool = False
     review_payload: Optional[dict[str, Any]] = None
@@ -105,7 +104,7 @@ class OrchestrationAgent:
                 checkpoint_id = (
                     final_state.checkpoint_key
                     if final_state is not None
-                    else result.get("checkpoint_id")
+                    else result.get("checkpoint_key") or result.get("checkpoint_id")
                 )
                 review_payload = (
                     final_state.review_payload
@@ -146,6 +145,7 @@ class OrchestrationAgent:
             state.response = None
             state.input = None
             state.halt = False
+            state.index = 0
             self._apply_resume_override(state, request)
             return state
 
@@ -184,19 +184,18 @@ class OrchestrationAgent:
         self, state: OrchestrationState, request: ChatRequest
     ) -> None:
         if request.resumeData and self._has_content(request.resumeData):
-            state.resume = request.resumeData
-            state.resume_document = self._build_resume_doc(
-                state.resume, "resumeData"
-            )
+            resume = request.resumeData
+            state.resume_document = self._build_resume_doc(resume, "resumeData")
+            state.context.resume_data = self._serialize_resume(resume)
             self._update_state_memory(
                 state,
-                current_resume=state.resume.model_dump(exclude_none=True),
+                current_resume=resume.model_dump(exclude_none=True),
             )
             return
 
         if request.resumeFile:
-            state.resume = None
             state.resume_document = None
+            state.context.resume_data = None
             state.needs_review = False
             state.review_payload = None
             self._update_state_memory(
@@ -243,22 +242,16 @@ class OrchestrationAgent:
 
         resume = None
         resume_doc = None
+        resume_text = None
         confidence_score = None
         low_confidence_fields: list[str] = []
         validation_errors: list[str] = []
         needs_review = False
 
-        if state.resume and self._has_content(state.resume):
-            resume = state.resume
-            resume_doc = state.resume_document or self._build_resume_doc(
-                resume, "resumeData"
-            )
-            validation_errors = self._validate_resume_data(resume)
-            confidence_score = 1.0
-            needs_review = bool(validation_errors)
-        elif request.resumeData and self._has_content(request.resumeData):
+        if request.resumeData and self._has_content(request.resumeData):
             resume = request.resumeData
             resume_doc = self._build_resume_doc(resume, "resumeData")
+            resume_text = self._serialize_resume(resume)
             validation_errors = self._validate_resume_data(resume)
             confidence_score = 1.0
             needs_review = bool(validation_errors)
@@ -271,6 +264,7 @@ class OrchestrationAgent:
                 parsed = json.loads(response.content or "{}")
                 resume = Resume.model_validate(parsed)
                 resume_doc = self._build_resume_doc(resume, "resumeFile")
+                resume_text = self._serialize_resume(resume)
                 confidence_score = response.confidence_score or 0.0
                 low_confidence_fields = response.low_confidence_fields or []
                 sharp_metadata = response.sharp_metadata or {}
@@ -289,13 +283,26 @@ class OrchestrationAgent:
                 state.halt = True
                 return state
         else:
-            state.response = self._failure(
-                "No resume provided.",
-                "Upload resume or provide resumeData.",
-                context,
-            )
-            state.halt = True
-            return state
+            parsed_from_context = None
+            if context.resume_data:
+                parsed_from_context = self._parse_resume_data(context.resume_data)
+            if parsed_from_context and self._has_content(parsed_from_context):
+                resume = parsed_from_context
+                resume_doc = state.resume_document or self._build_resume_doc(
+                    resume, "resumeData"
+                )
+                resume_text = context.resume_data
+                validation_errors = self._validate_resume_data(resume)
+                confidence_score = 1.0
+                needs_review = bool(validation_errors)
+            else:
+                state.response = self._failure(
+                    "No resume provided.",
+                    "Upload resume or provide resumeData.",
+                    context,
+                )
+                state.halt = True
+                return state
 
         if resume is None:
             state.response = self._failure(
@@ -309,6 +316,9 @@ class OrchestrationAgent:
 
         if resume_doc is None:
             resume_doc = self._build_resume_doc(resume, "resumeData")
+        if resume_text is None:
+            resume_text = self._serialize_resume(resume)
+        context.resume_data = resume_text
 
         review_payload = None
         if needs_review:
@@ -319,7 +329,6 @@ class OrchestrationAgent:
                 "fields_requiring_attention": low_confidence_fields,
             }
 
-        state.resume = resume
         state.resume_document = resume_doc
         state.needs_review = needs_review
         state.review_payload = review_payload
@@ -400,9 +409,10 @@ class OrchestrationAgent:
     def _build_agent_input(self, state: OrchestrationState) -> AgentInput:
         request = state.request
         intent = self._parse_intent(request.intent)
+        resume = self._resume_from_state(state)
         return AgentInput(
             intent=intent,
-            resume=state.resume,
+            resume=resume,
             resume_document=state.resume_document,
             job_description=request.jobDescription or "",
             message_history=request.messageHistory or [],
@@ -597,6 +607,35 @@ class OrchestrationAgent:
     def _build_resume_doc(self, resume: Resume, source: str) -> ResumeDocument:
         raw = json.dumps(resume.model_dump(exclude_none=True), indent=2)
         return ResumeDocument(source=source, raw_text=raw)
+
+    def _serialize_resume(self, resume: Resume) -> str:
+        return json.dumps(resume.model_dump(exclude_none=True), indent=2)
+
+    def _parse_resume_data(self, resume_data: str) -> Optional[Resume]:
+        if not resume_data or not isinstance(resume_data, str):
+            return None
+        try:
+            parsed = json.loads(resume_data)
+        except json.JSONDecodeError:
+            return None
+        try:
+            return Resume.model_validate(parsed)
+        except Exception:
+            return None
+
+    def _resume_from_state(self, state: OrchestrationState) -> Optional[Resume]:
+        context = state.context
+        if context.resume_data:
+            parsed = self._parse_resume_data(context.resume_data)
+            if parsed:
+                return parsed
+        current_resume = (state.shared_memory or {}).get("current_resume")
+        if current_resume:
+            try:
+                return Resume.model_validate(current_resume)
+            except Exception:
+                return None
+        return None
 
     def _has_content(self, resume: Resume) -> bool:
         def _contains_value(value: Any) -> bool:
