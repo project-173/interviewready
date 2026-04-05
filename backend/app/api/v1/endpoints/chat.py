@@ -14,6 +14,7 @@ from app.api.v1.services import (
 from langfuse import Langfuse, observe, propagate_attributes
 
 langfuse = Langfuse()
+from app.core.logging import logger
 from app.models import AgentResponse, ChatApiResponse, ChatRequest
 from app.utils.json_parser import parse_json_payload
 from app.core.limiter import limiter
@@ -74,9 +75,14 @@ async def chat_endpoint(
                 )
                 payload = _extract_api_payload(internal_response)
                 payload = _attach_payload_metadata(payload, internal_response)
+                metadata = _extract_response_metadata(internal_response)
                 result = ChatApiResponse(
                     agent=internal_response.agent_name,
-                    payload=payload
+                    payload=payload,
+                    confidence_score=internal_response.confidence_score,
+                    needs_review=internal_response.needs_review,
+                    low_confidence_fields=internal_response.low_confidence_fields or [],
+                    metadata=metadata,
                 )
                 langfuse.update_current_span(
                     output={
@@ -86,6 +92,14 @@ async def chat_endpoint(
                     }
                 )
                 return result
+            except ValueError as exc:
+                langfuse.update_current_span(
+                    output={"error": "invalid_request", "reason": str(exc)}
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
             except Exception as exc:
                 langfuse.update_current_span(
                     output={"error": "orchestration_failed", "reason": str(exc)}
@@ -134,8 +148,23 @@ def _attach_payload_metadata(
             "confidence_score": response.confidence_score,
             "needs_review": response.needs_review,
             "low_confidence_fields": response.low_confidence_fields or [],
+            "checkpoint_id": (response.sharp_metadata or {}).get("checkpoint_id"),
+            "review_payload": (response.sharp_metadata or {}).get("review_payload"),
+            "review_required": bool(response.needs_review),
         }
     )
     merged = dict(payload)
     merged["metadata"] = metadata
     return merged
+
+
+def _extract_response_metadata(response: AgentResponse) -> dict[str, Any]:
+    metadata = dict(response.sharp_metadata or {})
+    metadata.update(
+        {
+            "confidence_score": response.confidence_score,
+            "needs_review": response.needs_review,
+            "low_confidence_fields": response.low_confidence_fields or [],
+        }
+    )
+    return metadata

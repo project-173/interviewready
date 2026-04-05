@@ -1,150 +1,60 @@
 """LLM Guard scanner service for input/output security."""
 
-import subprocess
-import sys
 from typing import Optional, Tuple, List, Dict, Any
 from ..core.logging import logger
 from ..core.config import settings
 
 HAS_LLM_GUARD = False
-HAS_SPACY = False
-_vault = None
+
+# Cached scanner instances (created once at startup)
+# LLM Guard scanners:
+_prompt_injection_scanner = None
+_refusal_scanner = None
 
 
-def _ensure_spacy_models() -> bool:
-    """Try to install missing spaCy models. Returns True if successful."""
-    models = ["en_core_web_sm"]  # Only English model needed for resume/interview app
-
-    for model in models:
-        try:
-            import spacy
-
-            spacy.load(model)
-            logger.info(f"SpaCy model already installed: {model}")
-            continue
-        except Exception:
-            pass
-
-        # Try multiple installation methods
-        installation_methods = [
-            # Method 1: Use pip to install from the direct URL (from pyproject.toml)
-            lambda: subprocess.run(
-                [sys.executable, "-m", "pip", "install", 
-                 "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            ),
-            # Method 2: Use spaCy download command
-            lambda: subprocess.run(
-                [sys.executable, "-m", "spacy", "download", model],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            ),
-            # Method 3: Use pip install with model name
-            lambda: subprocess.run(
-                [sys.executable, "-m", "pip", "install", f"{model}==3.8.0"],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            ),
-        ]
-
-        installed = False
-        for i, install_method in enumerate(installation_methods, 1):
-            try:
-                logger.info(f"Trying installation method {i} for spaCy model: {model}...")
-                result = install_method()
-                if result.returncode == 0:
-                    logger.info(f"Successfully installed spaCy model: {model} using method {i}")
-                    installed = True
-                    break
-                else:
-                    logger.warning(
-                        f"Method {i} failed for {model}: {result.stderr[:200] if result.stderr else 'Unknown error'}"
-                    )
-            except Exception as e:
-                logger.warning(f"Method {i} exception for {model}: {e}")
-
-        if not installed:
-            logger.error(f"All installation methods failed for spaCy model: {model}")
-
-    try:
-        import spacy
-
-        spacy.load("en_core_web_sm")
-        return True
-    except Exception:
-        logger.error(f"Failed to load spaCy model after installation attempts")
-        return False
+# NOT LLM GUARD - DataFog for PII detection
+# DataFog is used instead of LLM Guard's Anonymize/Sensitive scanners
+import datafog as DataFog
 
 
 try:
-    from llm_guard.input_scanners import PromptInjection, Anonymize
-    from llm_guard.output_scanners import NoRefusal, Sensitive
-    from llm_guard.vault import Vault as LLMGuardVault
+    # LLM Guard: Only import PromptInjection and NoRefusal
+    # Anonymize and Sensitive are replaced by DataFog
+    from llm_guard.input_scanners import PromptInjection  # LLM Guard
+    from llm_guard.output_scanners import NoRefusal  # LLM Guard
 
     HAS_LLM_GUARD = True
-
-    try:
-        import spacy
-
-        try:
-            spacy.load("en_core_web_sm")
-            HAS_SPACY = True
-            logger.info("SpaCy en_core_web_sm model loaded successfully.")
-        except Exception:
-            logger.info("SpaCy model not found, attempting to install...")
-            if _ensure_spacy_models():
-                HAS_SPACY = True
-                logger.info("SpaCy model installed and loaded.")
-            else:
-                HAS_SPACY = False
-                logger.warning(
-                    "Could not install spaCy model. Anonymize and Sensitive scanners disabled."
-                )
-
-    except ImportError:
-        HAS_SPACY = False
+    logger.info("LLM Guard loaded (PromptInjection, NoRefusal)")
 
 except ImportError:
     HAS_LLM_GUARD = False
-    HAS_SPACY = False
-
-# Force disable spacy-dependent scanners for RAM optimization
-HAS_SPACY = False
-
-
-def get_vault() -> Optional["LLMGuardVault"]:
-    """Get or create the Vault instance for Anonymize scanner."""
-    global _vault
-    if _vault is None and HAS_LLM_GUARD:
-        try:
-            _vault = LLMGuardVault()
-        except Exception as e:
-            logger.warning(f"Failed to create Vault: {e}")
-            _vault = None
-    return _vault
+    logger.warning("LLM Guard not installed. Security scanning disabled.")
 
 
 class LLMGuardScanner:
     """Scanner for detecting prompt injection and sensitive content."""
 
     def __init__(self):
+        global _prompt_injection_scanner, _refusal_scanner
+
         self.enabled = getattr(settings, "LLM_GUARD_ENABLED", True) and HAS_LLM_GUARD
+
         if not HAS_LLM_GUARD:
             logger.warning("LLM Guard not installed. Security scanning disabled.")
         elif not self.enabled:
             logger.info("LLM Guard disabled via configuration.")
         else:
-            logger.info("LLM Guard initialized for input/output scanning.")
-            if HAS_SPACY:
-                logger.info("SpaCy loaded - Anonymize and Sensitive scanners ACTIVE.")
-            else:
-                logger.warning(
-                    "SpaCy not available - Anonymize and Sensitive scanners DISABLED."
-                )
+            logger.info("Initializing security scanners...")
+
+            # LLM Guard: PromptInjection scanner (input) - detects prompt injection attacks
+            _prompt_injection_scanner = PromptInjection()
+            logger.info("Created PromptInjection scanner at startup")  # LLM Guard
+
+            # LLM Guard: NoRefusal scanner (output) - detects model refusals
+            _refusal_scanner = NoRefusal()
+            logger.info("Created NoRefusal scanner at startup")  # LLM Guard
+
+            logger.info("Security scanners initialized (PromptInjection, NoRefusal)")
 
     def scan_input(self, prompt: str) -> Tuple[bool, str, List[Dict[str, Any]]]:
         """Scan user input for prompt injection and PII.
@@ -155,7 +65,6 @@ class LLMGuardScanner:
         Returns:
             Tuple of (is_safe, sanitized_prompt, list of issues)
         """
-        global HAS_SPACY
         if not self.enabled:
             return True, prompt, [{"note": "scanner_disabled"}]
 
@@ -163,12 +72,12 @@ class LLMGuardScanner:
         sanitized = prompt
 
         try:
-            scanner = PromptInjection()
-            sanitized, is_valid, risk_score = scanner.scan(sanitized)
+            # LLM Guard: Scan for prompt injection attacks
+            sanitized, is_valid, risk_score = _prompt_injection_scanner.scan(sanitized)
 
             if not is_valid:
                 issue = {
-                    "scanner": "PromptInjection",
+                    "scanner": "PromptInjection",  # LLM Guard
                     "risk_score": risk_score,
                     "reason": "Potential prompt injection detected",
                 }
@@ -177,47 +86,22 @@ class LLMGuardScanner:
                 )
                 return False, sanitized, [issue]
 
-            if HAS_SPACY:
-                try:
-                    vault = get_vault()
-                    if vault:
-                        try:
-                            anonymizer = Anonymize(vault=vault, language="en")
-                        except SystemExit:
-                            logger.warning(
-                                "SpaCy Anonymize scanner initialization failed with SystemExit, disabling spaCy scanners"
-                            )
-                            HAS_SPACY = False
-                            anonymizer = None
-                        
-                        if anonymizer is not None:
-                            sanitized, is_valid, risk_score = anonymizer.scan(sanitized)
-                            if not is_valid:
-                                issue = {
-                                    "scanner": "Anonymize",
-                                    "risk_score": risk_score,
-                                    "reason": "PII detected in input",
-                                }
-                                issues.append(issue)
-                except SystemExit:
-                    # Handle spaCy download failures that cause SystemExit
-                    logger.warning(
-                        "SpaCy Anonymize scanner failed with SystemExit, disabling spaCy scanners"
-                    )
-                    HAS_SPACY = False
-                except Exception as e:
-                    if (
-                        "spacy" in str(e).lower()
-                        or "zh_core" in str(e).lower()
-                        or "download" in str(e).lower()
-                        or "model" in str(e).lower()
-                    ):
-                        logger.warning(
-                            f"SpaCy Anonymize scanner failed, disabling spaCy scanners: {e}"
-                        )
-                        HAS_SPACY = False
-                    else:
-                        raise
+            # NOT LLM GUARD - DataFog with regex engine for PII detection in input
+            # DataFog.scan_prompt() scans user input for PII (emails, phones, SSN, etc.)
+            # Using regex engine (~1 MB) instead of spaCy to avoid large model downloads
+            try:
+                datafog_result = DataFog.scan_prompt(sanitized, engine="regex")
+                if datafog_result.entities:
+                    # Redact PII using DataFog
+                    sanitized = DataFog.sanitize(sanitized, engine="regex")
+                    issue = {
+                        "scanner": "DataFog",  # NOT LLM GUARD
+                        "risk_score": min(len(datafog_result.entities) / 10, 1.0),
+                        "reason": f"PII detected in input ({len(datafog_result.entities)} entities)",
+                    }
+                    issues.append(issue)
+            except Exception as e:
+                logger.warning(f"DataFog PII scan failed: {e}")
 
             return True, sanitized, issues
 
@@ -234,7 +118,6 @@ class LLMGuardScanner:
         Returns:
             Tuple of (is_safe, sanitized_output, list of issues)
         """
-        global HAS_SPACY
         if not self.enabled:
             return True, output, [{"note": "scanner_disabled"}]
 
@@ -242,63 +125,39 @@ class LLMGuardScanner:
         sanitized = output
 
         try:
-            refusal_scanner = NoRefusal()
-            sanitized, is_valid, risk_score = refusal_scanner.scan("", sanitized)
+            # LLM Guard: Scan for model refusals
+            sanitized, is_valid, risk_score = _refusal_scanner.scan("", sanitized)
             if not is_valid:
                 issues.append(
                     {
-                        "scanner": "NoRefusal",
+                        "scanner": "NoRefusal",  # LLM Guard
                         "risk_score": risk_score,
                         "reason": "Refusal detected",
                     }
                 )
 
-            if HAS_SPACY:
-                try:
-                    try:
-                        sensitive_scanner = Sensitive()
-                    except SystemExit:
-                        logger.warning(
-                            "SpaCy Sensitive scanner initialization failed with SystemExit, disabling spaCy scanners"
-                        )
-                        HAS_SPACY = False
-                        sensitive_scanner = None
-                    
-                    if sensitive_scanner is not None:
-                        sanitized, is_valid, risk_score = sensitive_scanner.scan(
-                            "", sanitized
-                        )
-                        if not is_valid:
-                            issues.append(
-                                {
-                                    "scanner": "Sensitive",
-                                    "risk_score": risk_score,
-                                    "reason": "Sensitive content detected",
-                                }
-                            )
-                except SystemExit:
-                    # Handle spaCy download failures that cause SystemExit
-                    logger.warning(
-                        "SpaCy Sensitive scanner failed with SystemExit, disabling spaCy scanners"
-                    )
-                    HAS_SPACY = False
-                except Exception as e:
-                    if (
-                        "spacy" in str(e).lower()
-                        or "zh_core" in str(e).lower()
-                        or "download" in str(e).lower()
-                        or "model" in str(e).lower()
-                    ):
-                        logger.warning(
-                            f"SpaCy Sensitive scanner failed, disabling spaCy scanners: {e}"
-                        )
-                        HAS_SPACY = False
-                    else:
-                        raise
+            # NOT LLM GUARD - DataFog with regex engine for PII detection in output
+            # DataFog.filter_output() scans model output for PII
+            # Using regex engine (~1 MB) instead of spaCy to avoid large model downloads
+            try:
+                datafog_result = DataFog.filter_output(sanitized, engine="regex")
+                if datafog_result.entities:
+                    # Redact PII using DataFog
+                    sanitized = datafog_result.redacted_text
+                    issue = {
+                        "scanner": "DataFog",  # NOT LLM GUARD
+                        "risk_score": min(len(datafog_result.entities) / 10, 1.0),
+                        "reason": f"Sensitive content detected in output ({len(datafog_result.entities)} entities)",
+                    }
+                    issues.append(issue)
+            except Exception as e:
+                logger.warning(f"DataFog output scan failed: {e}")
 
             if issues:
                 logger.security_event(
-                    "output_sensitive_detected", risk_count=len(issues), issues=issues
+                    "output_sensitive_detected",
+                    risk_count=len(issues),
+                    issues=issues,
                 )
                 return False, sanitized, issues
 

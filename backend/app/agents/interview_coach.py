@@ -75,6 +75,12 @@ PROGRESSION RULES:
 - If the evaluator says can_proceed is false: Re-ask the same question with constructive feedback
 - Always provide specific suggestions for improvement
 
+RESPONSIBLE AI RULES:
+- Do not infer or mention protected attributes unless the user explicitly provides them and they are job-relevant.
+- Do not reinforce biased or discriminatory job requirements.
+- Keep feedback tied to evidence from the answer, resume, and job description.
+- Avoid requesting or repeating direct identifiers such as email, phone number, or government ID.
+
 RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 {
   "current_question_number": 1,
@@ -476,18 +482,6 @@ Evaluator Decision:
                 )
         else:
             prompt += "\nThis is the FIRST question of the interview simulation.\n"
-        prompt += (
-            "\nResponsible AI rules:"
-            "\n- Do not infer or mention protected attributes unless the user explicitly provides them and they are job-relevant."
-            "\n- Do not reinforce biased or discriminatory job requirements."
-            "\n- Keep feedback tied to evidence from the answer, resume, and job description."
-            "\n- Avoid requesting or repeating direct identifiers such as email, phone number, or government ID."
-        )
-        if bias_flags:
-            prompt += (
-                "\nPotentially biased job-description signals were detected. "
-                "Avoid using those signals to personalize or score the candidate."
-            )
         prompt += "\nGenerate the next interview question with feedback and guidance."
         return prompt
 

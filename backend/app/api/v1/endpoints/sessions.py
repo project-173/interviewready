@@ -4,12 +4,22 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Path, status, Request
 
-from app.api.v1.services import get_session_context
+from app.api.v1.services import get_session_context, get_session_store
 from app.core.limiter import limiter
 from app.core.config import settings
 from app.models.resume import Resume
 
 router = APIRouter()
+
+
+@router.post("/new")
+@limiter.limit(settings.DEFAULT_RATE_LIMIT)
+async def create_session(request: Request) -> dict:
+    """Create a new session and return the session ID."""
+    user_id = "dev-user"
+    session_store = get_session_store()
+    session_id, _ = session_store.create_session(user_id)
+    return {"session_id": session_id}
 
 
 @router.get("/{session_id}/resume")

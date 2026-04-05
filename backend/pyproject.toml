@@ -24,6 +24,7 @@ dependencies = [
     "pypdf>=6.9.1",
     "langfuse>=3.0.0",
     "llm-guard>=0.3.0",
+    "datafog[nlp]>=4.3.0",
     "pip",
     "langchain>=1.2.13",
     "websockets>=13.0",

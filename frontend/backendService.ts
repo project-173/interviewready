@@ -26,6 +26,9 @@ interface ChatResponse {
   confidence_score?: number;
   metadata?: {
     needs_review?: boolean;
+    checkpoint_id?: string;
+    review_payload?: any;
+    review_required?: boolean;
   };
   decision_trace?: string[];
   sharp_metadata?: Record<string, any>;
@@ -112,14 +115,27 @@ export const formatInterviewCoachPayload = (payload: unknown): string => {
 };
 
 class BackendService {
-  private sessionId: string;
+  private sessionId: string = '';
+  private initialized: boolean = false;
 
-  constructor() {
-    this.sessionId = this.generateSessionId();
-  }
+  async initialize(): Promise<void> {
+    if (this.initialized) return;
+    
+    const response = await fetch(`${API_BASE_URL}/api/v1/sessions/new`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.getAuthToken()}`,
+      },
+    });
 
-  private generateSessionId(): string {
-    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    if (!response.ok) {
+      throw new Error(`Failed to create session: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    this.sessionId = data.session_id;
+    this.initialized = true;
   }
 
   private hasResumeContent(resume?: Resume | null): boolean {

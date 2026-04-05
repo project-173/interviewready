@@ -9,8 +9,29 @@ export const UploadStep: React.FC<{
   onUploadSubmit: (file: File | null) => void; // null = use manual resume from preview panel
   reviewNotice?: {
     needsReview: boolean;
+    checkpointId?: string;
   } | null;
-}> = ({ onUploadSubmit, reviewNotice }) => {
+  reviewPayload?: {
+    extracted_data?: ResumeSchema;
+    validation_errors?: string[];
+    confidence_score?: number;
+    fields_requiring_attention?: string[];
+  } | null;
+  manualResumeText: string;
+  manualResumeError?: string | null;
+  onManualResumeChange: (value: string) => void;
+  onManualSubmit: () => void;
+  onReviewSubmit: () => void;
+}> = ({
+  onUploadSubmit,
+  reviewNotice,
+  reviewPayload,
+  manualResumeText,
+  manualResumeError,
+  onManualResumeChange,
+  onManualSubmit,
+  onReviewSubmit,
+}) => {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -50,6 +71,50 @@ export const UploadStep: React.FC<{
             You can remove the file and rely on your manually edited resume
             instead.
           </p>
+        </div>
+      )}
+
+      {reviewPayload && (
+        <div className="mb-6 rounded-xl border border-amber-200 bg-white px-4 py-4 text-[12px] text-slate-700 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-widest text-amber-700">
+              Review Needed
+            </span>
+            {typeof reviewPayload.confidence_score === 'number' && (
+              <span className="text-[11px] font-medium text-amber-700">
+                Confidence: {(reviewPayload.confidence_score * 100).toFixed(0)}%
+              </span>
+            )}
+          </div>
+          {reviewPayload.validation_errors?.length ? (
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">
+                Validation Issues
+              </div>
+              <ul className="space-y-1 text-[11px] text-amber-700">
+                {reviewPayload.validation_errors.map((error, index) => (
+                  <li key={index} className="flex items-start gap-2">
+                    <span className="mt-0.5 h-1.5 w-1.5 rounded-full bg-amber-500" />
+                    <span>{error}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {reviewPayload.fields_requiring_attention?.length ? (
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">
+                Low Confidence Fields
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {reviewPayload.fields_requiring_attention.map((field, index) => (
+                  <span key={index} className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded border border-amber-200 font-medium">
+                    {field}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -105,6 +170,32 @@ export const UploadStep: React.FC<{
             className="w-full bg-slate-900 text-white text-[12px] font-semibold py-3 rounded-lg shadow-sm hover:bg-slate-800 transition-all"
           >
             Analyze Resume
+          </button>
+        </div>
+      )}
+
+      {(reviewPayload || manualResumeText) && (
+        <div className="mt-8 rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+              {reviewPayload ? 'Review Extracted JSON' : 'Manual Resume JSON'}
+            </h4>
+          </div>
+          <textarea
+            value={manualResumeText}
+            onChange={(e) => onManualResumeChange(e.target.value)}
+            rows={10}
+            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-mono text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-900"
+            placeholder="Paste edited resume JSON here..."
+          />
+          {manualResumeError && (
+            <div className="text-[11px] text-red-600">{manualResumeError}</div>
+          )}
+          <button
+            onClick={reviewPayload ? onReviewSubmit : onManualSubmit}
+            className="w-full bg-slate-900 text-white text-[12px] font-semibold py-2.5 rounded-lg shadow-sm hover:bg-slate-800 transition-all"
+          >
+            {reviewPayload ? 'Resume With Edits' : 'Analyze Manual Resume'}
           </button>
         </div>
       )}
@@ -1384,7 +1475,7 @@ export const InterviewStep: React.FC<{
 
   if (mode === "VOICE") {
     return (
-      <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-[calc(100vh-340px)] flex flex-col items-center justify-center space-y-12">
+      <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-[calc(100vh-150px)] flex flex-col items-center justify-center space-y-12">
         <div className="text-center space-y-4">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
             {isSpeaking ? (
@@ -1520,7 +1611,7 @@ export const InterviewStep: React.FC<{
   }
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-[calc(100vh-340px)] flex flex-col">
+    <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-[calc(100vh-150px)] flex flex-col">
       <div className="flex-1 overflow-y-auto space-y-4 pr-3 mb-4 scrollbar-thin scrollbar-thumb-slate-200">
         {history.map((msg, i) => (
           <div

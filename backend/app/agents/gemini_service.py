@@ -3,10 +3,11 @@
 import os
 import json
 import re
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Callable
 from google import genai
 from google.genai import types
 from ..core.config import settings
+from ..core.logging import logger
 
 MAX_OUTPUT_TOKENS = 8192
 
@@ -32,8 +33,6 @@ class GeminiService:
             self.client = genai.Client(api_key=self.api_key)
         else:
             # Gracefully degrade to mock mode when API key is not available
-            from ..core.logging import logger
-
             logger.warning("GEMINI_API_KEY not configured - using mock responses")
             self.mock_mode = True
 
@@ -42,6 +41,7 @@ class GeminiService:
         system_prompt: str,
         user_input: str,
         temperature: Optional[float] = None,
+        tools: Optional[List[Callable]] = None,
     ) -> str:
         """Generate response from Gemini.
 
@@ -49,6 +49,7 @@ class GeminiService:
             system_prompt: System prompt for the model
             user_input: User input text
             temperature: Optional generation temperature
+            tools: Optional list of Gemini tools/functions
 
         Returns:
             Generated response text
@@ -57,6 +58,7 @@ class GeminiService:
             system_prompt=system_prompt,
             user_input=user_input,
             temperature=temperature,
+            tools=tools,
         )
         return response
 
@@ -65,6 +67,7 @@ class GeminiService:
         system_prompt: str,
         user_input: str,
         temperature: Optional[float] = None,
+        tools: Optional[List[Callable]] = None,
     ) -> Tuple[str, Optional[Dict[str, int]]]:
         """Generate response from Gemini and return usage if available.
 
@@ -72,6 +75,7 @@ class GeminiService:
             system_prompt: System prompt for the model
             user_input: User input text
             temperature: Optional generation temperature
+            tools: Optional list of Gemini tools/functions
 
         Returns:
             Tuple of (response text, usage details) where usage details may be None.
@@ -84,12 +88,14 @@ class GeminiService:
                 system_prompt=system_prompt,
                 user_input=user_input,
                 temperature=temperature,
+                tools=tools,
             )
+            response_text = self._extract_text(response)
+            if response_text is None:
+                raise ValueError("Gemini response contained no text")
             usage = self._extract_usage(response)
-            return response.text, usage
+            return response_text, usage
         except Exception as e:
-            from ..core.logging import logger
-
             logger.error(f"Gemini API call failed: {str(e)}")
             return f"Error calling Gemini API: {str(e)}", None
 
@@ -98,6 +104,7 @@ class GeminiService:
         system_prompt: str,
         user_input: str,
         temperature: Optional[float] = None,
+        tools: Optional[List[Callable]] = None,
     ) -> Any:
         config_kwargs = {
             "system_instruction": system_prompt,
@@ -105,11 +112,43 @@ class GeminiService:
         }
         if temperature is not None:
             config_kwargs["temperature"] = temperature
+        if tools:
+            config_kwargs["tools"] = tools
+            config_kwargs["automatic_function_calling"] = (
+                types.AutomaticFunctionCallingConfig()
+            )
         return self.client.models.generate_content(
             model=self.model_name,
             contents=user_input,
             config=types.GenerateContentConfig(**config_kwargs),
         )
+
+    def _extract_text(self, response: Any) -> Optional[str]:
+        if response is None:
+            return None
+
+        text = getattr(response, "text", None)
+        if isinstance(text, str) and text.strip():
+            return text
+
+        candidates = getattr(response, "candidates", None)
+        if candidates:
+            parts_text: List[str] = []
+            for candidate in candidates:
+                content = getattr(candidate, "content", None)
+                parts = getattr(content, "parts", None) if content else None
+                if not parts:
+                    continue
+                for part in parts:
+                    part_text = getattr(part, "text", None)
+                    if isinstance(part_text, str) and part_text.strip():
+                        parts_text.append(part_text)
+            if parts_text:
+                return "".join(parts_text)
+
+        if isinstance(text, str):
+            return text
+        return None
 
     def _extract_usage(self, response: Any) -> Optional[Dict[str, int]]:
         usage = getattr(response, "usage_metadata", None) or getattr(
