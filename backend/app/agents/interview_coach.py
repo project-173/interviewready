@@ -971,7 +971,20 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                     result, method_used = self._generate_summary_response(
                         input_data, context
                     )
-                    response_json = json.loads(result)
+                    # Strip markdown code blocks if present (e.g., ```json ... ```)
+                    cleaned_result = result.strip()
+                    if cleaned_result.startswith("```json"):
+                        # Find the start and end of JSON content
+                        start = cleaned_result.find("{")
+                        end = cleaned_result.rfind("}") + 1
+                        if start != -1 and end != 0:
+                            cleaned_result = cleaned_result[start:end]
+                    elif cleaned_result.startswith("```"):
+                        start = cleaned_result.find("{")
+                        end = cleaned_result.rfind("}") + 1
+                        if start != -1 and end != 0:
+                            cleaned_result = cleaned_result[start:end]
+                    response_json = json.loads(cleaned_result)
                     state = self._get_interview_state(context)
 
                 if not response_json.get("interview_complete", False):
