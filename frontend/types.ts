@@ -7,7 +7,6 @@ export interface Work {
   url?: string;
   startDate?: string;
   endDate?: string;
-  summary?: string;
   highlights?: string[];
 }
 
@@ -38,8 +37,6 @@ export interface Certificate {
 
 export interface Skill {
   name?: string;
-  level?: string;
-  keywords?: string[];
 }
 
 export interface Project {
@@ -63,199 +60,44 @@ export interface ResumeSchema {
 // Backward compatibility alias
 export type Resume = ResumeSchema;
 
-export interface StructuralAssessment {
-  score: number;
-  readability: string;
-  formattingRecommendations: string[];
-  suggestions: string[];
-}
-
-export type SkillCategory = "Technical" | "Soft" | "Domain" | "Tool";
 export type EvidenceStrength = "HIGH" | "MEDIUM" | "LOW";
-export type ImpactLevel = "HIGH" | "MEDIUM" | "LOW";
+export type ResumeCriticIssueType = "ats" | "structure" | "impact" | "readability";
+export type ResumeCriticSeverity = "HIGH" | "MEDIUM" | "LOW";
+export type ContentSuggestionType = "action_verb" | "specificity" | "structure" | "redundancy";
 
-export interface ContentSkill {
-  name: string;
-  category: SkillCategory;
-  confidenceScore: number;
-  evidenceStrength: EvidenceStrength;
-  evidence: string;
+export interface ResumeCriticIssue {
+  location: string;
+  type: ResumeCriticIssueType;
+  severity: ResumeCriticSeverity;
+  description: string;
 }
 
-export interface ContentAchievement {
-  description: string;
-  impact: ImpactLevel;
-  quantifiable: boolean;
-  confidenceScore: number;
-  originalText: string;
+export interface ResumeCriticReport {
+  issues: ResumeCriticIssue[];
+  summary: string;
+  score?: number;
 }
 
 export interface ContentSuggestion {
+  location: string;
   original: string;
   suggested: string;
-  rationale: string;
-  faithful: boolean;
-  confidenceScore: number;
+  evidenceStrength: EvidenceStrength;
+  type: ContentSuggestionType;
 }
 
-export interface ContentAnalysisReport {
-  skills: ContentSkill[];
-  achievements: ContentAchievement[];
+export interface ContentStrengthReport {
   suggestions: ContentSuggestion[];
-  hallucinationRisk: number;
   summary: string;
+  score?: number;
 }
 
 export interface AlignmentReport {
   skillsMatch: string[];
   missingSkills: string[];
-  experienceMatch: string;
-  fitScore: number;
-  reasoning: string;
-  sources?: { title: string; uri: string }[];
+  experienceMatch: string[];
+  summary: string;
 }
-
-const workSchema = z.object({
-  name: z.string(),
-  position: z.string(),
-  url: z.string(),
-  startDate: z.string(),
-  endDate: z.string(),
-  summary: z.string(),
-  highlights: z.array(z.string()),
-}).partial();
-
-const volunteerSchema = z.object({
-  organization: z.string(),
-  position: z.string(),
-  url: z.string(),
-  startDate: z.string(),
-  endDate: z.string(),
-  summary: z.string(),
-  highlights: z.array(z.string()),
-}).partial();
-
-const educationSchema = z.object({
-  institution: z.string(),
-  url: z.string(),
-  area: z.string(),
-  studyType: z.string(),
-  startDate: z.string(),
-  endDate: z.string(),
-  score: z.string(),
-  courses: z.array(z.string()),
-}).partial();
-
-const awardSchema = z.object({
-  title: z.string(),
-  date: z.string(),
-  awarder: z.string(),
-  summary: z.string(),
-}).partial();
-
-const certificateSchema = z.object({
-  name: z.string(),
-  date: z.string(),
-  issuer: z.string(),
-  url: z.string(),
-}).partial();
-
-const publicationSchema = z.object({
-  name: z.string(),
-  publisher: z.string(),
-  releaseDate: z.string(),
-  url: z.string(),
-  summary: z.string(),
-}).partial();
-
-const skillSchema = z.object({
-  name: z.string(),
-  level: z.string(),
-  keywords: z.array(z.string()),
-}).partial();
-
-const languageSchema = z.object({
-  language: z.string(),
-  fluency: z.string(),
-}).partial();
-
-const interestSchema = z.object({
-  name: z.string(),
-  keywords: z.array(z.string()),
-}).partial();
-
-const referenceSchema = z.object({
-  name: z.string(),
-  reference: z.string(),
-}).partial();
-
-const projectSchema = z.object({
-  name: z.string(),
-  startDate: z.string(),
-  endDate: z.string(),
-  description: z.string(),
-  highlights: z.array(z.string()),
-  url: z.string(),
-}).partial();
-
-export const resumeJsonSchema = zodToJsonSchema(z.object({
-  work: z.array(workSchema).optional(),
-  volunteer: z.array(volunteerSchema).optional(),
-  education: z.array(educationSchema).optional(),
-  awards: z.array(awardSchema).optional(),
-  certificates: z.array(certificateSchema).optional(),
-  publications: z.array(publicationSchema).optional(),
-  skills: z.array(skillSchema).optional(),
-  languages: z.array(languageSchema).optional(),
-  interests: z.array(interestSchema).optional(),
-  references: z.array(referenceSchema).optional(),
-  projects: z.array(projectSchema).optional(),
-}), 'resumeSchema');
-
-export const structuralAssessmentJsonSchema = zodToJsonSchema(z.object({
-  score: z.number(),
-  readability: z.string(),
-  formattingRecommendations: z.array(z.string()),
-  suggestions: z.array(z.string()),
-}), 'structuralAssessmentSchema');
-
-export const contentAnalysisReportJsonSchema = zodToJsonSchema(z.object({
-  skills: z.array(z.object({
-    name: z.string(),
-    category: z.enum(["Technical", "Soft", "Domain", "Tool"]),
-    confidenceScore: z.number(),
-    evidenceStrength: z.enum(["HIGH", "MEDIUM", "LOW"]),
-    evidence: z.string(),
-  })),
-  achievements: z.array(z.object({
-    description: z.string(),
-    impact: z.enum(["HIGH", "MEDIUM", "LOW"]),
-    quantifiable: z.boolean(),
-    confidenceScore: z.number(),
-    originalText: z.string(),
-  })),
-  suggestions: z.array(z.object({
-    original: z.string(),
-    suggested: z.string(),
-    rationale: z.string(),
-    faithful: z.boolean(),
-    confidenceScore: z.number(),
-  })),
-  hallucinationRisk: z.number(),
-  summary: z.string(),
-}), 'contentAnalysisReportSchema');
-
-export const alignmentReportJsonSchema = zodToJsonSchema(z.object({
-  skillsMatch: z.array(z.string()),
-  missingSkills: z.array(z.string()),
-  experienceMatch: z.string(),
-  fitScore: z.number(),
-  reasoning: z.string(),
-  sources: z.array(z.object({
-    title: z.string(),
-    uri: z.string(),
-  })).optional(),
-}), 'alignmentReportSchema');
 
 export enum WorkflowStatus {
   IDLE = 'IDLE',
@@ -268,8 +110,12 @@ export enum WorkflowStatus {
   ALIGNING_JD = 'ALIGNING_JD',
   AWAITING_ALIGNMENT_APPROVAL = 'AWAITING_ALIGNMENT_APPROVAL',
   INTERVIEWING = 'INTERVIEWING',
+  SELECTING_INTERVIEW_MODE = 'SELECTING_INTERVIEW_MODE',
+  DEBUG_VOICE = 'DEBUG_VOICE',
   COMPLETED = 'COMPLETED'
 }
+
+export type InterviewMode = 'CHAT' | 'VOICE';
 
 export interface ResumeFile {
   data: string;
@@ -295,8 +141,19 @@ export interface SharedState {
   history: ResumeSchema[];
   jobDescription: string;
   status: WorkflowStatus;
-  criticReport: StructuralAssessment | null;
-  contentReport: ContentAnalysisReport | null;
+  criticReport: ResumeCriticReport | null;
+  contentReport: ContentStrengthReport | null;
   alignmentReport: AlignmentReport | null;
   interviewHistory: InterviewMessage[];
+  interviewMode?: InterviewMode;
+  extractionReview?: {
+    needsReview: boolean;
+  } | null;
 }
+
+export type ResumeLookupResult = {
+  isValid: boolean;
+  display?: string;
+  topLevel?: string;
+  usedSectionAsEvidence?: boolean;
+};

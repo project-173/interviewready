@@ -10,7 +10,7 @@ from .base import BaseAgent
 from ..core.logging import logger
 from ..core.config import settings
 from ..core.constants import ANTI_JAILBREAK_DIRECTIVE, RESUME_SCHEMA
-from ..models.agent import AgentResponse, ContentAnalysisReport, AgentInput
+from ..models.agent import AgentResponse, ContentStrengthReport, AgentInput
 from ..models.session import SessionContext
 
 class ContentStrengthAgent(BaseAgent):
@@ -19,52 +19,50 @@ class ContentStrengthAgent(BaseAgent):
     USE_MOCK_RESPONSE = settings.MOCK_CONTENT_STRENGTH_AGENT
     MOCK_RESPONSE_KEY = "ContentStrengthAgent"
     
-    SYSTEM_PROMPT = ("""
-You are a Content Strength & Skills Reasoning Agent analyzing resumes to identify key skills, achievements, and evidence of impact.
+    SYSTEM_PROMPT = (
+        """
+        You are a Content Strength Agent. Analyze the resume and return a single JSON object, nothing else.
 
-CRITICAL OUTPUT REQUIREMENT: You MUST respond with ONLY a valid JSON object. No text before, after, or around the JSON.
+        FAITHFULNESS — never violate:
+        - Only suggest rephrasing of text that exists verbatim in the resume
+        - Never add metrics, numbers, or claims not present in the original
+        - Never imply greater scope or seniority than the original supports
+        - If you cannot improve a field faithfully, omit it — do not include the suggestion
 
-RULES:
-1. Your entire response must be exactly one JSON object
-2. Start with '{' and end with '}' - nothing else
-3. Do NOT include markdown, explanatory text, preamble, or summary
-4. Do NOT include comments (// or /* */)
-5. All array fields must have 2+ items minimum
-6. All scores must be numbers 0-1.0 (not percentages)
-7. Do NOT use null - use empty strings/arrays/0
+        EVIDENCE STRENGTH:
+        - HIGH: quantified with specific numbers, percentages, or measurable outcomes
+        - MEDIUM: specific and contextual, but not quantified
+        - LOW: vague or generic
 
-Your Responsibilities:
-1. Identify key skills and achievements from the resume
-2. Evaluate the strength of evidence supporting each claim
-3. Suggest stronger phrasing WITHOUT fabricating new content
-4. Apply confidence scoring and consistency checks
+        LOCATION FORMAT: use JSON path notation matching the resume schema
+        e.g. work[0].highlights[1], skills[2].keywords, projects[0].description
 
-Evidence Strength: HIGH (quantified results) | MEDIUM (specific but not quantified) | LOW (vague claims)
+        OUTPUT: valid JSON only. No markdown, no text outside the object, no null values.
 
-Faithful Transformation Rules:
-- NEVER invent new skills, achievements, or experiences
-- NEVER add numbers or metrics that don't exist
-- ONLY suggest phrasing that preserves original meaning
-- If suggestion requires fabrication, mark faithful=false
-
-RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
-{
-  "skills": [
-    {"name": "skill name", "category": "category name", "confidenceScore": 0.85, "evidenceStrength": "HIGH|MEDIUM|LOW", "evidence": "quote from resume"}
-  ],
-  "achievements": [
-    {"description": "achievement", "impact": "HIGH|MEDIUM|LOW", "quantifiable": true, "confidenceScore": 0.9, "originalText": "original text"}
-  ],
-  "suggestions": [
-    {"original": "original phrasing", "suggested": "improved phrasing", "rationale": "why this helps", "faithful": true, "confidenceScore": 0.8}
-  ],
-  "hallucinationRisk": 0.15,
-  "summary": "brief summary of analysis"
-}
-"""
+        {
+        "suggestions": [
+            {
+            "location": "work[0].highlights[1]",
+            "original": "exact text from resume",
+            "suggested": "improved phrasing",
+            "evidenceStrength": "HIGH|MEDIUM|LOW",
+            "type": "action_verb|specificity|structure|redundancy"
+            }
+        ],
+        "summary": "2-3 sentences: what this resume does well, where evidence is weakest, and the single highest-leverage improvement"
+        }
+        """
     + RESUME_SCHEMA
     + ANTI_JAILBREAK_DIRECTIVE
-)
+    )
+
+    _EVIDENCE_WEIGHTS = {"HIGH": 1.0, "MEDIUM": 0.65, "LOW": 0.3}
+    _SUGGESTION_RISK = {
+        "action_verb": 0.0,
+        "redundancy": 0.0,
+        "structure": 0.05,
+        "specificity": 0.2,
+    }
     
     def __init__(self, gemini_service):
         """Initialize Content Strength Agent.
@@ -124,7 +122,15 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 
             raw_result = raw_result or self.call_gemini(input_text, context)
 
-            structured_result = self.parse_and_validate(raw_result, ContentAnalysisReport).model_dump()
+            # Ensure we have a valid dictionary for validation
+            parsed = self._parse_json(raw_result) if isinstance(raw_result, str) else raw_result
+            if not isinstance(parsed, dict):
+                parsed = {}
+            
+            # Re-serialize for parse_and_validate to handle potential string output
+            raw_content = json.dumps(parsed)
+
+            structured_result = self.parse_and_validate(raw_content, ContentStrengthReport).model_dump()
 
             processing_time = time.time() - processing_start_time
             
@@ -133,8 +139,10 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                         processing_time_ms=round(processing_time * 1000, 2))
 
             overall_confidence = self._calculate_overall_confidence(structured_result)
-            hallucination_risk = self._get_double_or_zero(structured_result, "hallucinationRisk")
+            hallucination_risk = self._calculate_hallucination_risk(structured_result)
             summary = self._get_text_or_empty(structured_result, "summary")
+
+            structured_result["score"] = overall_confidence
             
             decision_trace = [
                 "ContentStrengthAgent: Analyzed resume for skills and achievements",
@@ -160,7 +168,7 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
 
             # Log response creation
             logger.debug(
-                f"ContentStrengthAgent response created",
+                "ContentStrengthAgent response created",
                 session_id=session_id,
                 confidence_score=overall_confidence,
                 hallucination_risk=hallucination_risk,
@@ -173,56 +181,29 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             processing_time = time.time() - processing_start_time
             logger.log_agent_error(agent_name, e, session_id)
             logger.error(
-                f"ContentStrengthAgent processing failed",
+                "ContentStrengthAgent processing failed",
                 session_id=session_id,
                 processing_time_ms=round(processing_time * 1000, 2),
                 error_type=type(e).__name__,
                 error_message=str(e),
             )
             raise
-    def _calculate_overall_confidence(self, node: Dict[str, Any]) -> float:
-        """Calculate overall confidence from parsed data.
 
-        Args:
-            node: Parsed JSON data
-
-        Returns:
-            Overall confidence score
-        """
-        skill_avg = self._calculate_array_average(node, "skills", "confidenceScore")
-        achievement_avg = self._calculate_array_average(
-            node, "achievements", "confidenceScore"
-        )
-        suggestion_avg = self._calculate_array_average(
-            node, "suggestions", "confidenceScore"
-        )
-
-        count = 0
-        total = 0.0
-
-        if (
-            node.get("skills")
-            and isinstance(node["skills"], list)
-            and len(node["skills"]) > 0
-        ):
-            total += skill_avg
-            count += 1
-        if (
-            node.get("achievements")
-            and isinstance(node["achievements"], list)
-            and len(node["achievements"]) > 0
-        ):
-            total += achievement_avg
-            count += 1
-        if (
-            node.get("suggestions")
-            and isinstance(node["suggestions"], list)
-            and len(node["suggestions"]) > 0
-        ):
-            total += suggestion_avg
-            count += 1
-
-        return total / count if count > 0 else 0.0
+    def _calculate_overall_confidence(self, result: Dict[str, Any]) -> int:
+        suggestions = result.get("suggestions") or []
+        scores = [
+            self._EVIDENCE_WEIGHTS.get(s.get("evidenceStrength", "LOW"), 0.3)
+            for s in suggestions if isinstance(s, dict)
+        ]
+        return int(sum(scores) / len(scores) * 100) if scores else 0
+    
+    def _calculate_hallucination_risk(self, result: Dict[str, Any]) -> float:
+        suggestions = result.get("suggestions") or []
+        risks = [
+            self._SUGGESTION_RISK.get(s.get("type", ""), 0.1)
+            for s in suggestions if isinstance(s, dict)
+        ]
+        return round(max(risks, default=0.0), 3)
 
     def _calculate_array_average(
         self, parent: Dict[str, Any], array_name: str, field_name: str
@@ -290,6 +271,38 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
             return float(node.get(field, 0.0))
         except (ValueError, TypeError):
             return 0.0
+
+    def _parse_json(self, text: str) -> Dict[str, Any]:
+        """Parse JSON from raw or fenced markdown text."""
+        if not text:
+            return {}
+
+        # Remove markdown code blocks if the AI ignored instructions
+        text = text.strip()
+        if text.startswith("```json"):
+            text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+        try:
+            return json.loads(text)
+        except Exception as e:
+            logger.warning(f"Direct JSON parse failed, trying regex: {e}")
+
+        # If it still fails, find the first { and last }
+        try:
+            start_idx = text.find("{")
+            end_idx = text.rfind("}")
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                json_str = text[start_idx : end_idx + 1]
+                return json.loads(json_str)
+        except Exception as e:
+            logger.error(f"Failed to parse JSON using regex extraction: {e}")
+
+        return {}
 
     @staticmethod
     def _build_prompt(input_data: AgentInput) -> str:

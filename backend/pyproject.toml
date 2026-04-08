@@ -26,6 +26,8 @@ dependencies = [
     "llm-guard>=0.3.0",
     "pip",
     "langchain>=1.2.13",
+    "websockets>=13.0",
+    "slowapi>=0.1.9",
 ]
 requires-python = ">=3.11"
 readme = "README.md"
@@ -41,8 +43,15 @@ dev = [
     "pre-commit>=3.4.0",
 ]
 
+[tool.hatch.build]
+include = ["app/mock_responses.json"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+include = ["app/mock_responses.json"]
+
+[tool.hatch.build.targets.sdist]
+include = ["app/mock_responses.json"]
 
 [tool.hatch.metadata]
 allow-direct-references = true

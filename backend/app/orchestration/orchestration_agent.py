@@ -9,6 +9,7 @@ from langgraph.graph import END, StateGraph
 from langfuse import Langfuse, observe, propagate_attributes
 
 from app.agents.base import BaseAgentProtocol
+from app.core.config import settings
 from app.core.logging import logger
 from app.governance.sharp_governance_service import SharpGovernanceService
 from app.models.agent import (
@@ -55,6 +56,10 @@ class OrchestrationAgent:
         self.governance = governance
         self.workflow = self._build_workflow()
 
+    def get_agents(self) -> dict[str, BaseAgentProtocol]:
+        """Return the registered agents keyed by name."""
+        return self.agent_list
+
     # ---------- Public API ----------
 
     @observe(name="orchestration_execution")
@@ -67,6 +72,8 @@ class OrchestrationAgent:
             with propagate_attributes(user_id=user_id, session_id=session_id):
 
                 intent = self._parse_intent(request.intent)
+                if request.jobDescription:
+                    context.job_description = request.jobDescription
                 normalized = self._normalize_or_fail(request, context)
                 if isinstance(normalized, AgentResponse):
                     return normalized
@@ -143,6 +150,7 @@ class OrchestrationAgent:
 
         state.response = audited
         state.artifacts.append(self._build_artifact(audited, agent_name))
+        self._update_memory(context, artifacts=[artifact.model_dump() for artifact in state.artifacts])
         state.index += 1
 
         return state
@@ -178,8 +186,41 @@ class OrchestrationAgent:
                 )
                 parsed = json.loads(response.content or "{}")
                 resume = Resume.model_validate(parsed)
+
+                sharp_metadata = response.sharp_metadata or {}
+
+                self._update_memory(
+                    context,
+                    extractor_confidence_score=response.confidence_score,
+                    extractor_low_confidence_fields=response.low_confidence_fields,
+                    extractor_needs_review=response.needs_review,
+                    extractor_validation_errors=sharp_metadata.get(
+                        "validation_errors", []
+                    ),
+                )
+
+                logger.info(
+                    "ExtractorAgent normalization complete",
+                    session_id=getattr(context, "session_id", "unknown"),
+                    confidence_score=response.confidence_score,
+                    needs_review=response.needs_review,
+                    low_confidence_fields=response.low_confidence_fields,
+                )
+
+                if response.needs_review:
+                    return self._failure(
+                    "Failed to extract meaningful information from resume file.",
+                    "Failed to extract meaningful information from resume file.",
+                    context,
+                    needs_review=True
+                )
             except Exception as e:
-                return self._failure("Failed to parse resume file.", str(e), context)
+                return self._failure(
+                    "Failed to parse resume file.",
+                    str(e),
+                    context,
+                    needs_review=True
+                )
 
             doc = self._build_resume_doc(resume, "resumeFile")
             self._update_memory(context, current_resume=resume.model_dump())
@@ -191,18 +232,33 @@ class OrchestrationAgent:
             context,
         )
 
-    def _failure(self, reason: str, details: str, context: SessionContext):
+    def _failure(
+        self,
+        reason: str,
+        details: str,
+        context: SessionContext,
+        needs_review: bool = False,
+    ):
+        metadata = {}
+        if needs_review:
+            metadata.update(
+                {
+                    "needs_review": True
+                }
+            )
         plan = ActionPlan(
             summary="Resume normalization failed.",
             actions=[details],
             priority="HIGH",
             no_change=False,
+            metadata=metadata,
         )
         return AgentResponse(
             agent_name="NormalizeStage",
             content=json.dumps(plan.model_dump()),
             reasoning=reason,
             confidence_score=0.0,
+            needs_review=needs_review,
             decision_trace=context.decision_trace or [],
         )
 
@@ -222,10 +278,16 @@ class OrchestrationAgent:
     def _render_input(self, agent_input: AgentInput) -> str:
         data = (
             agent_input.resume.model_dump(exclude_none=True)
-            if agent_input.resume
+            if agent_input.resume is not None
             else {}
         )
-        if agent_input.intent == Intent.ALIGNMENT.value:
+        # Handle cases where agent_input.intent might be an Enum or a string
+        intent_value = (
+            agent_input.intent.value
+            if hasattr(agent_input.intent, "value")
+            else agent_input.intent
+        )
+        if intent_value == Intent.ALIGNMENT.value:
             return f"{json.dumps(data, indent=2)}\nJD: {agent_input.job_description}"
         return json.dumps(data, indent=2)
 
@@ -234,7 +296,18 @@ class OrchestrationAgent:
         return ResumeDocument(source=source, raw_text=raw)
 
     def _has_content(self, resume: Resume) -> bool:
-        return bool(resume.model_dump(exclude_none=True))
+        def _contains_value(value: Any) -> bool:
+            if value is None:
+                return False
+            if isinstance(value, str):
+                return bool(value.strip())
+            if isinstance(value, dict):
+                return any(_contains_value(item) for item in value.values())
+            if isinstance(value, list):
+                return any(_contains_value(item) for item in value)
+            return True
+
+        return _contains_value(resume.model_dump(exclude_none=True))
 
     def _build_artifact(self, response: AgentResponse, agent_name: str):
         parsed = parse_json_payload(response.content or "", allow_array=True)

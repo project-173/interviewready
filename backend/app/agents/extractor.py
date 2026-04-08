@@ -24,7 +24,6 @@ class ExtractorAgent(BaseAgent):
 
     USE_MOCK_RESPONSE = settings.MOCK_EXTRACTOR_AGENT
     MOCK_RESPONSE_KEY = "ExtractorAgent"
-    CONFIDENCE_SCORE = 0.95
 
     SYSTEM_PROMPT = (
         """You are an expert resume parser. Extract structured information from resume text and return it as JSON.
@@ -44,7 +43,7 @@ JSON RULES:
 
 EXTRACTION RULES:
 1. Parse the resume text carefully - ONLY extract information explicitly stated in the text
-2. Extract the following JSON Resume sections: work, education, awards, certificates, skills, projects, languages, interests, references
+2. Extract the following JSON Resume sections: work, education, awards, certificates, skills, projects
 3. CRITICAL - URL Handling:
        - Only include a url field if a URL is EXPLICITLY mentioned in the resume text
        - Do NOT infer, guess, or hallucinate URLs that are not in the source text
@@ -58,13 +57,32 @@ EXTRACTION RULES:
 6. For awards: title, date, awarder, summary
 7. For certificates: name, date, issuer, url
        - url MUST be a valid URL present in the text or null
-8. For skills: name, level, keywords (array)
+8. For skills: name
 9. For projects: name, startDate, endDate, description, highlights (array), url
         - url MUST be a valid URL present in the text (e.g., "https://github.com/user/project") or null
         - If the resume only mentions "Github" without a URL, use null
 10. CRITICAL - Date format: Use YYYY-MM-DD format ONLY
         - For current positions, use an empty string "" for endDate (NOT "Present", "Current", or any other text)
         - For ongoing education, use an empty string "" for endDate
+
+After extracting all resume data, add a "_confidence" key with this structure:
+{
+    "_confidence": {
+        "overall": "HIGH" | "MEDIUM" | "LOW",
+        "low_confidence_fields": ["work[0].startDate", "education[0].url"],
+        "reasons": ["Employment dates unclear", "No institution URL in source"]
+    }
+}
+
+Flag a field as low confidence if:
+- The value was inferred, not explicitly stated
+- The source text was ambiguous or contradictory
+- You had to guess a format (especially dates)
+
+Example low_confidence_fields format:
+- "work[0].startDate" for array items
+- "education[1].score" for nested array fields
+- "skills[0].name" for list items
 
 Output format:
     {
@@ -109,9 +127,7 @@ Output format:
         ],
         "skills": [
             {
-                "name": "Web Development",
-                "level": "Advanced",
-                "keywords": ["HTML", "CSS", "JavaScript"]
+                "name": "Web Development"
             }
         ],
         "projects": [
@@ -175,13 +191,33 @@ Output format:
 
             if self.USE_MOCK_RESPONSE:
                 resume = self._generate_mock_response(context)
+                validation_errors = self._validate_data(resume, extracted_text)
+                confidence_score = self._calculate_confidence_score(
+                    resume=resume,
+                    confidence_map={},
+                    source_text=extracted_text,
+                    validation_errors=validation_errors,
+                )
+                low_confidence_fields: list[str] = []
             else:
-                resume = self._generate_llm_response(extracted_text, context)
+                resume, confidence_score, low_confidence_fields, validation_errors = (
+                    self._generate_llm_response(extracted_text, context)
+                )
+
+            needs_review = confidence_score < settings.EXTRACTOR_AUTO_PROCEED_THRESHOLD
+
+            logger.info(
+                "ExtractorAgent confidence review",
+                session_id=session_id,
+                confidence_score=confidence_score,
+                needs_review=needs_review,
+                low_confidence_fields=low_confidence_fields,
+            )
 
             resume_document = ResumeDocument(
                 source="resumeFile",
                 raw_text=extracted_text,
-                parse_confidence=self.CONFIDENCE_SCORE,
+                parse_confidence=confidence_score,
             )
             metadata = {
                 "source": "resumeFile",
@@ -189,7 +225,10 @@ Output format:
                 "extractedTextLength": len(extracted_text),
                 "resume_document": resume_document.model_dump(exclude_none=True),
                 "analysis_type": "resume_extraction",
-                "confidence_score": self.CONFIDENCE_SCORE,
+                "confidence_score": confidence_score,
+                "low_confidence_fields": low_confidence_fields,
+                "validation_errors": validation_errors,
+                "needs_review": needs_review
             }
             decision_trace = [
                 "ExtractorAgent: Used LLM to parse resume PDF and extract structured data"
@@ -207,7 +246,9 @@ Output format:
                 agent_name=self.get_name(),
                 content=json.dumps(resume.model_dump(), indent=2),
                 reasoning="Extracted and structured resume data using LLM.",
-                confidence_score=self.CONFIDENCE_SCORE,
+                confidence_score=confidence_score,
+                needs_review=needs_review,
+                low_confidence_fields=low_confidence_fields,
                 decision_trace=decision_trace,
                 sharp_metadata=metadata,
             )
@@ -247,7 +288,7 @@ Output format:
 
     def _generate_llm_response(
         self, text: str, context: SessionContext
-    ) -> Resume:
+    ) -> tuple[Resume, float, list[str], list[str]]:
         """Use LLM to extract structured resume data from text."""
         user_input = (
             "Extract structured information from the following resume text:\n\n"
@@ -265,10 +306,33 @@ Output format:
             raise ValueError(
                 f"Failed to parse valid JSON from Gemini response: {raw_result[:200]}..."
             )
+        if not isinstance(parsed_result, dict):
+            raise ValueError("ExtractorAgent expected a JSON object response from Gemini")
+
+        confidence_map = {}
+        if isinstance(parsed_result, dict):
+            confidence_map = parsed_result.pop("_confidence", {}) or {}
 
         validated_result = Resume.model_validate(parsed_result)
-        self._validate_data(validated_result, text)
-        return validated_result
+        validation_errors = self._validate_data(validated_result, text)
+        self._handle_validation_errors(validation_errors, validated_result)
+
+        confidence_score = self._calculate_confidence_score(
+            resume=validated_result,
+            confidence_map=confidence_map,
+            source_text=text,
+            validation_errors=validation_errors,
+        )
+        low_confidence_fields = confidence_map.get("low_confidence_fields", [])
+        if not isinstance(low_confidence_fields, list):
+            low_confidence_fields = []
+
+        return validated_result, confidence_score, low_confidence_fields, validation_errors
+
+    def _extract_resume_with_llm(self, text: str, context: SessionContext) -> Resume:
+        """Backward-compatible wrapper for resume extraction."""
+        resume, _, _, _ = self._generate_llm_response(text, context)
+        return resume
 
     @staticmethod
     def _parse_payload(input_text: str) -> dict[str, Any]:
@@ -282,7 +346,7 @@ Output format:
             raise ValueError("ExtractorAgent payload must be a JSON object")
         return payload
 
-    def _validate_data(self, resume: Resume, source_text: str) -> None:
+    def _validate_data(self, resume: Resume, source_text: str) -> list[str]:
         """Validate URLs and dates in resume data."""
         invalid_urls = []
         invalid_dates = []
@@ -314,8 +378,18 @@ Output format:
                 f"Invalid date format (use yyyy-mm-dd, yyyy-mm, or empty): {'; '.join(invalid_dates)}"
             )
 
+        return errors
+
+    def _handle_validation_errors(
+        self, errors: list[str], resume_data: Resume
+    ) -> None:
+        """Log validation errors without short-circuiting confidence scoring."""
         if errors:
-            raise ValueError(" ".join(errors))
+            logger.warning(
+                "ExtractorAgent validation errors handled",
+                errors=errors,
+                resume_preview=resume_data.model_dump(exclude_none=True),
+            )
 
     def _validate_urls_for_item(
         self,
@@ -330,10 +404,18 @@ Output format:
             return
         if not is_valid_url(url_value):
             invalid_urls.append(f"{field}.{item_name}: url='{url_value}' (invalid)")
+            try:
+                setattr(item, "url", None)
+            except Exception:
+                pass
         elif url_value.lower() not in source_lower and is_full_url(url_value):
             invalid_urls.append(
                 f"{field}.{item_name}: url='{url_value}' (not in source)"
             )
+            try:
+                setattr(item, "url", None)
+            except Exception:
+                pass
 
     def _validate_dates_for_item(
         self, item: Any, field: str, item_name: str, invalid_dates: list
@@ -344,3 +426,161 @@ Output format:
                 invalid_dates.append(
                     f"{field}.{item_name}: {attr_name}='{attr_value}'"
                 )
+
+    def _calculate_confidence_score(
+        self,
+        resume: Resume,
+        confidence_map: dict,
+        source_text: str,
+        validation_errors: list[str],
+    ) -> float:
+        low_confidence_fields = confidence_map.get("low_confidence_fields", [])
+        if not isinstance(low_confidence_fields, list):
+            low_confidence_fields = []
+
+        total_fields = self._count_total_fields(resume)
+        low_confidence_count = len(low_confidence_fields)
+
+        base_score = 1.0
+
+        completeness_penalty = (
+            1.0 - self._weighted_completeness_ratio(resume)
+        ) * 0.4
+        uncertainty_penalty = (low_confidence_count / max(total_fields, 1)) * 0.2
+        quality_penalty = min(self._count_parser_warnings(source_text) * 0.1, 0.3)
+        structure_penalty = min(self._count_missing_sections(resume) * 0.2, 0.2)
+        validation_penalty = min(len(validation_errors) * 0.05, 0.1)
+
+        uncertainty_weight = (
+            settings.EXTRACTOR_UNCERTAINTY_WEIGHT
+            if settings.EXTRACTOR_UNCERTAINTY_VALIDATION_COMPLETE
+            else 0.0
+        )
+
+        final_score = max(
+            0.0,
+            base_score
+            - completeness_penalty
+            - (uncertainty_penalty * uncertainty_weight)
+            - quality_penalty
+            - structure_penalty
+            - validation_penalty,
+        )
+        return round(final_score, 4)
+
+    def _weighted_completeness_ratio(self, resume: Resume) -> float:
+        section_fields = {
+            "work": ["name", "position", "url", "startDate", "endDate", "highlights"],
+            "education": [
+                "institution",
+                "url",
+                "area",
+                "studyType",
+                "startDate",
+                "endDate",
+                "score",
+                "courses",
+            ],
+            "skills": ["name"],
+            "projects": ["name", "startDate", "endDate", "description", "highlights", "url"],
+            "awards": ["title", "date", "awarder", "summary"],
+            "certificates": ["name", "date", "issuer", "url"],
+        }
+
+        weights = settings.EXTRACTOR_FIELD_WEIGHTS
+        section_weights = {
+            "work": weights.get("required", 2.0),
+            "education": weights.get("required", 2.0),
+            "skills": weights.get("important", 1.5),
+            "projects": weights.get("important", 1.5),
+            "awards": weights.get("optional", 1.0),
+            "certificates": weights.get("optional", 1.0),
+        }
+
+        total_weighted = 0.0
+        filled_weighted = 0.0
+
+        for section, fields in section_fields.items():
+            items = getattr(resume, section, []) or []
+            weight = float(section_weights.get(section, 1.0))
+            expected_items = max(len(items), 1)
+            total_weighted += expected_items * len(fields) * weight
+            if not items:
+                continue
+            for item in items:
+                for field_name in fields:
+                    value = getattr(item, field_name, None)
+                    if self._field_has_value(value):
+                        filled_weighted += weight
+
+        if total_weighted <= 0:
+            return 0.0
+        return min(filled_weighted / total_weighted, 1.0)
+
+    def _count_total_fields(self, resume: Resume) -> int:
+        section_fields = {
+            "work": ["name", "position", "url", "startDate", "endDate", "highlights"],
+            "education": [
+                "institution",
+                "url",
+                "area",
+                "studyType",
+                "startDate",
+                "endDate",
+                "score",
+                "courses",
+            ],
+            "skills": ["name"],
+            "projects": ["name", "startDate", "endDate", "description", "highlights", "url"],
+            "awards": ["title", "date", "awarder", "summary"],
+            "certificates": ["name", "date", "issuer", "url"],
+        }
+
+        total = 0
+        for section, fields in section_fields.items():
+            items = getattr(resume, section, []) or []
+            for item in items:
+                for field_name in fields:
+                    if self._field_has_value(getattr(item, field_name, None)):
+                        total += 1
+        return total
+
+    @staticmethod
+    def _field_has_value(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, list):
+            return len(value) > 0
+        return True
+
+    @staticmethod
+    def _count_parser_warnings(source_text: str) -> int:
+        if not source_text:
+            return 1
+        warnings = 0
+        if len(source_text.strip()) < 200:
+            warnings += 1
+        if "�" in source_text:
+            warnings += 1
+        if source_text.count("\n") <= 2:
+            warnings += 1
+        return warnings
+
+    @staticmethod
+    def _count_missing_sections(resume: Resume) -> int:
+        expected_sections = [
+            "work",
+            "education",
+            "skills",
+            "projects",
+            "awards",
+            "certificates",
+        ]
+        missing = 0
+        for section in expected_sections:
+            items = getattr(resume, section, None)
+            if not items:
+                missing += 1
+        return missing

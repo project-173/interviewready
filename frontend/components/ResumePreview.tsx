@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Resume } from "../types";
 
 interface ResumePreviewProps {
-  resume: Resume | null;
+  resume: Resume;
 }
 
 const formatRange = (start?: string, end?: string): string => {
@@ -27,7 +27,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
     []
   );
 
-  if (!resume) {
+    if (!resume) {
     return (
       <div className="h-full flex flex-col items-center justify-center text-slate-400 p-8 text-center bg-white">
         <div className="w-16 h-16 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-center mb-4">
@@ -70,21 +70,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
             <h2 className="text-2xl font-bold tracking-tight text-slate-900">
               Resume Preview
             </h2>
-            <div className="flex gap-4 mt-2 text-xs font-medium text-slate-400">
-              <span>JSON Resume (basics excluded)</span>
-            </div>
           </div>
-          <button className="text-[11px] font-bold text-slate-500 border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all flex items-center gap-2 shadow-sm">
-            <svg
-              className="w-3.5 h-3.5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0L8 8m4-4v12"></path>
-            </svg>
-            Export
-          </button>
         </div>
 
         <div className="inline-flex h-9 items-center justify-center rounded-lg bg-slate-100 p-1 text-slate-500 flex-wrap">
@@ -121,11 +107,6 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
                   <p className="text-xs font-semibold text-slate-500 mb-4">
                     {item.name || "Company"}
                   </p>
-                  {item.summary && (
-                    <p className="text-[13px] text-slate-600 leading-relaxed mb-4">
-                      {item.summary}
-                    </p>
-                  )}
                   {item.highlights && item.highlights.length > 0 && (
                     <ul className="space-y-2.5">
                       {item.highlights.map((highlight, idx) => (
@@ -202,17 +183,7 @@ export const ResumePreview: React.FC<ResumePreviewProps> = ({ resume }) => {
                     <h4 className="text-sm font-bold text-slate-900">
                       {skill.name || "Skill"}
                     </h4>
-                    {skill.level && (
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">
-                        {skill.level}
-                      </span>
-                    )}
                   </div>
-                  {skill.keywords && skill.keywords.length > 0 && (
-                    <div className="text-[11px] text-slate-500">
-                      {skill.keywords.join(", ")}
-                    </div>
-                  )}
                 </div>
               ))
             ) : (

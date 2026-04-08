@@ -1,0 +1,264 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "id": "resume_strong_swe",
+      "title": "Strong SWE with metrics",
+      "notes": "Baseline strong SWE resume with quantified impact across two roles.",
+      "last_reviewed": "2026-03-27",
+      "resume": {
+        "work": [
+          {
+            "name": "Orbit Systems",
+            "position": "Senior Software Engineer",
+            "startDate": "2022-01-01",
+            "endDate": "2025-02-01",
+            "summary": "Led backend platform improvements and reliability work.",
+            "highlights": [
+              "Reduced API p95 latency by 42 percent by optimizing caching and query plans.",
+              "Migrated 12 services to a shared auth gateway, lowering auth incidents by 60 percent.",
+              "Mentored 4 engineers and led incident response for two quarters."
+            ]
+          },
+          {
+            "name": "Blue Pine Labs",
+            "position": "Software Engineer",
+            "startDate": "2019-06-01",
+            "endDate": "2021-12-01",
+            "summary": "Built customer-facing features and internal tooling.",
+            "highlights": [
+              "Implemented a feature flag system used across 8 teams.",
+              "Built CI pipelines that reduced build time from 18 minutes to 7 minutes."
+            ]
+          }
+        ],
+        "education": [
+          {
+            "institution": "State University",
+            "area": "Computer Science",
+            "studyType": "BS",
+            "startDate": "2015-09-01",
+            "endDate": "2019-05-01",
+            "score": "3.8"
+          }
+        ],
+        "skills": [
+          {
+            "name": "Programming",
+            "level": "Advanced",
+            "keywords": ["Python", "TypeScript", "Go"]
+          },
+          {
+            "name": "Cloud",
+            "level": "Advanced",
+            "keywords": ["AWS", "Docker", "Kubernetes"]
+          }
+        ],
+        "projects": [
+          {
+            "name": "Latency Dashboard",
+            "startDate": "2021-03-01",
+            "endDate": "2021-08-01",
+            "description": "Internal dashboard for API latency trends and alerting.",
+            "highlights": ["Reduced mean time to detect by 25 percent."]
+          }
+        ],
+        "awards": [],
+        "certificates": []
+      }
+    },
+    {
+      "id": "resume_sparse_metrics",
+      "title": "Sparse resume with weak metrics",
+      "notes": "Edge case with vague statements and minimal detail.",
+      "last_reviewed": "2026-03-27",
+      "resume": {
+        "work": [
+          {
+            "name": "Local Shop",
+            "position": "Developer",
+            "startDate": "2021-01-01",
+            "endDate": "2023-01-01",
+            "summary": "Worked on various tasks.",
+            "highlights": [
+              "Helped with website updates.",
+              "Assisted team with requests."
+            ]
+          }
+        ],
+        "education": [
+          {
+            "institution": "Community College",
+            "area": "Information Technology",
+            "studyType": "Associate",
+            "startDate": "2018-09-01",
+            "endDate": "2020-05-01"
+          }
+        ],
+        "skills": [
+          {
+            "name": "General",
+            "level": "Intermediate",
+            "keywords": ["HTML", "CSS", "JavaScript"]
+          }
+        ],
+        "projects": [],
+        "awards": [],
+        "certificates": []
+      }
+    },
+    {
+      "id": "resume_employment_gap",
+      "title": "Employment gap",
+      "notes": "Gap between roles to test clarity and narrative handling.",
+      "last_reviewed": "2026-03-27",
+      "resume": {
+        "work": [
+          {
+            "name": "Northwind Health",
+            "position": "Data Analyst",
+            "startDate": "2016-01-01",
+            "endDate": "2018-03-01",
+            "summary": "Created reporting for clinical operations.",
+            "highlights": ["Automated weekly reports using SQL and Excel."]
+          },
+          {
+            "name": "Harbor Analytics",
+            "position": "Senior Data Analyst",
+            "startDate": "2020-09-01",
+            "endDate": "2024-02-01",
+            "summary": "Owned KPI tracking and dashboard development.",
+            "highlights": [
+              "Built Tableau dashboards for 6 business units.",
+              "Improved forecast accuracy by 12 percent."
+            ]
+          }
+        ],
+        "education": [
+          {
+            "institution": "Lakeside University",
+            "area": "Statistics",
+            "studyType": "BS",
+            "startDate": "2012-09-01",
+            "endDate": "2016-05-01"
+          }
+        ],
+        "skills": [
+          {
+            "name": "Analytics",
+            "level": "Advanced",
+            "keywords": ["SQL", "Tableau", "Python"]
+          }
+        ],
+        "projects": [],
+        "awards": [],
+        "certificates": []
+      }
+    },
+    {
+      "id": "resume_career_changer",
+      "title": "Career changer",
+      "notes": "Teacher moving into data analyst role with transferable skills.",
+      "last_reviewed": "2026-03-27",
+      "resume": {
+        "work": [
+          {
+            "name": "Riverside High School",
+            "position": "Math Teacher",
+            "startDate": "2017-08-01",
+            "endDate": "2023-06-01",
+            "summary": "Taught AP Statistics and Algebra.",
+            "highlights": [
+              "Designed a data-driven curriculum using real-world datasets.",
+              "Led a student analytics club focused on dashboard building."
+            ]
+          },
+          {
+            "name": "Freelance",
+            "position": "Data Analyst",
+            "startDate": "2023-07-01",
+            "endDate": "2024-12-01",
+            "summary": "Delivered analytics projects for small businesses.",
+            "highlights": [
+              "Built sales dashboards in Tableau for 3 clients.",
+              "Created SQL pipelines to automate monthly reporting."
+            ]
+          }
+        ],
+        "education": [
+          {
+            "institution": "Metro University",
+            "area": "Mathematics",
+            "studyType": "BS",
+            "startDate": "2013-09-01",
+            "endDate": "2017-05-01"
+          }
+        ],
+        "skills": [
+          {
+            "name": "Analytics",
+            "level": "Intermediate",
+            "keywords": ["SQL", "Tableau", "Excel", "Python"]
+          }
+        ],
+        "projects": [
+          {
+            "name": "Student Outcomes Dashboard",
+            "startDate": "2022-01-01",
+            "endDate": "2022-06-01",
+            "description": "Tracked student performance and interventions.",
+            "highlights": ["Improved pass rates by 9 percent."]
+          }
+        ],
+        "awards": [],
+        "certificates": []
+      }
+    },
+    {
+      "id": "resume_overqualified_senior",
+      "title": "Overqualified senior engineer",
+      "notes": "Senior leader with broad scope applying to mid-level roles.",
+      "last_reviewed": "2026-03-27",
+      "resume": {
+        "work": [
+          {
+            "name": "Skyline Tech",
+            "position": "Principal Engineer",
+            "startDate": "2015-01-01",
+            "endDate": "2025-01-01",
+            "summary": "Led platform modernization and engineering strategy.",
+            "highlights": [
+              "Managed a 20 person platform organization.",
+              "Cut infrastructure costs by 35 percent through consolidation.",
+              "Defined multi-year architecture roadmap for payment systems."
+            ]
+          }
+        ],
+        "education": [
+          {
+            "institution": "Pacific Institute of Technology",
+            "area": "Computer Engineering",
+            "studyType": "MS",
+            "startDate": "2012-09-01",
+            "endDate": "2014-05-01"
+          }
+        ],
+        "skills": [
+          {
+            "name": "Leadership",
+            "level": "Expert",
+            "keywords": ["Org Design", "Roadmapping", "Executive Communication"]
+          },
+          {
+            "name": "Architecture",
+            "level": "Expert",
+            "keywords": ["Distributed Systems", "Reliability", "Security"]
+          }
+        ],
+        "projects": [],
+        "awards": [],
+        "certificates": []
+      }
+    }
+  ]
+}

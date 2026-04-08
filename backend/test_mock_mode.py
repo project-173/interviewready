@@ -19,7 +19,7 @@ from app.models.session import SessionContext
 class DummyGeminiService:
     """Fallback Gemini service for tests."""
 
-    def generate_response(self, system_prompt: str, user_input: str, context=None) -> str:
+    def generate_response(self, system_prompt: str, user_input: str) -> str:
         if "Resume Critic" in system_prompt:
             return json.dumps(
                 {
@@ -78,7 +78,6 @@ def test_agents_with_inline_mock() -> bool:
                 Work(
                     name="Sample Company",
                     position="Sample Role",
-                    summary="Sample resume text for testing",
                     highlights=["Improved performance", "Delivered features"],
                 )
             ]

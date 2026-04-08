@@ -44,7 +44,7 @@ class BaseAgentProtocol(Protocol):
 class BaseAgent(ABC, BaseAgentProtocol):
     """Abstract base agent implementation."""
 
-    MOCK_RESPONSES_FILE = Path(__file__).resolve().parents[2] / "mock_responses.json"
+    MOCK_RESPONSES_FILE = Path(__file__).resolve().parents[1] / "mock_responses.json"
     _mock_responses_cache: Optional[Dict[str, Any]] = None
 
     def __init__(self, gemini_service: "GeminiService", system_prompt: str, name: str):
@@ -85,14 +85,22 @@ class BaseAgent(ABC, BaseAgentProtocol):
             return cls._mock_responses_cache
 
         try:
+            if not cls.MOCK_RESPONSES_FILE.exists():
+                logger.error(
+                    f"Mock responses file does not exist at expected path: {cls.MOCK_RESPONSES_FILE}"
+                )
+                return {}
+
             raw = cls.MOCK_RESPONSES_FILE.read_text(encoding="utf-8")
             parsed = json.loads(raw)
             if isinstance(parsed, dict):
                 cls._mock_responses_cache = parsed
                 return parsed
-        except Exception:
+        except Exception as e:
             logger.warning(
-                "Failed to load mock responses file", path=str(cls.MOCK_RESPONSES_FILE)
+                "Failed to load mock responses file",
+                path=str(cls.MOCK_RESPONSES_FILE),
+                error=str(e),
             )
 
         cls._mock_responses_cache = {}
@@ -175,7 +183,6 @@ class BaseAgent(ABC, BaseAgentProtocol):
                             response = self.mock_service.generate_response(
                                 system_prompt=self.system_prompt,
                                 user_input=input_text,
-                                context=context,
                             )
                         else:
                             # Use real Gemini service
@@ -187,7 +194,6 @@ class BaseAgent(ABC, BaseAgentProtocol):
                             response = self.gemini_service.generate_response(
                                 system_prompt=self.system_prompt,
                                 user_input=input_text,
-                                context=context,
                             )
 
                         span.update(output=response)

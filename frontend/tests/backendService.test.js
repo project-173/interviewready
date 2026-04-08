@@ -1,52 +1,65 @@
-import { describe, it, expect } from 'vitest';
-import { backendService } from '../backendService.ts';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { backendService, formatInterviewCoachPayload } from '../backendService.ts';
 
-describe('Backend Service Integration', () => {
-  it('should test basic connectivity', async () => {
-    console.log('Testing basic connectivity...');
-    
-    try {
-      const testMessage = 'EXTRACTOR: Test message';
-      const response = await backendService.callChatEndpoint(testMessage);
-      
-      expect(response).toBeDefined();
-      console.log('✅ Backend connection successful');
-      console.log('Response:', response);
-    } catch (error) {
-      console.error('❌ Test failed:', error.message);
-      throw error;
-    }
+describe('backendService interview coach flow', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    global.fetch = vi.fn();
   });
 
-  it('should have session management', () => {
-    console.log('Testing session management...');
-    expect(backendService.sessionId).toBeDefined();
-    console.log('Session ID:', backendService.sessionId);
+  it('formats structured interview questions into readable chat copy', () => {
+    const formatted = formatInterviewCoachPayload({
+      current_question_number: 2,
+      total_questions: 5,
+      question: 'Tell me about a time you learned a new framework quickly.',
+      feedback: 'Your previous answer was too generic.',
+      answer_score: 42,
+      tip: 'Use a concrete example with measurable impact.',
+      next_challenge: 'Be more specific about your actions.',
+    });
+
+    expect(formatted).toContain('Question 2 of 5');
+    expect(formatted).toContain('Your previous answer was too generic.');
+    expect(formatted).toContain('Score: 42/100');
+    expect(formatted).toContain('Tip: Use a concrete example with measurable impact.');
+  });
+
+  it('starts the interview from the backend instead of a hardcoded frontend prompt', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        payload: {
+          current_question_number: 1,
+          total_questions: 5,
+          question: 'Walk me through a project that best matches this role.',
+          feedback: '',
+          tip: 'Use STAR.',
+          can_proceed: true,
+        },
+      }),
+    });
+
+    const responseText = await backendService.interviewCoachAgent(
+      {
+        work: [{ name: 'Example Co', position: 'Engineer' }],
+        education: [],
+        awards: [],
+        certificates: [],
+        skills: [{ name: 'React' }],
+        projects: [],
+      },
+      'Frontend engineer role',
+      [],
+    );
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [, requestInit] = global.fetch.mock.calls[0];
+    const body = JSON.parse(requestInit.body);
+
+    expect(body.intent).toBe('INTERVIEW_COACH');
+    expect(body.jobDescription).toBe('Frontend engineer role');
+    expect(body.messageHistory).toEqual([]);
+    expect(responseText).toContain('Question 1 of 5');
+    expect(responseText).toContain('Walk me through a project that best matches this role.');
   });
 });
-
-// Keep the original function for backward compatibility
-async function testBackendService() {
-  console.log('Testing Backend Service Integration...');
-  
-  try {
-    // Test 1: Basic connectivity
-    console.log('\n1. Testing basic connectivity...');
-    const testMessage = 'EXTRACTOR: Test message';
-    const response = await backendService.callChatEndpoint(testMessage);
-    console.log('✅ Backend connection successful');
-    console.log('Response:', response);
-    
-    // Test 2: Session management
-    console.log('\n2. Testing session management...');
-    console.log('Session ID:', backendService.sessionId);
-    
-    console.log('\n✅ All tests passed!');
-    
-  } catch (error) {
-    console.error('❌ Test failed:', error.message);
-    console.error('Make sure the backend is running on http://localhost:8080');
-  }
-}
-
-export { testBackendService };

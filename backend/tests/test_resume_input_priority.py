@@ -148,8 +148,8 @@ def test_extractor_agent_extracts_pdf_payload() -> None:
     payload = json.dumps({"data": "any-base64", "fileType": "pdf"})
 
     with patch("app.agents.extractor.parse_pdf_base64", return_value="Jane Doe Resume Text"), patch(
-        "app.agents.extractor.ExtractorAgent._extract_resume_with_llm",
-        return_value=Resume(work=[Work(name="Jane Doe Resume Text")]),
+        "app.agents.extractor.ExtractorAgent._generate_llm_response",
+        return_value=(Resume(work=[Work(name="Jane Doe Resume Text")]), 0.95, [], []),
     ):
         response = agent.process(payload, context)
 

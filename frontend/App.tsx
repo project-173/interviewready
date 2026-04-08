@@ -2,12 +2,23 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   SharedState, 
   WorkflowStatus,
-  ChatRequest
+  ChatRequest,
+  InterviewMode,
+  InterviewMessage,
+  Resume
 } from './types';
+
+const DEFAULT_RESUME: Resume = {
+  work: [],
+  education: [],
+  awards: [],
+  certificates: [],
+  skills: [],
+  projects: []
+};
 import {
   contentStrengthAgent, 
-  alignmentAgent, 
-  interviewCoachAgent,
+  alignmentAgent,
   backendService 
 } from './backendService';
 import { StepIndicator } from './components/StepIndicator';
@@ -20,22 +31,27 @@ import {
   ContentStep, 
   AlignmentStep, 
   AlignmentReportStep, 
-  InterviewStep 
+  InterviewStep,
+  InterviewModeSelectionStep
 } from './components/WorkflowSteps';
+
+const isInterviewCompleteResponse = (text: string) =>
+  text.toLowerCase().includes('interview complete');
 
 const AppContent: React.FC = () => {
   const [state, setState] = useState<SharedState>(() => {
     const saved = localStorage.getItem('interview_ready_state');
     if (saved) return JSON.parse(saved);
     return {
-      currentResume: null,
+      currentResume: DEFAULT_RESUME,
       history: [],
       jobDescription: '',
       status: WorkflowStatus.IDLE,
       criticReport: null,
       contentReport: null,
       alignmentReport: null,
-      interviewHistory: []
+      interviewHistory: [],
+      extractionReview: null
     };
   });
 
@@ -50,14 +66,15 @@ const AppContent: React.FC = () => {
     if (confirm('Reset current progress? This will clear all data and start over.')) {
       localStorage.removeItem('interview_ready_state');
       setState({
-        currentResume: null,
+        currentResume: DEFAULT_RESUME,
         history: [],
         jobDescription: '',
         status: WorkflowStatus.IDLE,
         criticReport: null,
         contentReport: null,
         alignmentReport: null,
-        interviewHistory: []
+        interviewHistory: [],
+        extractionReview: null
       });
       setError(null);
     }
@@ -105,7 +122,6 @@ const AppContent: React.FC = () => {
         </div>
         
         <div className="flex items-center gap-4">
-          <div className="h-4 w-[1px] bg-slate-200"></div>
           <button 
             onClick={resetSession}
             className="text-xs font-medium text-slate-500 hover:text-slate-900 transition-colors"
@@ -131,11 +147,21 @@ const AppContent: React.FC = () => {
         <aside className="w-[450px] border-r border-slate-200 bg-white flex flex-col z-20 overflow-hidden">
           <div className="flex-1 overflow-y-auto p-8 space-y-8 scrollbar-thin scrollbar-thumb-slate-200">
             {error && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3 text-red-700 animate-in fade-in slide-in-from-top-1">
-                <div className="mt-0.5 text-red-500">
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" /></svg>
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start justify-between gap-3 text-red-700 animate-in fade-in slide-in-from-top-1">
+                <div className="flex items-start gap-3 flex-1">
+                  <div className="mt-0.5 text-red-500">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" /></svg>
+                  </div>
+                  <div className="text-xs font-medium">{error}</div>
                 </div>
-                <div className="text-xs font-medium">{error}</div>
+                <button
+                  type="button"
+                  onClick={() => setError(null)}
+                  aria-label="Close notification"
+                  className="text-red-500 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-200 rounded-full"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
               </div>
             )}
 
@@ -163,25 +189,6 @@ const AppContent: React.FC = () => {
           <div className="flex-1 overflow-y-auto">
             <ResumePreview resume={state.currentResume} />
           </div>
-
-          {state.history.length > 1 && state.status === WorkflowStatus.IDLE && (
-            <div className="absolute top-6 right-6 group">
-              <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm w-64 max-h-[300px] overflow-y-auto">
-                 <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-3">Recent Uploads</h4>
-                 <div className="space-y-1.5">
-                   {state.history.map((h, index) => (
-                     <button 
-                       key={index}
-                       onClick={() => setState(prev => ({ ...prev, currentResume: h, status: WorkflowStatus.CRITIQUING }))}
-                       className="w-full p-2.5 rounded-lg text-left text-[11px] font-medium text-slate-600 hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-all truncate"
-                     >
-                        Resume {index + 1}
-                     </button>
-                   ))}
-                 </div>
-              </div>
-            </div>
-          )}
         </main>
       </div>
 
@@ -199,8 +206,13 @@ const WorkflowController: React.FC<{
   chatEndRef: React.RefObject<HTMLDivElement>;
 }> = ({ state, setState, setError, chatEndRef }) => {
   const { startLoading, updateProgress, stopLoading } = useLoading();
+  const [manualResumeText, setManualResumeText] = useState('');
+  const [manualResumeError, setManualResumeError] = useState<string | null>(null);
 
   const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+  const isRecord = (value: unknown): value is Record<string, any> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
 
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -215,18 +227,27 @@ const WorkflowController: React.FC<{
     });
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+const handleUploadSubmit = async (file: File | null) => {
+  setError(null);
+  setManualResumeError(null);
 
-    startLoading('Analyzing your resume...', ['Uploading file', 'Extracting content', 'Analyzing structure', 'Generating insights']);
-    setError(null);
+  // CASE 1: File provided → extract → critic
+  if (file) {
+    startLoading('Analyzing your resume...', [
+      'Uploading file',
+      'Extracting content',
+      'Analyzing structure',
+      'Generating insights'
+    ]);
+
     try {
       if (file.type === 'application/pdf') {
         updateProgress(25, 0);
+
         const base64 = await fileToBase64(file);
 
         updateProgress(50, 1);
+
         const request: ChatRequest = {
           intent: 'RESUME_CRITIC',
           resumeData: null,
@@ -234,66 +255,127 @@ const WorkflowController: React.FC<{
           messageHistory: [],
           resumeFile: { data: base64, fileType: 'pdf' }
         };
-        
+
         updateProgress(75, 2);
+
         const response = await backendService.callChatEndpoint(request);
         const parsedResume = await backendService.fetchCurrentResume();
-        const critiqueData =
-          response.payload && typeof response.payload === 'object' && !Array.isArray(response.payload)
-            ? response.payload
-            : {};
 
         let responseData;
         try {
           responseData = response.payload || JSON.parse(response.content || '{}');
-        } catch (error) {
-          console.error('Failed to parse backend response:', error);
+        } catch {
           throw new Error('Invalid response from backend');
         }
 
-        const resumeData = responseData.resume_data || {};
+        const payloadMetadata =
+          isRecord(response.payload) && isRecord((response.payload as any).metadata)
+            ? (response.payload as any).metadata
+            : null;
 
-        const resume = {
-          title: resumeData.title || 'Untitled Resume',
-          summary: resumeData.summary || '',
-          isMaster: false,
-          contact: resumeData.contact || {
-            fullName: '',
-            email: '',
-            phone: '',
-            city: '',
-            country: '',
-            linkedin: '',
-            github: '',
-            portfolio: ''
-          },
-          skills: resumeData.skills || [],
-          experience: resumeData.experiences || resumeData.experience || [],
-          education: resumeData.educations || resumeData.education || [],
-          experiences: resumeData.experiences || resumeData.experience || [],
-          educations: resumeData.educations || resumeData.education || [],
-          projects: resumeData.projects || [],
-          certifications: resumeData.certifications || [],
-          awards: resumeData.awards || []
-        };
+        const needsReview = Boolean(payloadMetadata?.needs_review);
 
         updateProgress(90, 3);
+
+        if (needsReview) {
+          setState(prev => ({
+            ...prev,
+            currentResume: parsedResume || prev.currentResume,
+            history: parsedResume ? [...prev.history, parsedResume] : prev.history,
+            criticReport: null,
+            status: WorkflowStatus.IDLE,
+            extractionReview: {
+              needsReview: true,
+            }
+          }));
+
+          updateProgress(100, 3);
+          return;
+        }
+
         setState(prev => ({
           ...prev,
           currentResume: parsedResume || prev.currentResume,
           history: parsedResume ? [...prev.history, parsedResume] : prev.history,
-          criticReport: {
-            score: Number((critiqueData as any).score) || 85,
-            readability: String((critiqueData as any).readability || 'Resume processed successfully'),
-            formattingRecommendations: Array.isArray((critiqueData as any).formattingRecommendations) ? (critiqueData as any).formattingRecommendations : [],
-            suggestions: Array.isArray((critiqueData as any).suggestions) ? (critiqueData as any).suggestions : []
-          },
-          status: WorkflowStatus.AWAITING_CRITIC_APPROVAL
+          criticReport: responseData,
+          status: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
+          extractionReview: null,
         }));
+
         updateProgress(100, 3);
       }
     } catch (err: any) {
       setError(err.message || "Failed to process resume");
+    } finally {
+      stopLoading();
+    }
+
+    return;
+  }
+
+  // CASE 2: No file → use resume from preview panel
+  if (!state.currentResume) {
+    setError('No resume available. Please upload or edit your resume.');
+    return;
+  }
+
+  startLoading('Analyzing your resume...', [
+    'Validating resume',
+    'Analyzing structure',
+    'Generating insights'
+  ]);
+
+  try {
+    updateProgress(50, 1);
+
+    const report = await backendService.resumeCriticAgent(state.currentResume);
+
+    updateProgress(100, 2);
+
+    setState(prev => ({
+      ...prev,
+      criticReport: report,
+      status: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
+      extractionReview: null,
+    }));
+  } catch (err: any) {
+    setError(err.message || 'Failed to analyze resume');
+  } finally {
+    stopLoading();
+  }
+};
+
+  const submitManualResume = async () => {
+    setManualResumeError(null);
+    let parsed: any;
+    try {
+      parsed = JSON.parse(manualResumeText);
+    } catch (error) {
+      setManualResumeError('Manual resume data must be valid JSON.');
+      return;
+    }
+
+    if (!parsed || typeof parsed !== 'object') {
+      setManualResumeError('Manual resume data must be a JSON object.');
+      return;
+    }
+
+    startLoading('Analyzing your resume...', ['Validating manual input', 'Analyzing structure', 'Generating insights']);
+    try {
+      updateProgress(35, 0);
+      const report = await backendService.resumeCriticAgent(parsed);
+      updateProgress(100, 2);
+      setState(prev => ({
+        ...prev,
+        currentResume: parsed,
+        history: [...prev.history, parsed],
+        criticReport: report,
+        status: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
+        extractionReview: null,
+      }));
+      setManualResumeText('');
+    } catch (err: any) {
+      setManualResumeError(err.message || 'Failed to process manual resume data.');
     } finally {
       stopLoading();
     }
@@ -331,12 +413,52 @@ const WorkflowController: React.FC<{
     }
   };
 
-  const startInterview = async () => {
-    setState(prev => ({ 
-      ...prev, 
-      status: WorkflowStatus.INTERVIEWING, 
-      interviewHistory: [{ role: 'agent', text: "Ready to practice? Based on your profile, tell me why you're a fit for this role." }]
+  const startInterviewSelection = () => {
+    setState(prev => ({
+      ...prev,
+      status: WorkflowStatus.SELECTING_INTERVIEW_MODE,
+      interviewHistory: [],
     }));
+  };
+
+  const startInterview = async (mode: InterviewMode) => {
+    setState(prev => ({
+      ...prev,
+      interviewMode: mode,
+      status: WorkflowStatus.INTERVIEWING,
+      interviewHistory: [],
+    }));
+
+    if (mode === 'VOICE') {
+      setError(null);
+      return; // Handled by WebSocket auto-start
+    }
+
+    startLoading('Starting interview...', ['Preparing first question', 'Personalizing coach guidance']);
+    setError(null);
+    try {
+      updateProgress(50, 0);
+      const openingQuestion = await backendService.interviewCoachAgent(
+        state.currentResume,
+        state.jobDescription,
+        [],
+      );
+      updateProgress(100, 1);
+      setState(prev => ({
+        ...prev,
+        status: WorkflowStatus.INTERVIEWING,
+        interviewHistory: [{ role: 'agent', text: openingQuestion }],
+      }));
+    } catch (err: any) {
+      setError(err.message);
+      setState(prev => ({
+        ...prev,
+        status: WorkflowStatus.SELECTING_INTERVIEW_MODE,
+        interviewHistory: [],
+      }));
+    } finally {
+      stopLoading();
+    }
   };
 
   const handleInterviewMessage = async (msg: string) => {
@@ -345,9 +467,18 @@ const WorkflowController: React.FC<{
     startLoading('Coach is thinking...', ['Analyzing your response', 'Generating feedback']);
     try {
       updateProgress(50, 0);
-      const responseText = await interviewCoachAgent(state.alignmentReport, updatedHistory);
+      const responseText = await backendService.interviewCoachAgent(
+        state.currentResume,
+        state.jobDescription,
+        updatedHistory,
+      );
+      const interviewComplete = isInterviewCompleteResponse(responseText);
       updateProgress(100, 1);
-      setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
+      setState(prev => ({
+        ...prev,
+        interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }],
+        status: interviewComplete ? WorkflowStatus.COMPLETED : prev.status,
+      }));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -356,11 +487,11 @@ const WorkflowController: React.FC<{
   };
 
   const handleInterviewAudioMessage = async (audio: Uint8Array) => {
-    const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: '[Audio response]' }];
+    // This is the legacy audio path used only in CHAT mode for voice-to-text
+    const updatedHistory = [...state.interviewHistory, { role: 'user' as const, text: '[Analyzing audio...]' }];
     setState(prev => ({ ...prev, interviewHistory: updatedHistory }));
-    startLoading('Processing audio...', ['Transcribing speech', 'Analyzing content', 'Generating response']);
+    
     try {
-      updateProgress(33, 0);
       const request: ChatRequest = {
         intent: 'INTERVIEW_COACH',
         resumeData: state.currentResume,
@@ -368,26 +499,93 @@ const WorkflowController: React.FC<{
         messageHistory: updatedHistory,
         audioData: audio,
       };
-      updateProgress(66, 1);
+      
       const response = await backendService.callChatEndpoint(request);
-      const responseText = typeof response.payload === 'string' ? response.payload : JSON.stringify(response.payload);
-      updateProgress(100, 2);
-      setState(prev => ({ ...prev, interviewHistory: [...updatedHistory, { role: 'agent', text: responseText }] }));
+      const responseText = backendService.formatInterviewCoachPayload(response.payload ?? response.content);
+      const interviewComplete = isInterviewCompleteResponse(responseText);
+      
+      setState(prev => {
+        const newHistory = prev.interviewHistory.map((msg, i) => 
+          i === prev.interviewHistory.length - 1 && msg.text === '[Analyzing audio...]' 
+            ? { ...msg, text: (response as any).transcription || '[Audio response]' } 
+            : msg
+        );
+        return {
+          ...prev,
+          interviewHistory: [...newHistory, { role: 'agent', text: responseText }],
+          status: interviewComplete ? WorkflowStatus.COMPLETED : prev.status,
+        };
+      });
     } catch (err: any) {
-      setError(err.message);
-    } finally {
-      stopLoading();
+      setError(err.message || 'Failed to process audio');
+      setState(prev => ({
+        ...prev,
+        interviewHistory: prev.interviewHistory.filter(msg => msg.text !== '[Analyzing audio...]')
+      }));
+    }
+  };
+
+  const handleLiveEvent = (event: { type: string; text?: string }) => {
+    if (event.type === 'user' && event.text) {
+      setState(prev => {
+        const history = [...prev.interviewHistory];
+        const last = history[history.length - 1];
+        if (last && last.role === 'user') {
+          // If the last message was also from user, we might be getting streaming updates
+          // For simplicity in this UI, we just append or replace
+          return { ...prev, interviewHistory: [...history.slice(0, -1), { role: 'user', text: event.text || '' }] };
+        }
+        return { ...prev, interviewHistory: [...history, { role: 'user', text: event.text || '' }] };
+      });
+    } else if (event.type === 'gemini' && event.text) {
+      setState(prev => {
+        const history = [...prev.interviewHistory];
+        const last = history[history.length - 1];
+        if (last && last.role === 'agent') {
+          return { ...prev, interviewHistory: [...history.slice(0, -1), { role: 'agent', text: event.text || '' }] };
+        }
+        return { ...prev, interviewHistory: [...history, { role: 'agent', text: event.text || '' }] };
+      });
     }
   };
 
   return (
     <>
-      {(state.status === WorkflowStatus.IDLE || state.status === WorkflowStatus.EXTRACTING) && <UploadStep onUpload={handleFileUpload} />}
-      {(state.status === WorkflowStatus.CRITIQUING || state.status === WorkflowStatus.AWAITING_CRITIC_APPROVAL) && state.criticReport && <CriticStep report={state.criticReport} onApprove={approveCritic} />}
-      {(state.status === WorkflowStatus.ANALYZING_CONTENT || state.status === WorkflowStatus.AWAITING_CONTENT_APPROVAL) && state.contentReport && <ContentStep report={state.contentReport} onApprove={approveContent} />}
+      {(state.status === WorkflowStatus.IDLE || state.status === WorkflowStatus.EXTRACTING) && (
+        <UploadStep
+          onUploadSubmit={handleUploadSubmit}
+          reviewNotice={state.extractionReview}
+        />
+      )}
+      {(state.status === WorkflowStatus.CRITIQUING || state.status === WorkflowStatus.AWAITING_CRITIC_APPROVAL) && state.criticReport && (
+        <CriticStep report={state.criticReport} resume={state.currentResume} onApprove={approveCritic} />
+      )}
+      {(state.status === WorkflowStatus.ANALYZING_CONTENT || state.status === WorkflowStatus.AWAITING_CONTENT_APPROVAL) && state.contentReport && (
+        <ContentStep report={state.contentReport} resume={state.currentResume} onApprove={approveContent} />
+      )}
       {(state.status === WorkflowStatus.ALIGNING_JD) && <AlignmentStep jd={state.jobDescription} onChangeJD={(val) => setState(prev => ({ ...prev, jobDescription: val }))} onAnalyze={runAlignment} isLoading={false} />}
-      {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && <AlignmentReportStep report={state.alignmentReport} onStartInterview={startInterview} />}
-      {state.status === WorkflowStatus.INTERVIEWING && <InterviewStep history={state.interviewHistory} onSend={handleInterviewMessage} onSendAudio={handleInterviewAudioMessage} isLoading={false} chatEndRef={chatEndRef} />}
+      {(state.status === WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL) && state.alignmentReport && (
+        <AlignmentReportStep
+          report={state.alignmentReport}
+          resume={state.currentResume}
+          onStartInterview={startInterviewSelection}
+        />
+      )}
+      {(state.status === WorkflowStatus.SELECTING_INTERVIEW_MODE) && <InterviewModeSelectionStep onSelect={startInterview} />}
+      {(state.status === WorkflowStatus.INTERVIEWING || state.status === WorkflowStatus.DEBUG_VOICE || state.status === WorkflowStatus.COMPLETED) && (
+        <InterviewStep 
+          history={state.interviewHistory} 
+          onSend={handleInterviewMessage} 
+          onSendAudio={handleInterviewAudioMessage} 
+          isLoading={false} 
+          chatEndRef={chatEndRef} 
+          mode={state.status === WorkflowStatus.DEBUG_VOICE ? 'VOICE' : (state.interviewMode || 'CHAT')} 
+          sessionId={backendService.getSessionId()} 
+          isComplete={state.status === WorkflowStatus.COMPLETED}
+          onExit={() => setState(prev => ({ ...prev, status: WorkflowStatus.SELECTING_INTERVIEW_MODE }))}
+          onLiveEvent={handleLiveEvent}
+        />
+      )}
     </>
   );
 };

@@ -2,8 +2,9 @@
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status, Request
 from fastapi.concurrency import run_in_threadpool
+from app.core.limiter import limiter
 from langfuse import get_client, observe, propagate_attributes
 
 from app.api.v1.services import (
@@ -15,6 +16,8 @@ from langfuse import Langfuse, observe, propagate_attributes
 langfuse = Langfuse()
 from app.models import AgentResponse, ChatApiResponse, ChatRequest
 from app.utils.json_parser import parse_json_payload
+from app.core.limiter import limiter
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -22,9 +25,11 @@ langfuse = get_client()
 
 
 @router.post("")
+@limiter.limit(settings.DEFAULT_RATE_LIMIT)
 @observe(name="chat_endpoint")
 async def chat_endpoint(
-    request: ChatRequest,
+    request: Request,
+    chat_request: ChatRequest,
     session_id: Annotated[str, Query(alias="sessionId")],
 ) -> ChatApiResponse:
     """Run orchestration for the chat message within a user-owned session."""
@@ -65,11 +70,13 @@ async def chat_endpoint(
 
             try:
                 internal_response = await run_in_threadpool(
-                    orchestrator.orchestrate, request, context
+                    orchestrator.orchestrate, chat_request, context
                 )
+                payload = _extract_api_payload(internal_response)
+                payload = _attach_payload_metadata(payload, internal_response)
                 result = ChatApiResponse(
                     agent=internal_response.agent_name,
-                    payload=_extract_api_payload(internal_response),
+                    payload=payload
                 )
                 langfuse.update_current_span(
                     output={
@@ -104,7 +111,31 @@ def _extract_api_payload(response: AgentResponse) -> dict[str, Any] | list[Any] 
 
 def _parse_json_payload(content: str) -> dict[str, Any] | list[Any] | None:
     """Parse JSON payload from raw content or fenced markdown code block."""
-    parsed = parse_json_payload(content, allow_array=True)
-    if isinstance(parsed, (dict, list)):
-        return parsed
+    try:
+        parsed = parse_json_payload(content, allow_array=True)
+        if isinstance(parsed, (dict, list)):
+            return parsed
+    except Exception as exc:
+        logger.warning(f"Failed to parse JSON payload in chat endpoint: {exc}", content_preview=content[:100])
     return None
+
+
+def _attach_payload_metadata(
+    payload: dict[str, Any] | list[Any] | str,
+    response: AgentResponse,
+) -> dict[str, Any] | list[Any] | str:
+    """Attach response metadata to payload when payload is a JSON object."""
+    if not isinstance(payload, dict):
+        return payload
+
+    metadata = dict(payload.get("metadata") or {})
+    metadata.update(
+        {
+            "confidence_score": response.confidence_score,
+            "needs_review": response.needs_review,
+            "low_confidence_fields": response.low_confidence_fields or [],
+        }
+    )
+    merged = dict(payload)
+    merged["metadata"] = metadata
+    return merged

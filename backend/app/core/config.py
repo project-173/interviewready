@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     SERVER_PORT: int = 8080
     LOG_LEVEL: str = "DEBUG"
     APP_ENV: str = "local" # (e.g. local, staging, prod)
+    DEFAULT_RATE_LIMIT: str = "20/minute"
 
     # Google Configuration
     GEMINI_MODEL: str = "gemini-2.5-flash"
@@ -49,6 +50,15 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: Optional[str] = None
     LANGFUSE_SECRET_KEY: Optional[str] = None
     LANGFUSE_HOST: Optional[str] = "https://cloud.langfuse.com"
+    LANGFUSE_LLM_AS_A_JUDGE_ENABLED: bool = True
+
+    # Optional judge cost estimation (USD per 1K tokens)
+    JUDGE_PROMPT_COST_PER_1K_USD: Optional[float] = None
+    JUDGE_COMPLETION_COST_PER_1K_USD: Optional[float] = None
+
+    # Evals
+    SKIP_EVAL_TESTS: bool = True
+    EVAL_SAMPLE_RATE: float = 0.1
 
     # Mock agent response
     MOCK_RESUME_CRITIC_AGENT: bool = False
@@ -56,6 +66,20 @@ class Settings(BaseSettings):
     MOCK_CONTENT_STRENGTH_AGENT: bool = False
     MOCK_JOB_ALIGNMENT_AGENT: bool = False
     MOCK_INTERVIEW_COACH_AGENT: bool = False
+
+    # Extractor HITL configuration
+    EXTRACTOR_AUTO_PROCEED_THRESHOLD: float = 0.2
+    EXTRACTOR_HITL_TIMEOUT_MINUTES: int = 30
+    EXTRACTOR_HITL_FALLBACK: str = "proceed"  # proceed | fail | queue
+
+    # Extractor confidence weighting
+    EXTRACTOR_FIELD_WEIGHTS: dict = {
+        "required": 2.0,
+        "important": 1.5,
+        "optional": 1.0,
+    }
+    EXTRACTOR_UNCERTAINTY_WEIGHT: float = 0.0
+    EXTRACTOR_UNCERTAINTY_VALIDATION_COMPLETE: bool = False
     
     class Config:
         env_file = ".env"

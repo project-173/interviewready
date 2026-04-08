@@ -9,8 +9,8 @@ interface StepIndicatorProps {
 
 const steps = [
   { status: WorkflowStatus.IDLE, label: 'Upload' },
-  { status: WorkflowStatus.CRITIQUING, label: 'Review' },
-  { status: WorkflowStatus.ANALYZING_CONTENT, label: 'Analysis' },
+  { status: WorkflowStatus.CRITIQUING, label: 'Critic' },
+  { status: WorkflowStatus.ANALYZING_CONTENT, label: 'Content' },
   { status: WorkflowStatus.ALIGNING_JD, label: 'Matching' },
   { status: WorkflowStatus.INTERVIEWING, label: 'Interview' },
 ];

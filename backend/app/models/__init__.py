@@ -9,15 +9,10 @@ from .database import *
 __all__ = [
     # Base models
     "Work",
-    "Volunteer",
     "Education",
     "Award",
     "Certificate",
-    "Publication",
     "Skill",
-    "Language",
-    "Interest",
-    "Reference",
     "Project",
     "Source",
     
@@ -35,9 +30,9 @@ __all__ = [
     "ActionPlan",
     "NormalizationFailure",
     "AlignmentReport",
-    "ContentAnalysisReport",
+    "ContentStrengthReport",
     "InterviewMessage",
-    "StructuralAssessment",
+    "ResumeCriticReport",
     "WorkflowStatus",
     
     # Session models

@@ -17,15 +17,14 @@ class SessionStore:
     def get_or_create(self, session_id: str, user_id: str) -> SessionContext:
         """Return existing session context or create one for the requesting user."""
         with self._lock:
-            context = self._sessions.get(session_id)
-            if context is None:
-                context = SessionContext(session_id=session_id, user_id=user_id)
-                self._sessions[session_id] = context
+            if session_id in self._sessions:
+                context = self._sessions[session_id]
+                if context.user_id != user_id:
+                    raise PermissionError("Unauthorized access to session")
                 return context
 
-            if context.user_id != user_id:
-                raise PermissionError("Unauthorized access to session")
-
+            context = SessionContext(session_id=session_id, user_id=user_id)
+            self._sessions[session_id] = context
             return context
 
     def get(self, session_id: str, user_id: str) -> SessionContext | None:

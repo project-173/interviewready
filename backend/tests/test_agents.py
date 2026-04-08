@@ -81,7 +81,6 @@ def test_agents():
             Work(
                 name="Tech Corp",
                 position="Senior Software Engineer",
-                summary=sample_resume.strip(),
                 highlights=[
                     "Led team of 5 developers",
                     "Improved system performance by 30%",
