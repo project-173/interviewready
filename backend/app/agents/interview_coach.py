@@ -641,6 +641,82 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
         last_user_message = user_messages[-1]
         return True, _message_value(last_user_message, "text")
 
+    def _build_summary_fallback_response(self) -> str:
+        """Return a safe fallback summary when the summary generator output is invalid."""
+        response = {
+            "interview_complete": True,
+            "summary": "Interview completed successfully. You provided thoughtful answers and demonstrated relevant experience.",
+            "strengths": [
+                "Clear communication",
+                "Relevant experience",
+                "Professional demeanor"
+            ],
+            "areas_for_improvement": [
+                "Consider providing more specific examples",
+                "Quantify results when possible",
+                "Include more detail on your role"
+            ],
+            "overall_rating": "Good",
+            "recommendations": [
+                "Practice the STAR method for structured answers",
+                "Research the company and role thoroughly",
+                "Prepare specific examples of your achievements"
+            ],
+            "final_feedback": "Thank you for completing the mock interview. Use this feedback to continue preparing for your real interviews."
+        }
+        return json.dumps(response)
+
+    def _validate_summary_response(self, response_json: dict) -> bool:
+        """Validate that the summary response has the correct JSON structure.
+        
+        Returns True if valid, False otherwise.
+        """
+        required_fields = {
+            "interview_complete": bool,
+            "summary": str,
+            "strengths": list,
+            "areas_for_improvement": list,
+            "overall_rating": str,
+            "recommendations": list,
+            "final_feedback": str,
+        }
+
+        # Check that all required fields are present
+        if not isinstance(response_json, dict):
+            return False
+
+        for field, expected_type in required_fields.items():
+            if field not in response_json:
+                return False
+            value = response_json[field]
+            
+            # Type checking
+            if not isinstance(value, expected_type):
+                return False
+            
+            # Additional validation for specific fields
+            if field == "interview_complete" and value is not True:
+                return False
+            if field == "summary" and not value.strip():
+                return False
+            if field == "strengths" and len(value) == 0:
+                return False
+            if field == "areas_for_improvement" and len(value) == 0:
+                return False
+            if field == "overall_rating" and not value.strip():
+                return False
+            if field == "recommendations" and len(value) == 0:
+                return False
+            if field == "final_feedback" and not value.strip():
+                return False
+            
+            # Validate array items are strings
+            if field in ["strengths", "areas_for_improvement", "recommendations"]:
+                if not all(isinstance(item, str) and item.strip() for item in value):
+                    return False
+
+        return True
+
     def _generate_summary_response(
         self, input_data: AgentInput, context: SessionContext
     ) -> tuple[str, str]:
@@ -977,7 +1053,30 @@ RESPOND WITH THIS EXACT JSON STRUCTURE AND NOTHING ELSE:
                     result, method_used = self._generate_summary_response(
                         input_data, context
                     )
-                    response_json = json.loads(result)
+                    # Parse summary response with validation and fallback for invalid JSON/structure
+                    try:
+                        response_json = json.loads(result)
+                        # Validate the JSON structure
+                        if not self._validate_summary_response(response_json):
+                            logger.warning(
+                                "InterviewCoachAgent summary response has invalid structure",
+                                session_id=session_id,
+                                result_preview=result[:200],
+                            )
+                            # Use fallback summary response when structure is invalid
+                            result = self._build_summary_fallback_response()
+                            response_json = json.loads(result)
+                            method_used = "summary_invalid_structure"
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            "Failed to parse InterviewCoachAgent summary response as JSON",
+                            session_id=session_id,
+                            result_preview=result[:200],
+                        )
+                        # Use fallback summary response when Gemini output is invalid JSON
+                        result = self._build_summary_fallback_response()
+                        response_json = json.loads(result)
+                        method_used = "summary_fallback"
                     state = self._get_interview_state(context)
 
                 if not response_json.get("interview_complete", False):
