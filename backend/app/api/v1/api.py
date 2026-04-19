@@ -1,7 +1,8 @@
 """Main API router for v1 endpoints."""
 
 from fastapi import APIRouter
-from app.api.v1.endpoints import chat, agents, sessions, interview
+
+from app.api.v1.endpoints import agents, chat, interview, sessions
 
 api_router = APIRouter()
 

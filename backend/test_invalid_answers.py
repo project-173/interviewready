@@ -37,8 +37,6 @@ def test_invalid_answers():
         },
     )
 
-    print("Testing InterviewCoachAgent mock responses for invalid answers...\n")
-
     # Test each question with invalid answer simulation
     test_cases = [
         (0, "too brief", "InterviewCoachAgent_Q2_Invalid"),  # Q1 invalid
@@ -48,7 +46,7 @@ def test_invalid_answers():
         (4, "too negative", "InterviewCoachAgent_Q6_Invalid"),  # Q5 invalid
     ]
 
-    for question_index, invalid_reason, expected_key in test_cases:
+    for question_index, _invalid_reason, _expected_key in test_cases:
         # Set up context for this question
         context.shared_memory["current_question_index"] = question_index
 
@@ -56,25 +54,15 @@ def test_invalid_answers():
         mock_key = agent._get_dynamic_mock_key(
             context, is_follow_up=True, is_valid=False
         )
-        print(
-            f"Question {question_index + 1} invalid answer -> Mock key: {mock_key} (expected: {expected_key})"
-        )
 
         # Verify the mock response exists
         response_str = agent.get_mock_response_by_key(mock_key)
         if response_str:
             response = json.loads(response_str)
-            print(
-                f"  ✓ Response found - Question: {response.get('question', 'N/A')[:50]}..."
-            )
-            print(f"  ✓ Feedback: {response.get('feedback', 'N/A')[:50]}...")
         else:
-            print(f"  ✗ No response found for key: {mock_key}")
-
-        print()
+            pass
 
     # Test normal progression
-    print("Testing normal question progression:")
     for question_index in range(5):
         context.shared_memory["current_question_index"] = question_index
         mock_key = agent._get_dynamic_mock_key(
@@ -83,14 +71,9 @@ def test_invalid_answers():
         response_str = agent.get_mock_response_by_key(mock_key)
         if response_str:
             response = json.loads(response_str)
-            q_num = response.get("current_question_number", "N/A")
-            print(
-                f"  Question {question_index + 1} -> Mock key: {mock_key}, Response Q#: {q_num}"
-            )
+            response.get("current_question_number", "N/A")
         else:
-            print(f"  ✗ No response for Question {question_index + 1}")
-
-    print("\nTest completed!")
+            pass
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ interface ChatResponse {
   content?: string;
   reasoning?: string;
   confidence_score?: number;
+  transcription?: string;
   metadata?: {
     needs_review?: boolean;
     checkpoint_id?: string;
@@ -73,30 +74,25 @@ const parseInterviewCoachPayload = (payload: unknown): InterviewCoachPayload | n
   return isRecord(payload) ? payload as InterviewCoachPayload : null;
 };
 
-export const formatInterviewCoachPayload = (payload: unknown): string => {
-  const parsed = parseInterviewCoachPayload(payload);
-  if (!parsed) {
-    return typeof payload === 'string' ? payload : "I'm sorry, I couldn't generate a response.";
-  }
+const formatInterviewCompleteResponse = (parsed: InterviewCoachPayload): string => {
+  const lines = [
+    'Interview complete.',
+    parsed.overall_rating ? `Overall rating: ${parsed.overall_rating}` : '',
+    parsed.summary || '',
+    parsed.strengths?.length ? `Strengths: ${parsed.strengths.join(', ')}` : '',
+    parsed.areas_for_improvement?.length
+      ? `Areas to improve: ${parsed.areas_for_improvement.join(', ')}`
+      : '',
+    parsed.recommendations?.length
+      ? `Recommendations: ${parsed.recommendations.join(', ')}`
+      : '',
+    parsed.final_feedback || '',
+  ];
 
-  if (parsed.interview_complete) {
-    const lines = [
-      'Interview complete.',
-      parsed.overall_rating ? `Overall rating: ${parsed.overall_rating}` : '',
-      parsed.summary || '',
-      parsed.strengths?.length ? `Strengths: ${parsed.strengths.join(', ')}` : '',
-      parsed.areas_for_improvement?.length
-        ? `Areas to improve: ${parsed.areas_for_improvement.join(', ')}`
-        : '',
-      parsed.recommendations?.length
-        ? `Recommendations: ${parsed.recommendations.join(', ')}`
-        : '',
-      parsed.final_feedback || '',
-    ];
+  return lines.filter(Boolean).join('\n\n');
+};
 
-    return lines.filter(Boolean).join('\n\n');
-  }
-
+const formatQuestionResponse = (parsed: InterviewCoachPayload): string => {
   const questionLabel =
     parsed.current_question_number && parsed.total_questions
       ? `Question ${parsed.current_question_number} of ${parsed.total_questions}`
@@ -112,6 +108,17 @@ export const formatInterviewCoachPayload = (payload: unknown): string => {
   ];
 
   return lines.filter(Boolean).join('\n\n');
+};
+
+export const formatInterviewCoachPayload = (payload: unknown): string => {
+  const parsed = parseInterviewCoachPayload(payload);
+  if (!parsed) {
+    return typeof payload === 'string' ? payload : "I'm sorry, I couldn't generate a response.";
+  }
+
+  return parsed.interview_complete 
+    ? formatInterviewCompleteResponse(parsed)
+    : formatQuestionResponse(parsed);
 };
 
 class BackendService {
@@ -161,10 +168,7 @@ class BackendService {
     let audioDataBase64: string | null = null;
     if (request.audioData) {
       const bytes = new Uint8Array(request.audioData);
-      let binary = '';
-      for (let i = 0; i < bytes.length; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
+      const binary = String.fromCodePoint(...bytes);
       audioDataBase64 = btoa(binary);
     }
 
@@ -235,7 +239,6 @@ class BackendService {
       console.error('Failed to parse resume critic response:', error);
       throw new Error('Invalid response from resume critic agent');
     }
-    throw new Error('Invalid response from resume critic agent');
   }
 
   async contentStrengthAgent(resume?: Resume | null): Promise<ContentStrengthReport> {
@@ -257,7 +260,6 @@ class BackendService {
       console.error('Failed to parse content strength response:', error);
       throw new Error('Invalid response from content strength agent');
     }
-    throw new Error('Invalid response from content strength agent');
   }
 
   async alignmentAgent(resume: Resume | null | undefined, jd: string): Promise<AlignmentReport> {

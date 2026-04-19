@@ -170,7 +170,7 @@ APP_ENV=local  # local, staging, production
 # Optional: Langfuse (for distributed tracing)
 LANGFUSE_PUBLIC_KEY=<your-langfuse-public-key>
 LANGFUSE_SECRET_KEY=<your-langfuse-secret-key>
-LANGFUSE_HOST=https://cloud.langfuse.com
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
 
 # Optional: Agent Configuration
 MOCK_RESUME_CRITIC_AGENT=false
@@ -413,7 +413,7 @@ GEMINI_API_KEY=sk-...                 # Google Gemini API key
 # Observability (Optional)
 LANGFUSE_PUBLIC_KEY=pk-...            # Langfuse public key
 LANGFUSE_SECRET_KEY=sk-...            # Langfuse secret key
-LANGFUSE_HOST=https://cloud.langfuse.com  # Langfuse endpoint
+LANGFUSE_BASE_URL=https://cloud.langfuse.com  # Langfuse endpoint
 
 # Agent Mock Mode (Optional)
 MOCK_RESUME_CRITIC_AGENT=false        # Use mock responses instead of API

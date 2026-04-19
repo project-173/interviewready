@@ -2,12 +2,12 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from langfuse import Langfuse, observe, propagate_attributes
-from app.core.limiter import limiter
-from app.core.config import settings
 
 from app.api.v1.services import get_orchestration_agent
+from app.core.config import settings
+from app.core.limiter import limiter
 
 langfuse = Langfuse()
 
@@ -15,6 +15,7 @@ router = APIRouter()
 
 SessionId = Annotated[str | None, Query(alias="sessionId")]
 OrchestrationAgent = Annotated[object, Depends(get_orchestration_agent)]
+
 
 @router.get("")
 @limiter.limit(settings.DEFAULT_RATE_LIMIT)
@@ -39,9 +40,7 @@ async def list_agents(
     ) as trace:
         with propagate_attributes(user_id=user_id, session_id=effective_session_id):
             if orchestrator is None:
-                trace.update(
-                    output={"error": "orchestrator_unavailable"}
-                )
+                trace.update(output={"error": "orchestrator_unavailable"})
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Orchestration service unavailable",

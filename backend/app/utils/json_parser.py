@@ -75,9 +75,7 @@ def _parse_balanced_json(
 
     start_indices: list[int] = []
     for idx, ch in enumerate(text):
-        if ch == "{":
-            start_indices.append(idx)
-        elif allow_array and ch == "[":
+        if ch == "{" or (allow_array and ch == "["):
             start_indices.append(idx)
 
     for start in start_indices:
@@ -91,6 +89,32 @@ def _parse_balanced_json(
     return None
 
 
+def _handle_string_char(ch: str, escape: bool) -> tuple[bool, bool]:
+    """Handle character within string context. Returns (in_string, escape)."""
+    if escape:
+        return True, False
+    if ch == "\\":
+        return True, True
+    if ch == '"':
+        return False, False
+    return True, False
+
+
+def _handle_bracket(ch: str, stack: list[str]) -> str | None:
+    """Handle bracket matching. Returns extracted text if complete, None otherwise."""
+    if ch == "{":
+        stack.append("}")
+    elif ch == "[":
+        stack.append("]")
+    elif ch in ("}", "]"):
+        if not stack or ch != stack[-1]:
+            return None
+        stack.pop()
+        if not stack:
+            return "complete"
+    return None
+
+
 def _extract_from_start(text: str, start: int) -> str | None:
     stack: list[str] = []
     in_string = False
@@ -100,27 +124,17 @@ def _extract_from_start(text: str, start: int) -> str | None:
         ch = text[idx]
 
         if in_string:
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
-                in_string = False
+            in_string, escape = _handle_string_char(ch, escape)
             continue
 
         if ch == '"':
             in_string = True
             continue
 
-        if ch == "{":
-            stack.append("}")
-        elif ch == "[":
-            stack.append("]")
-        elif ch in ("}", "]"):
-            if not stack or ch != stack[-1]:
-                return None
-            stack.pop()
-            if not stack:
-                return text[start : idx + 1]
+        result = _handle_bracket(ch, stack)
+        if result == "complete":
+            return text[start : idx + 1]
+        if result is None:
+            continue
 
     return None

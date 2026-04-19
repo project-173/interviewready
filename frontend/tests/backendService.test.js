@@ -4,7 +4,7 @@ import { backendService, formatInterviewCoachPayload } from '../backendService.t
 describe('backendService interview coach flow', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    global.fetch = vi.fn();
+    globalThis.fetch = vi.fn();
   });
 
   it('formats structured interview questions into readable chat copy', () => {
@@ -25,7 +25,7 @@ describe('backendService interview coach flow', () => {
   });
 
   it('starts the interview from the backend instead of a hardcoded frontend prompt', async () => {
-    global.fetch.mockResolvedValue({
+    globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
         payload: {
@@ -52,8 +52,8 @@ describe('backendService interview coach flow', () => {
       [],
     );
 
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    const [, requestInit] = global.fetch.mock.calls[0];
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    const [, requestInit] = globalThis.fetch.mock.calls[0];
     const body = JSON.parse(requestInit.body);
 
     expect(body.intent).toBe('INTERVIEW_COACH');

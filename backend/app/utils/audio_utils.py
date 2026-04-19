@@ -2,10 +2,11 @@
 
 import io
 import wave
-from typing import Optional
 
 
-def pcm_to_wav(pcm_data: bytes, sample_rate: int = 16000, channels: int = 1, sample_width: int = 2) -> bytes:
+def pcm_to_wav(
+    pcm_data: bytes, sample_rate: int = 16000, channels: int = 1, sample_width: int = 2
+) -> bytes:
     """Convert raw PCM audio data to WAV format.
 
     Args:
@@ -20,7 +21,7 @@ def pcm_to_wav(pcm_data: bytes, sample_rate: int = 16000, channels: int = 1, sam
     # Create an in-memory WAV file
     wav_buffer = io.BytesIO()
 
-    with wave.open(wav_buffer, 'wb') as wav_file:
+    with wave.open(wav_buffer, "wb") as wav_file:
         wav_file.setnchannels(channels)
         wav_file.setsampwidth(sample_width)
         wav_file.setframerate(sample_rate)
@@ -42,4 +43,4 @@ def validate_audio_format(audio_data: bytes) -> bool:
         return False
 
     # Check for WAV header
-    return audio_data[:4] == b'RIFF' and audio_data[8:12] == b'WAVE'
+    return audio_data[:4] == b"RIFF" and audio_data[8:12] == b"WAVE"

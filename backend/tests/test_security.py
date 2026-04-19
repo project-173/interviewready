@@ -16,16 +16,16 @@ import pytest
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 
 from app.governance import SharpGovernanceService
-from app.models.agent import AgentResponse, AgentInput, ChatRequest
+from app.models.agent import AgentResponse, ChatRequest
 from app.models.resume import Resume
 from app.models.session import SessionContext
 from app.orchestration import OrchestrationAgent
 from app.utils.output_sanitizer import get_output_sanitizer
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class StubAgent:
     """Test double that returns a canned AgentResponse."""
@@ -47,7 +47,7 @@ class StubAgent:
         return self.system_prompt
 
     def process(self, input_data, context: SessionContext) -> AgentResponse:
-        self.inputs.append(input_data)
+        self.inputs.append(input_data, context)
         return AgentResponse(
             agent_name=self._name,
             content=self._content,
@@ -64,13 +64,18 @@ def _make_context(session_id: str = "test-session") -> SessionContext:
 
 def _make_resume() -> Resume:
     return Resume.model_validate(
-        {"work": [{"name": "Acme", "position": "Engineer", "summary": "Built systems."}]}
+        {
+            "work": [
+                {"name": "Acme", "position": "Engineer", "summary": "Built systems."}
+            ]
+        }
     )
 
 
 # ---------------------------------------------------------------------------
 # SEC -- Prompt Injection Resistance (RISK-001)
 # ---------------------------------------------------------------------------
+
 
 class TestPromptInjectionResistance:
     """Verify that the governance + output pipeline handles injection attempts
@@ -90,7 +95,15 @@ class TestPromptInjectionResistance:
         request = ChatRequest(
             intent="RESUME_CRITIC",
             resumeData=Resume.model_validate(
-                {"work": [{"name": "Acme", "position": "Engineer", "summary": injected_summary}]}
+                {
+                    "work": [
+                        {
+                            "name": "Acme",
+                            "position": "Engineer",
+                            "summary": injected_summary,
+                        }
+                    ]
+                }
             ),
             jobDescription="",
             messageHistory=[],
@@ -122,6 +135,7 @@ class TestPromptInjectionResistance:
 # ---------------------------------------------------------------------------
 # HAL -- Hallucination Boundary (RISK-002)
 # ---------------------------------------------------------------------------
+
 
 class TestHallucinationBoundary:
     """Verify governance service correctly classifies hallucination risk."""
@@ -212,7 +226,9 @@ class TestHallucinationBoundary:
         audited = governance.audit(response, "improved performance")
 
         assert audited.sharp_metadata.get("unfaithful_suggestions", 0) == 0
-        assert "unfaithful_suggestions" not in audited.sharp_metadata.get("audit_flags", [])
+        assert "unfaithful_suggestions" not in audited.sharp_metadata.get(
+            "audit_flags", []
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +288,9 @@ class TestInterviewCoachAgentGovernance:
         audited = governance.audit(response, "interview input")
 
         assert audited.sharp_metadata["governance_audit"] == "flagged"
-        assert "prompt_injection_attempt" in audited.sharp_metadata.get("audit_flags", [])
+        assert "prompt_injection_attempt" in audited.sharp_metadata.get(
+            "audit_flags", []
+        )
         assert "requires_human_review" in audited.sharp_metadata.get("audit_flags", [])
 
     @_SIT_GOVERNANCE
@@ -291,7 +309,9 @@ class TestInterviewCoachAgentGovernance:
         audited = governance.audit(response, "interview input with SSN: 123-45-6789")
 
         assert audited.sharp_metadata["governance_audit"] == "flagged"
-        assert "sensitive_interview_content" in audited.sharp_metadata.get("audit_flags", [])
+        assert "sensitive_interview_content" in audited.sharp_metadata.get(
+            "audit_flags", []
+        )
         assert "requires_human_review" in audited.sharp_metadata.get("audit_flags", [])
 
     def test_clean_interview_response_passes_governance(self) -> None:
@@ -309,7 +329,9 @@ class TestInterviewCoachAgentGovernance:
         audited = governance.audit(response, "clean interview input")
 
         assert audited.sharp_metadata["governance_audit"] == "passed"
-        assert "requires_human_review" not in audited.sharp_metadata.get("audit_flags", [])
+        assert "requires_human_review" not in audited.sharp_metadata.get(
+            "audit_flags", []
+        )
 
     @_SIT_GOVERNANCE
     def test_multiple_flags_all_appended_without_duplicates(self) -> None:
@@ -340,6 +362,7 @@ class TestInterviewCoachAgentGovernance:
 # ---------------------------------------------------------------------------
 # GOV -- Governance Threshold Tests (RISK-002, RISK-005)
 # ---------------------------------------------------------------------------
+
 
 class TestGovernanceThresholds:
     """Verify SHARP governance service enforces confidence and hallucination thresholds."""
@@ -428,8 +451,10 @@ class TestGovernanceThresholds:
         audited = governance.audit(response, "review my resume")
 
         assert audited.sharp_metadata["governance_audit"] == "passed"
-        assert audited.sharp_metadata.get("audit_flags") is None or \
-               audited.sharp_metadata.get("audit_flags") == []
+        assert (
+            audited.sharp_metadata.get("audit_flags") is None
+            or audited.sharp_metadata.get("audit_flags") == []
+        )
 
     @pytest.mark.xfail(
         reason="sit branch: governance audit merges existing sharp_metadata; not yet on this branch",
@@ -457,6 +482,7 @@ class TestGovernanceThresholds:
 # SCH -- Output Sanitisation
 # ---------------------------------------------------------------------------
 
+
 class TestOutputSanitization:
     """Verify that the OutputSanitizer processes responses safely."""
 
@@ -477,7 +503,7 @@ class TestOutputSanitization:
             }
         )
 
-        is_safe, sanitized, issues = sanitizer.sanitize(clean_output)
+        _is_safe, sanitized, _issues = sanitizer.sanitize(clean_output)
 
         assert sanitized  # Non-empty response returned
 
@@ -494,7 +520,7 @@ class TestOutputSanitization:
         sanitizer = get_output_sanitizer()
         large_output = "A" * 10_000
 
-        is_safe, sanitized, issues = sanitizer.sanitize(large_output)
+        is_safe, sanitized, _issues = sanitizer.sanitize(large_output)
 
         assert isinstance(is_safe, bool)
         assert isinstance(sanitized, str)
@@ -503,6 +529,7 @@ class TestOutputSanitization:
 # ---------------------------------------------------------------------------
 # ORCH -- Orchestrator Security Boundaries (RISK-009, RISK-010)
 # ---------------------------------------------------------------------------
+
 
 class TestOrchestratorSecurityBoundaries:
     """Verify orchestration-level security: missing resume, intent validation,
@@ -537,7 +564,7 @@ class TestOrchestratorSecurityBoundaries:
 
         assert result is not None
         assert result.agent_name == "NormalizeStage"
-        assert result.confidence_score == 0.0
+        assert result.confidence_score == pytest.approx(0.0, abs=1e-9)
 
     def test_each_session_has_isolated_context(self) -> None:
         """Two concurrent sessions must not share state."""
@@ -569,11 +596,12 @@ class TestOrchestratorSecurityBoundaries:
 # HALLUC -- contains_quantifiable_claim helper
 # ---------------------------------------------------------------------------
 
+
 class TestQuantifiableClaimDetection:
     """Verify hallucination risk helper correctly identifies unsupported numeric claims."""
 
     @pytest.mark.parametrize(
-        "text,expected",
+        ("text", "expected"),
         [
             ("Improved performance by 30%", True),
             ("Saved $50,000 in operational costs", True),
@@ -610,12 +638,12 @@ class TestQuantifiableClaimDetection:
 
         risk = governance.calculate_hallucination_risk(text, text)
 
-        assert risk == 0.0
+        assert risk == pytest.approx(0.0, abs=1e-9)
 
     def test_hallucination_risk_none_inputs_return_max(self) -> None:
         """None inputs must return maximum risk (1.0) to trigger safety review."""
         governance = SharpGovernanceService()
 
-        assert governance.calculate_hallucination_risk(None, "some output") == 1.0
-        assert governance.calculate_hallucination_risk("some input", None) == 1.0
-        assert governance.calculate_hallucination_risk(None, None) == 1.0
+        assert governance.calculate_hallucination_risk(None, "some output") == pytest.approx(1.0, abs=1e-9)
+        assert governance.calculate_hallucination_risk("some input", None) == pytest.approx(1.0, abs=1e-9)
+        assert governance.calculate_hallucination_risk(None, None) == pytest.approx(1.0, abs=1e-9)

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 _TOKEN_PATTERN = re.compile(r"([^[.\]]+)|\[(\d+)\]")
 
@@ -57,9 +60,7 @@ def resume_location_exists(resume_data: Any, location: str) -> bool:
     return _has_meaningful_value(current)
 
 
-def filter_locations(
-    resume_data: Any, locations: Iterable[str] | None
-) -> list[str]:
+def filter_locations(resume_data: Any, locations: Iterable[str] | None) -> list[str]:
     if not locations:
         return []
     return [loc for loc in locations if resume_location_exists(resume_data, loc)]

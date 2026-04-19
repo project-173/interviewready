@@ -18,6 +18,8 @@ from app.models import (
 )
 from app.orchestration import OrchestrationAgent
 
+NUMBER_OF_EXTRACTOR_CALLS = 2
+
 
 class StubAgent:
     def __init__(self, name: str):
@@ -37,7 +39,7 @@ class StubAgent:
     def process(
         self, input_data: AgentInput | str | bytes, context: SessionContext
     ) -> AgentResponse:
-        self.inputs.append(input_data)
+        self.inputs.append(input_data, context)
         return AgentResponse(
             agent_name=self._name,
             content=json.dumps({"ok": True}),
@@ -58,7 +60,7 @@ class StubExtractorAgent(StubAgent):
         self, input_data: AgentInput | str | bytes, context: SessionContext
     ) -> AgentResponse:
         self.calls += 1
-        self.inputs.append(input_data)
+        self.inputs.append(input_data, context)
         return AgentResponse(
             agent_name=self._name,
             content=json.dumps({"work": [{"name": "Extracted from PDF"}]}),
@@ -154,9 +156,19 @@ def test_extractor_agent_extracts_pdf_payload() -> None:
     context = SessionContext(session_id="s3", user_id="u3")
     payload = json.dumps({"data": "any-base64", "fileType": "pdf"})
 
-    with patch("app.agents.extractor.parse_pdf_base64", return_value="Jane Doe Resume Text"), patch(
-        "app.agents.extractor.ExtractorAgent._generate_llm_response",
-        return_value=(Resume(work=[Work(name="Jane Doe Resume Text")]), 0.95, [], []),
+    with (
+        patch(
+            "app.agents.extractor.parse_pdf_base64", return_value="Jane Doe Resume Text"
+        ),
+        patch(
+            "app.agents.extractor.ExtractorAgent._generate_llm_response",
+            return_value=(
+                Resume(work=[Work(name="Jane Doe Resume Text")]),
+                0.95,
+                [],
+                [],
+            ),
+        ),
     ):
         response = agent.process(payload, context)
 
@@ -238,7 +250,7 @@ def test_resume_control_skips_extractor_after_review() -> None:
         resumeData=Resume(work=[Work(name="Edited Resume")]),
     )
 
-    result = orchestrator.orchestrate(resume_request, context)
+    orchestrator.orchestrate(resume_request, context)
 
     assert extractor.calls == 1
     assert resume_agent.inputs
@@ -275,4 +287,4 @@ def test_rewind_with_new_resume_file_reextracts() -> None:
 
     orchestrator.orchestrate(rewind_request, context)
 
-    assert extractor.calls == 2
+    assert extractor.calls == NUMBER_OF_EXTRACTOR_CALLS

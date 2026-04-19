@@ -1,7 +1,7 @@
 import json
-import time
-from datetime import datetime, timezone
-from typing import Any, Optional, Dict
+from datetime import UTC, datetime
+from typing import Any
+
 from app.core.config import settings
 
 
@@ -20,7 +20,7 @@ class OrchestrationLogger:
     def _format_message(self, level: str, message: str, **kwargs) -> str:
         """Format a structured log message."""
         log_entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "service": self.service_name,
             "level": level,
             "message": message,
@@ -31,29 +31,25 @@ class OrchestrationLogger:
     def debug(self, message: str, **kwargs) -> None:
         """Log debug message."""
         if self._should_log("DEBUG"):
-            formatted = self._format_message("DEBUG", message, **kwargs)
-            print(f"    \033[2m{formatted}\033[0m")
+            self._format_message("DEBUG", message, **kwargs)
 
     def info(self, message: str, **kwargs) -> None:
         """Log info message."""
         if self._should_log("INFO"):
-            formatted = self._format_message("INFO", message, **kwargs)
-            print(formatted)
+            self._format_message("INFO", message, **kwargs)
 
     def warning(self, message: str, **kwargs) -> None:
         """Log warning message."""
         if self._should_log("WARNING"):
-            formatted = self._format_message("WARNING", message, **kwargs)
-            print(f"\033[33m{formatted}\033[0m")
+            self._format_message("WARNING", message, **kwargs)
 
     def error(self, message: str, **kwargs) -> None:
         """Log error message."""
         if self._should_log("ERROR"):
-            formatted = self._format_message("ERROR", message, **kwargs)
-            print(f"\033[31m{formatted}\033[0m")
+            self._format_message("ERROR", message, **kwargs)
 
     def log_orchestration_start(
-        self, input_text: str, session_id: str, user_id: Optional[str] = None
+        self, input_text: str, session_id: str, user_id: str | None = None
     ) -> None:
         """Log orchestration request start."""
         self.info(

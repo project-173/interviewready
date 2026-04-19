@@ -1,5 +1,5 @@
-import os
 import json
+import os
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -14,7 +14,7 @@ from app.models import AgentResponse, ChatRequest
 class StubOrchestrator:
     """Deterministic orchestrator stub for endpoint schema tests."""
 
-    def orchestrate(self, request: ChatRequest, context) -> AgentResponse:  # noqa: ANN001
+    def orchestrate(self, request: ChatRequest, context) -> AgentResponse:
         if request.intent == "RESUME_CRITIC":
             payload = {
                 "score": 88,

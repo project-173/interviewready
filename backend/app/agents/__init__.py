@@ -1,22 +1,22 @@
 """Agent package initialization."""
 
 from .base import BaseAgent, BaseAgentProtocol
-from .gemini_service import GeminiService
-from .registry import AgentRegistry
-from .extractor import ExtractorAgent
-from .resume_critic import ResumeCriticAgent
 from .content_strength import ContentStrengthAgent
-from .job_alignment import JobAlignmentAgent
+from .extractor import ExtractorAgent
+from .gemini_service import GeminiService
 from .interview_coach import InterviewCoachAgent
+from .job_alignment import JobAlignmentAgent
+from .registry import AgentRegistry
+from .resume_critic import ResumeCriticAgent
 
 __all__ = [
-    "BaseAgent",
-    "BaseAgentProtocol", 
-    "GeminiService",
     "AgentRegistry",
-    "ExtractorAgent",
-    "ResumeCriticAgent",
+    "BaseAgent",
+    "BaseAgentProtocol",
     "ContentStrengthAgent",
-    "JobAlignmentAgent",
+    "ExtractorAgent",
+    "GeminiService",
     "InterviewCoachAgent",
+    "JobAlignmentAgent",
+    "ResumeCriticAgent",
 ]

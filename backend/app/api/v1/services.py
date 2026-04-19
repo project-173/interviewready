@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from app.agents import (
     AgentRegistry,
@@ -10,8 +11,10 @@ from app.agents import (
 )
 from app.api.v1.session_store import SessionStore
 from app.governance import SharpGovernanceService
-from app.models import SessionContext
 from app.orchestration import OrchestrationAgent
+
+if TYPE_CHECKING:
+    from app.models import SessionContext
 
 _session_store = SessionStore()
 

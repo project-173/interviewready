@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import time
 from threading import RLock
-from typing import Optional
 
 from app.models import SessionContext
-
 
 SESSION_EXPIRY_SECONDS = 3600
 
@@ -24,8 +22,6 @@ class SessionStore:
     def _generate_session_id(self) -> str:
         """Generate a unique session ID that is not currently in use."""
         import uuid
-        import random
-        import string
 
         attempts = 0
         while attempts < 100:
@@ -77,12 +73,14 @@ class SessionStore:
             if session_id in self._sessions:
                 context = self._sessions[session_id]
                 if context.user_id != user_id:
-                    raise PermissionError("Unauthorized access to session")
+                    msg = "Unauthorized access to session"
+                    raise PermissionError(msg)
                 self._session_timestamps[session_id] = time.time()
                 return context
 
             if session_id in self._used_session_ids:
-                raise ValueError("Session ID already in use")
+                msg = "Session ID already in use"
+                raise ValueError(msg)
 
             context = SessionContext(session_id=session_id, user_id=user_id)
             self._sessions[session_id] = context
@@ -98,7 +96,8 @@ class SessionStore:
                 return None
 
             if context.user_id != user_id:
-                raise PermissionError("Unauthorized access to session")
+                msg = "Unauthorized access to session"
+                raise PermissionError(msg)
 
             self._session_timestamps[session_id] = time.time()
             return context

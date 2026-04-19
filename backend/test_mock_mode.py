@@ -5,15 +5,15 @@ import json
 import sys
 from pathlib import Path
 
-backend_dir = Path(__file__).parent
-sys.path.insert(0, str(backend_dir))
-
 from app.agents.content_strength import ContentStrengthAgent
 from app.agents.interview_coach import InterviewCoachAgent
 from app.agents.job_alignment import JobAlignmentAgent
 from app.agents.resume_critic import ResumeCriticAgent
 from app.models import AgentInput, Resume, Work
 from app.models.session import SessionContext
+
+backend_dir = Path(__file__).parent
+sys.path.insert(0, str(backend_dir))
 
 
 class DummyGeminiService:
@@ -100,8 +100,8 @@ def test_agents_with_inline_mock() -> bool:
             )
             response = agent.process(agent_input, context)
             if not response.content:
-                raise AssertionError(f"{agent.get_name()} returned empty content")
-            print(f"PASS {agent.get_name()} | confidence={response.confidence_score}")
+                msg = f"{agent.get_name()} returned empty content"
+                raise AssertionError(msg)
 
         return True
     finally:
@@ -110,17 +110,12 @@ def test_agents_with_inline_mock() -> bool:
 
 
 def main() -> int:
-    print("Testing inline mock response mode")
-    print("=" * 40)
 
     try:
         ok = test_agents_with_inline_mock()
-    except Exception as exc:
-        print(f"FAIL: {exc}")
+    except Exception:
         return 1
 
-    print("=" * 40)
-    print("All checks passed" if ok else "Checks failed")
     return 0 if ok else 1
 
 

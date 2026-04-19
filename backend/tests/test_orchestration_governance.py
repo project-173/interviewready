@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from app.governance import SharpGovernanceService
 from app.models.agent import AgentResponse, ChatRequest
-from app.models import AgentInput
 from app.models.session import SessionContext
 from app.orchestration import OrchestrationAgent
+
+if TYPE_CHECKING:
+    from app.models import AgentInput
 
 
 class StubAgent:
@@ -30,7 +34,7 @@ class StubAgent:
     def process(
         self, input_data: AgentInput | str | bytes, context: SessionContext
     ) -> AgentResponse:
-        self.inputs.append(input_data)
+        self.inputs.append(input_data, context)
         return AgentResponse(
             agent_name=self._name,
             content=f"{self._name} processed",
@@ -106,7 +110,9 @@ def test_governance_preserves_interview_metadata_and_flags_sensitive_content() -
 
     audited = governance.audit(response, "resume input")
 
-    assert audited.sharp_metadata["responsible_ai"]["explainability"]["decision_basis"] == ["job alignment"]
+    assert audited.sharp_metadata["responsible_ai"]["explainability"][
+        "decision_basis"
+    ] == ["job alignment"]
     assert audited.sharp_metadata["governance_audit"] == "flagged"
     assert "sensitive_interview_content" in audited.sharp_metadata["audit_flags"]
     assert "bias_review_required" in audited.sharp_metadata["audit_flags"]
@@ -151,7 +157,7 @@ def test_orchestration_routes_resume_critic_intent() -> None:
         intent="RESUME_CRITIC",
         resumeData={"skills": [{"name": "Python"}]},
         jobDescription="",
-        messageHistory=[]
+        messageHistory=[],
     )
     result = orchestrator.orchestrate(request, context)
 
@@ -178,7 +184,7 @@ def test_orchestration_routes_alignment_intent() -> None:
         intent="ALIGNMENT",
         resumeData={"skills": [{"name": "Python"}]},
         jobDescription="",
-        messageHistory=[]
+        messageHistory=[],
     )
     result = orchestrator.orchestrate(request, context)
 

@@ -1,12 +1,12 @@
 """Session endpoints for retrieving persisted session state."""
 
-from typing import Annotated, Any
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, status, Request
+from fastapi import APIRouter, HTTPException, Path, Request, status
 
 from app.api.v1.services import get_session_context, get_session_store
-from app.core.limiter import limiter
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.models.resume import Resume
 
 router = APIRouter()

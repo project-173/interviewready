@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Dict
 from pydantic import BaseModel
 
 JUDGE_TEMPERATURE = 0.0
@@ -10,7 +9,7 @@ JUDGE_TEMPERATURE = 0.0
 BASE_RUBRIC = """Evaluate the agent output for a resume coaching application.
 Focus on correctness, usefulness, and clarity of feedback based only on the provided input."""
 
-AGENT_RUBRICS: Dict[str, str] = {
+AGENT_RUBRICS: dict[str, str] = {
     "ResumeCriticAgent": (
         "Score structure, clarity, ATS compliance, and actionable critique. "
         "Penalize missing or vague issue descriptions."
@@ -36,7 +35,7 @@ class EvalThresholds(BaseModel):
     min_helpfulness_score: float
 
 
-EVAL_THRESHOLDS: Dict[str, EvalThresholds] = {
+EVAL_THRESHOLDS: dict[str, EvalThresholds] = {
     "ResumeCriticAgent": EvalThresholds(
         min_quality_score=0.7,
         min_accuracy_score=0.8,
@@ -65,6 +64,4 @@ def get_rubric(agent_name: str) -> str:
 
 
 def get_thresholds(agent_name: str) -> EvalThresholds:
-    return EVAL_THRESHOLDS.get(
-        agent_name, EvalThresholds(0.7, 0.7, 0.7)
-    )
+    return EVAL_THRESHOLDS.get(agent_name, EvalThresholds(0.7, 0.7, 0.7))

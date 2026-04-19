@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
 from urllib.parse import urlparse
-
 
 DATE_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?$")
 
 
-def is_valid_date(date_str: Optional[str]) -> bool:
+def is_valid_date(date_str: str | None) -> bool:
     """Check if a date string is in valid format (yyyy-mm-dd, yyyy-mm, or empty).
 
     Args:
@@ -24,7 +22,7 @@ def is_valid_date(date_str: Optional[str]) -> bool:
     return bool(DATE_PATTERN.match(date_str))
 
 
-def is_valid_url(url: Optional[str]) -> bool:
+def is_valid_url(url: str | None) -> bool:
     """Check if a string is a valid URL.
 
     Args:
@@ -54,4 +52,4 @@ def is_full_url(url: str) -> bool:
     Returns:
         True if it's a full URL with http/https scheme
     """
-    return url.startswith("http://") or url.startswith("https://")
+    return url.startswith(("http://", "https://"))

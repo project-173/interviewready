@@ -1,31 +1,30 @@
 """Main FastAPI application entry point."""
 
+from contextlib import asynccontextmanager, suppress
+
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from contextlib import asynccontextmanager
+from langfuse.langchain import CallbackHandler
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from app.core.limiter import limiter
-from langfuse.langchain import CallbackHandler
 
-from dotenv import load_dotenv
+from app.api.v1 import api_router
+from app.core.config import settings
+from app.core.limiter import limiter
+
 load_dotenv()
 
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from app.core.limiter import limiter
-
-from app.core.config import settings
-from app.api.v1 import api_router
-
 MAX_REQUEST_SIZE = 20 * 1024 * 1024
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     yield
     # Cleanup can be added here
+
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -85,21 +84,13 @@ async def check_request_size(request, call_next):
                 )
         except ValueError:
             pass
-    response = await call_next(request)
-    return response
+    return await call_next(request)
 
 
 @app.middleware("http")
 async def log_requests(request, call_next):
-    import time
-
-    start_time = time.time()
-    origin = request.headers.get("origin")
+    request.headers.get("origin")
     response = await call_next(request)
-    duration = time.time() - start_time
-    print(
-        f"DEBUG: {request.method} {request.url.path} status={response.status_code} duration={duration:.2f}s origin={origin}"
-    )
     return response
 
 
@@ -109,11 +100,8 @@ app.include_router(api_router, prefix="/api/v1")
 # Initialize Langfuse Callback Handler safely
 langfuse_handler = None
 if settings.LANGFUSE_PUBLIC_KEY:
-    try:
+    with suppress(Exception):
         langfuse_handler = CallbackHandler()
-        print("Langfuse callback handler initialized.")
-    except Exception as e:
-        print(f"Failed to initialize Langfuse handler: {e}")
 
 
 @app.get("/health")
@@ -144,7 +132,7 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=settings.SERVER_PORT,
         reload=settings.LOG_LEVEL == "DEBUG",
     )

@@ -4,40 +4,45 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Dict, Tuple, Type
 
 import pytest
+from evals.loader import (
+    build_agent_input,
+    build_session_context,
+    filter_cases,
+    load_eval_cases,
+)
 
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from evals.loader import build_agent_input, build_session_context, filter_cases, load_eval_cases
 from app.agents import (
     ContentStrengthAgent,
+    GeminiService,
     InterviewCoachAgent,
     JobAlignmentAgent,
     ResumeCriticAgent,
-    GeminiService,
 )
 from app.core.config import settings
 from app.models import AlignmentReport, ContentStrengthReport, ResumeCriticReport
 from app.utils.json_parser import parse_json_payload
 
-AGENT_CLASSES: Dict[str, Type] = {
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+
+AGENT_CLASSES: dict[str, type] = {
     "ResumeCriticAgent": ResumeCriticAgent,
     "ContentStrengthAgent": ContentStrengthAgent,
     "JobAlignmentAgent": JobAlignmentAgent,
     "InterviewCoachAgent": InterviewCoachAgent,
 }
 
-JSON_MODELS: Dict[str, Type] = {
+JSON_MODELS: dict[str, type] = {
     "ResumeCriticAgent": ResumeCriticReport,
     "ContentStrengthAgent": ContentStrengthReport,
     "JobAlignmentAgent": AlignmentReport,
 }
 
-LENGTH_BOUNDS: Dict[str, Tuple[int, int]] = {
+LENGTH_BOUNDS: dict[str, tuple[int, int]] = {
     "ResumeCriticAgent": (200, 9000),
     "ContentStrengthAgent": (200, 9000),
     "JobAlignmentAgent": (100, 4000),
@@ -69,8 +74,7 @@ def test_agent_structural_checks(case) -> None:
 
     min_len, max_len = LENGTH_BOUNDS[case.agent]
     assert min_len <= len(output) <= max_len, (
-        f"{case.agent} output length {len(output)} outside bounds "
-        f"{min_len}-{max_len}"
+        f"{case.agent} output length {len(output)} outside bounds {min_len}-{max_len}"
     )
 
     if case.agent in JSON_MODELS:
@@ -80,7 +84,6 @@ def test_agent_structural_checks(case) -> None:
     elif case.agent == "InterviewCoachAgent":
         parsed = parse_json_payload(output, allow_array=False)
         assert isinstance(parsed, dict), "InterviewCoachAgent returned invalid JSON"
-        assert (
-            "current_question_number" in parsed
-            or parsed.get("interview_complete", False)
+        assert "current_question_number" in parsed or parsed.get(
+            "interview_complete", False
         ), "InterviewCoachAgent response missing interview state"

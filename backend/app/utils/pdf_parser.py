@@ -1,9 +1,8 @@
 """PDF parsing utilities for resume processing."""
 
 import base64
-import re
-from typing import Optional, Dict, Any
 import io
+import re
 
 try:
     from pypdf import PdfReader
@@ -12,7 +11,7 @@ try:
 except ImportError:
     PYPDF_AVAILABLE = False
 
-from ..core.logging import logger
+from app.core.logging import logger
 
 
 def is_pdf_data(job_description: str) -> bool:
@@ -40,7 +39,7 @@ def is_pdf_data(job_description: str) -> bool:
     return any(indicator in lower_desc for indicator in pdf_indicators)
 
 
-def extract_base64_from_text(text: str) -> Optional[str]:
+def extract_base64_from_text(text: str) -> str | None:
     """Extract base64 data from text that contains file information.
 
     Args:
@@ -60,7 +59,7 @@ def extract_base64_from_text(text: str) -> Optional[str]:
     return None
 
 
-def parse_pdf_base64(base64_data: str) -> Optional[str]:
+def parse_pdf_base64(base64_data: str) -> str | None:
     """Parse PDF from base64 encoded data.
 
     Args:
@@ -91,16 +90,15 @@ def parse_pdf_base64(base64_data: str) -> Optional[str]:
                 text_length=len(text_content),
             )
             return text_content.strip()
-        else:
-            logger.warning("PDF parsed but no text content found")
-            return None
+        logger.warning("PDF parsed but no text content found")
+        return None
 
     except Exception as e:
         logger.error("Failed to parse PDF", error=str(e), error_type=type(e).__name__)
         return None
 
 
-def process_pdf_input(job_description: str) -> Optional[str]:
+def process_pdf_input(job_description: str) -> str | None:
     """Process job description that contains PDF data and return extracted text.
 
     Args:
@@ -127,9 +125,8 @@ def process_pdf_input(job_description: str) -> Optional[str]:
     if extracted_text:
         logger.info("PDF parsing successful", extracted_text_length=len(extracted_text))
         return extracted_text
-    else:
-        logger.error("PDF parsing failed")
-        return None
+    logger.error("PDF parsing failed")
+    return None
 
 
 def create_pdf_processing_prompt(extracted_text: str) -> str:

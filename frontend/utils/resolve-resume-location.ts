@@ -32,6 +32,34 @@ const traverseResume = (
   return current !== null && current !== undefined ? { value: current } : null;
 };
 
+const isSingleTokenWithTopLevel = (
+  tokens: Array<string | number>,
+  topLevel: string | undefined,
+): boolean => tokens.length === 1 && !!topLevel;
+
+const resolveArrayDisplay = (
+  value: unknown[],
+  tokens: Array<string | number>,
+  topLevel: string | undefined,
+): string | undefined => {
+  const stringItems = value.filter(
+    (item): item is string => typeof item === "string" && !!item.trim(),
+  );
+  if (stringItems.length) return stringItems.join("; ");
+  if (isSingleTokenWithTopLevel(tokens, topLevel)) return topLevel;
+  return value.length ? JSON.stringify(value) : undefined;
+};
+
+const resolveObjectDisplay = (
+  value: object,
+  tokens: Array<string | number>,
+  topLevel: string | undefined,
+): string | undefined => {
+  if (isSingleTokenWithTopLevel(tokens, topLevel)) return topLevel;
+  const json = JSON.stringify(value);
+  return json === "{}" ? undefined : json;
+};
+
 const resolveDisplay = (
   value: unknown,
   tokens: Array<string | number>,
@@ -45,17 +73,10 @@ const resolveDisplay = (
     return String(value);
   }
   if (Array.isArray(value)) {
-    const stringItems = value.filter(
-      (item): item is string => typeof item === "string" && !!item.trim(),
-    );
-    if (stringItems.length) return stringItems.join("; ");
-    if (tokens.length === 1 && topLevel) return topLevel;
-    return value.length ? JSON.stringify(value) : undefined;
+    return resolveArrayDisplay(value, tokens, topLevel);
   }
   if (typeof value === "object" && value !== null) {
-    if (tokens.length === 1 && topLevel) return topLevel;
-    const json = JSON.stringify(value);
-    return json === "{}" ? undefined : json;
+    return resolveObjectDisplay(value, tokens, topLevel);
   }
   return undefined;
 };

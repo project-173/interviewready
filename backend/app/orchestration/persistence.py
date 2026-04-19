@@ -5,10 +5,12 @@ import time
 import uuid
 from dataclasses import dataclass
 from threading import RLock
-from typing import Annotated, Optional
-from typing_extensions import TypedDict
-from langgraph.graph import StateGraph, END
+from typing import Annotated
+
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import StateGraph
+from typing_extensions import TypedDict
+
 
 class ChatState(TypedDict):
     messages: Annotated[list, lambda x, y: x + y]
@@ -41,19 +43,19 @@ class CheckpointStore:
             self._store.setdefault(session_id, []).append(record)
         return checkpoint_id
 
-    def latest(self, session_id: str) -> Optional[CheckpointRecord]:
+    def latest(self, session_id: str) -> CheckpointRecord | None:
         with self._lock:
             records = self._store.get(session_id, [])
             return records[-1] if records else None
 
-    def get(self, session_id: str, checkpoint_id: str) -> Optional[CheckpointRecord]:
+    def get(self, session_id: str, checkpoint_id: str) -> CheckpointRecord | None:
         with self._lock:
             for record in self._store.get(session_id, []):
                 if record.checkpoint_id == checkpoint_id:
                     return record
         return None
 
-    def rewind(self, session_id: str, checkpoint_id: str) -> Optional[CheckpointRecord]:
+    def rewind(self, session_id: str, checkpoint_id: str) -> CheckpointRecord | None:
         with self._lock:
             records = self._store.get(session_id, [])
             for index, record in enumerate(records):
@@ -69,10 +71,11 @@ _checkpoint_store = CheckpointStore()
 def get_checkpoint_store() -> CheckpointStore:
     return _checkpoint_store
 
+
 def create_chat_graph():
     workflow = StateGraph(ChatState)
-    
+
     # We can add nodes here as needed, but for now, we'll use MemorySaver
     # to demonstrate persistent state management.
-    
+
     return workflow.compile(checkpointer=MemorySaver())

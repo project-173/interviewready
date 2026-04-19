@@ -73,4 +73,3 @@ RESUME_SCHEMA = """
   }]
 }
 """
-

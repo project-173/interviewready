@@ -3,8 +3,8 @@
 Test script to verify the new scoring-based validation system.
 """
 
-import sys
 import os
+import sys
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -42,8 +42,6 @@ def test_scoring_system():
         },
     )
 
-    print("Testing InterviewCoachAgent scoring validation system...\n")
-
     # Test cases with different answer qualities
     test_cases = [
         (
@@ -59,28 +57,16 @@ def test_scoring_system():
         ("I like pizza", "Irrelevant answer"),
     ]
 
-    for answer, description in test_cases:
-        score, feedback, meets_minimum = agent._score_interview_answer(
+    for answer, _description in test_cases:
+        score, feedback, _meets_minimum = agent._score_interview_answer(
             answer, "Test question", context
         )
-        print(f"{description}:")
-        print(f"  Answer: '{answer}'")
-        print(f"  Score: {score:.1f}/100")
-        print(f"  Meets minimum: {meets_minimum}")
-        print(f"  Feedback: {feedback}")
-        print()
 
     # Test comprehensive validation
-    print("Testing comprehensive validation:")
-    for answer, description in test_cases[:3]:  # Skip the obviously bad ones
-        can_proceed, feedback, score = agent._comprehensive_validate_answer(
+    for answer, _description in test_cases[:3]:  # Skip the obviously bad ones
+        _can_proceed, _feedback, _score = agent._comprehensive_validate_answer(
             answer, "Test question", context, False
         )
-        print(f"{description}:")
-        print(f"  Can proceed: {can_proceed}")
-        print(f"  Score: {score:.1f}/100")
-        print(f"  Feedback: {feedback}")
-        print()
 
 
 if __name__ == "__main__":

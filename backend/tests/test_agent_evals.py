@@ -6,29 +6,33 @@ import sys
 import warnings
 from datetime import date
 from pathlib import Path
-from typing import Dict, Type
 
 import pytest
+from evals.loader import (
+    build_agent_input,
+    build_input_summary,
+    build_session_context,
+    load_eval_cases,
+)
 
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from evals.loader import build_agent_input, build_input_summary, build_session_context, load_eval_cases
 from app.agents import (
     ContentStrengthAgent,
+    GeminiService,
     InterviewCoachAgent,
     JobAlignmentAgent,
     ResumeCriticAgent,
-    GeminiService,
 )
 from app.agents.eval_rubrics import get_thresholds
 from app.agents.llm_judge import LLmasJudgeEvaluator
 from app.core.config import settings
 
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 SKIP_EVAL_TESTS = settings.SKIP_EVAL_TESTS
 
-AGENT_CLASSES: Dict[str, Type] = {
+AGENT_CLASSES: dict[str, type] = {
     "ResumeCriticAgent": ResumeCriticAgent,
     "ContentStrengthAgent": ContentStrengthAgent,
     "JobAlignmentAgent": JobAlignmentAgent,
@@ -43,10 +47,12 @@ def _is_judge_failure(evaluation) -> bool:
     if "parse error" in concerns or "judge evaluation unavailable" in concerns:
         return True
     reason = (evaluation.reasoning or "").lower()
-    return reason.startswith("failed to parse") or reason.startswith("evaluation failed")
+    return reason.startswith(("failed to parse", "evaluation failed"))
 
 
-def _assert_threshold(metric: str, score: float, threshold: float, reasoning: str) -> None:
+def _assert_threshold(
+    metric: str, score: float, threshold: float, reasoning: str
+) -> None:
     if score < threshold - 0.1:
         pytest.fail(
             f"{metric} score {score:.2f} below hard threshold {threshold - 0.1:.2f}. "

@@ -2,25 +2,22 @@
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, status, Request
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
-from app.core.limiter import limiter
-from langfuse import get_client, observe, propagate_attributes
+from langfuse import Langfuse, get_client, observe, propagate_attributes
 
 from app.api.v1.services import (
     get_or_create_session_context,
     get_orchestration_agent,
 )
-from langfuse import Langfuse, observe, propagate_attributes
-
-langfuse = Langfuse()
+from app.core.config import settings
+from app.core.limiter import limiter
 from app.core.logging import logger
 from app.models import AgentResponse, ChatApiResponse, ChatRequest
 from app.utils.json_parser import parse_json_payload
-from app.core.limiter import limiter
-from app.core.config import settings
 
 router = APIRouter()
+langfuse = Langfuse()
 
 langfuse = get_client()
 
@@ -36,78 +33,80 @@ async def chat_endpoint(
     """Run orchestration for the chat message within a user-owned session."""
     user_id = "dev-user"
 
-    with langfuse.start_as_current_observation(
-        as_type="span",
-        name="chat_api_request",
-        metadata={
-            "endpoint": "/api/v1/chat",
-            "method": "POST",
-        },
+    with (
+        langfuse.start_as_current_observation(
+            as_type="span",
+            name="chat_api_request",
+            metadata={
+                "endpoint": "/api/v1/chat",
+                "method": "POST",
+            },
+        ),
+        propagate_attributes(user_id=user_id, session_id=session_id),
     ):
-        with propagate_attributes(user_id=user_id, session_id=session_id):
-            try:
-                context = get_or_create_session_context(
-                    session_id=session_id, user_id=user_id
-                )
-            except PermissionError as exc:
-                langfuse.update_current_span(
-                    output={"error": "permission_denied", "reason": str(exc)}
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=str(exc),
-                ) from exc
+        try:
+            context = get_or_create_session_context(
+                session_id=session_id, user_id=user_id
+            )
+        except PermissionError as exc:
+            langfuse.update_current_span(
+                output={"error": "permission_denied", "reason": str(exc)}
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=str(exc),
+            ) from exc
 
-            try:
-                orchestrator = get_orchestration_agent()
-            except Exception as exc:
-                langfuse.update_current_span(
-                    output={"error": "orchestrator_unavailable", "reason": str(exc)}
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=f"Orchestration service unavailable: {exc}",
-                ) from exc
+        try:
+            orchestrator = get_orchestration_agent()
+        except Exception as exc:
+            langfuse.update_current_span(
+                output={"error": "orchestrator_unavailable", "reason": str(exc)}
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Orchestration service unavailable: {exc}",
+            ) from exc
 
-            try:
-                internal_response = await run_in_threadpool(
-                    orchestrator.orchestrate, chat_request, context
-                )
-                payload = _extract_api_payload(internal_response)
-                payload = _attach_payload_metadata(payload, internal_response)
-                metadata = _extract_response_metadata(internal_response)
-                result = ChatApiResponse(
-                    agent=internal_response.agent_name,
-                    payload=payload,
-                    confidence_score=internal_response.confidence_score,
-                    needs_review=internal_response.needs_review,
-                    low_confidence_fields=internal_response.low_confidence_fields or [],
-                    metadata=metadata,
-                )
-                langfuse.update_current_span(
-                    output={
-                        "success": True,
-                        "agent": internal_response.agent_name,
-                        "response_length": len(str(result.payload)),
-                    }
-                )
-                return result
-            except ValueError as exc:
-                langfuse.update_current_span(
-                    output={"error": "invalid_request", "reason": str(exc)}
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=str(exc),
-                ) from exc
-            except Exception as exc:
-                langfuse.update_current_span(
-                    output={"error": "orchestration_failed", "reason": str(exc)}
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Failed to process chat request: {exc}",
-                ) from exc
+        try:
+            internal_response = await run_in_threadpool(
+                orchestrator.orchestrate, chat_request, context
+            )
+            payload = _extract_api_payload(internal_response)
+            payload = _attach_payload_metadata(payload, internal_response)
+            metadata = _extract_response_metadata(internal_response)
+            result = ChatApiResponse(
+                agent=internal_response.agent_name,
+                payload=payload,
+                confidence_score=internal_response.confidence_score,
+                needs_review=internal_response.needs_review,
+                low_confidence_fields=internal_response.low_confidence_fields or [],
+                metadata=metadata,
+            )
+            langfuse.update_current_span(
+                output={
+                    "success": True,
+                    "agent": internal_response.agent_name,
+                    "response_length": len(str(result.payload)),
+                }
+            )
+            return result
+        except ValueError as exc:
+            langfuse.update_current_span(
+                output={"error": "invalid_request", "reason": str(exc)}
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+        except Exception as exc:
+            langfuse.update_current_span(
+                output={"error": "orchestration_failed", "reason": str(exc)}
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to process chat request: {exc}",
+            ) from exc
 
 
 def _extract_api_payload(response: AgentResponse) -> dict[str, Any] | list[Any] | str:
@@ -130,7 +129,10 @@ def _parse_json_payload(content: str) -> dict[str, Any] | list[Any] | None:
         if isinstance(parsed, (dict, list)):
             return parsed
     except Exception as exc:
-        logger.warning(f"Failed to parse JSON payload in chat endpoint: {exc}", content_preview=content[:100])
+        logger.warning(
+            f"Failed to parse JSON payload in chat endpoint: {exc}",
+            content_preview=content[:100],
+        )
     return None
 
 

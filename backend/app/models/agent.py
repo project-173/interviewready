@@ -1,23 +1,25 @@
 """Agent-related models."""
 
-from enum import Enum
-from typing import Optional, List, Dict, Any, Literal
-from pydantic import BaseModel, Field, field_validator
 from dataclasses import field
+from enum import StrEnum
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, field_validator
+
 from .resume import Resume
 
 
 class AgentResponse(BaseModel):
     """Agent response model with SHARP compliance data."""
 
-    agent_name: Optional[str] = None
-    content: Optional[str] = None
-    reasoning: Optional[str] = None  # Explainability
-    confidence_score: Optional[float] = None  # Confidence Indicator
-    needs_review: Optional[bool] = None
-    low_confidence_fields: Optional[List[str]] = Field(default_factory=list)
-    decision_trace: Optional[List[str]] = Field(default_factory=list)  # Auditability
-    sharp_metadata: Optional[Dict[str, Any]] = Field(
+    agent_name: str | None = None
+    content: str | None = None
+    reasoning: str | None = None  # Explainability
+    confidence_score: float | None = None  # Confidence Indicator
+    needs_review: bool | None = None
+    low_confidence_fields: list[str] | None = Field(default_factory=list)
+    decision_trace: list[str] | None = Field(default_factory=list)  # Auditability
+    sharp_metadata: dict[str, Any] | None = Field(
         default_factory=dict
     )  # SHARP Compliance Data
 
@@ -25,19 +27,19 @@ class AgentResponse(BaseModel):
 class ChatApiResponse(BaseModel):
     """External API response model for frontend consumption."""
 
-    agent: Optional[str] = None
-    payload: Optional[Dict[str, Any] | List[Any] | str] = None
-    confidence_score: Optional[float] = None
-    needs_review: Optional[bool] = None
-    low_confidence_fields: Optional[List[str]] = Field(default_factory=list)
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    agent: str | None = None
+    payload: dict[str, Any] | list[Any] | str | None = None
+    confidence_score: float | None = None
+    needs_review: bool | None = None
+    low_confidence_fields: list[str] | None = Field(default_factory=list)
+    metadata: dict[str, Any] | None = Field(default_factory=dict)
 
 
 class InterviewMessage(BaseModel):
     """Interview coaching message."""
 
-    role: Optional[str] = Field(default=None, max_length=50)
-    text: Optional[str] = Field(default=None, max_length=4000)
+    role: str | None = Field(default=None, max_length=50)
+    text: str | None = Field(default=None, max_length=4000)
 
 
 class ResumeFile(BaseModel):
@@ -56,19 +58,20 @@ class ChatRequest(BaseModel):
         "ALIGNMENT",
         "INTERVIEW_COACH",
     ]
-    control: Optional[Literal["resume", "rewind"]] = None
-    checkpointId: Optional[str] = None
-    resumeData: Optional[Resume] = None
-    resumeFile: Optional[ResumeFile] = None
-    jobDescription: Optional[str] = Field(default="", max_length=20000)
-    messageHistory: Optional[List[InterviewMessage]] = Field(default_factory=list)
-    audioData: Optional[bytes] = None
+    control: Literal["resume", "rewind"] | None = None
+    checkpointId: str | None = None
+    resumeData: Resume | None = None
+    resumeFile: ResumeFile | None = None
+    jobDescription: str | None = Field(default="", max_length=20000)
+    messageHistory: list[InterviewMessage] | None = Field(default_factory=list)
+    audioData: bytes | None = None
 
-    @field_validator('audioData', mode='before')
+    @field_validator("audioData", mode="before")
     @classmethod
     def decode_audio_data(cls, v):
         if isinstance(v, str):
             import base64
+
             decoded = base64.b64decode(v)
         else:
             decoded = v
@@ -77,7 +80,8 @@ class ChatRequest(BaseModel):
             return None
 
         # Convert PCM to WAV if not already WAV
-        from ..utils.audio_utils import pcm_to_wav, validate_audio_format
+        from app.utils.audio_utils import pcm_to_wav, validate_audio_format
+
         if not validate_audio_format(decoded):
             # Assume it's PCM and convert to WAV
             decoded = pcm_to_wav(decoded)
@@ -88,50 +92,50 @@ class ChatRequest(BaseModel):
 class ResumeDocument(BaseModel):
     """Normalized resume document (lite)."""
 
-    id: Optional[str] = None
-    source: Optional[str] = None
-    raw_text: Optional[str] = None
-    parse_confidence: Optional[float] = None
-    warnings: List[str] = Field(default_factory=list)
-    sections: Optional[Dict[str, str]] = None
-    spans: Optional[List[Dict[str, Any]]] = None
+    id: str | None = None
+    source: str | None = None
+    raw_text: str | None = None
+    parse_confidence: float | None = None
+    warnings: list[str] = Field(default_factory=list)
+    sections: dict[str, str] | None = None
+    spans: list[dict[str, Any]] | None = None
 
 
 class AnalysisArtifact(BaseModel):
     """Structured output captured from an agent."""
 
-    agent: Optional[str] = None
-    artifact_type: Optional[str] = None
-    payload: Optional[Dict[str, Any] | List[Any] | str] = None
-    confidence_score: Optional[float] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    agent: str | None = None
+    artifact_type: str | None = None
+    payload: dict[str, Any] | list[Any] | str | None = None
+    confidence_score: float | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ActionPlan(BaseModel):
     """Synthesis plan for resume edits or next steps."""
 
-    summary: Optional[str] = None
-    actions: List[str] = Field(default_factory=list)
-    priority: Optional[str] = None
-    no_change: Optional[bool] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    summary: str | None = None
+    actions: list[str] = Field(default_factory=list)
+    priority: str | None = None
+    no_change: bool | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class NormalizationFailure(BaseModel):
     """Normalization failure details."""
 
     reason: str
-    recovery_steps: Optional[str] = None
-    details: Optional[str] = None
+    recovery_steps: str | None = None
+    details: str | None = None
 
 
 class AlignmentReport(BaseModel):
     """Job alignment analysis report."""
 
-    skillsMatch: Optional[List[str]] = Field(default_factory=list)
-    missingSkills: Optional[List[str]] = Field(default_factory=list)
-    experienceMatch: Optional[List[str]] = Field(default_factory=list)
-    summary: Optional[str] = None
+    skillsMatch: list[str] | None = Field(default_factory=list)
+    missingSkills: list[str] | None = Field(default_factory=list)
+    experienceMatch: list[str] | None = Field(default_factory=list)
+    summary: str | None = None
 
 
 class ContentSkill(BaseModel):
@@ -167,9 +171,9 @@ class ContentSuggestion(BaseModel):
 class ContentStrengthReport(BaseModel):
     """Content strength analysis report."""
 
-    suggestions: List[ContentSuggestion] = Field(default_factory=list)
+    suggestions: list[ContentSuggestion] = Field(default_factory=list)
     summary: str = ""
-    score: Optional[int] = None
+    score: int | None = None
 
 
 class ResumeCriticIssue(BaseModel):
@@ -180,23 +184,26 @@ class ResumeCriticIssue(BaseModel):
     severity: Literal["HIGH", "MEDIUM", "LOW"]
     description: str
 
+
 class ResumeCriticReport(BaseModel):
     """Resume critic analysis report."""
 
-    issues: List[ResumeCriticIssue] = Field(default_factory=list)
+    issues: list[ResumeCriticIssue] = Field(default_factory=list)
     summary: str = ""
-    score: Optional[int] = None
+    score: int | None = None
+
 
 class WorkflowStatus(BaseModel):
     """Workflow execution status."""
 
-    session_id: Optional[str] = None
-    current_agent: Optional[str] = None
-    status: Optional[str] = None  # PENDING, IN_PROGRESS, COMPLETED, FAILED
-    progress_percentage: Optional[float] = None
-    error_message: Optional[str] = None
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
+    session_id: str | None = None
+    current_agent: str | None = None
+    status: str | None = None  # PENDING, IN_PROGRESS, COMPLETED, FAILED
+    progress_percentage: float | None = None
+    error_message: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+
 
 class AgentInput(BaseModel):
     """Structured input passed from the orchestrator to individual agents."""
@@ -207,13 +214,14 @@ class AgentInput(BaseModel):
         "ALIGNMENT",
         "INTERVIEW_COACH",
     ]
-    resume: Optional[Resume] = None
-    resume_document: Optional[ResumeDocument] = None
+    resume: Resume | None = None
+    resume_document: ResumeDocument | None = None
     job_description: str = ""
-    message_history: List[InterviewMessage] = field(default_factory=list)
-    audio_data: Optional[bytes] = None
+    message_history: list[InterviewMessage] = field(default_factory=list)
+    audio_data: bytes | None = None
 
-class Intent(str, Enum):
+
+class Intent(StrEnum):
     RESUME_CRITIC = "RESUME_CRITIC"
     CONTENT_STRENGTH = "CONTENT_STRENGTH"
     ALIGNMENT = "ALIGNMENT"

@@ -1,33 +1,32 @@
 """Application configuration settings."""
 
+import json
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
-from typing import List, Optional, Union
-import os
-import json
 
 
 class Settings(BaseSettings):
     """Application settings."""
-    
+
     # Application
     APP_NAME: str = "agent-backend"
     VERSION: str = "1.0.0"
     SERVER_PORT: int = 8080
     LOG_LEVEL: str = "DEBUG"
-    APP_ENV: str = "local" # (e.g. local, staging, prod)
+    APP_ENV: str = "local"  # (e.g. local, staging, prod)
     DEFAULT_RATE_LIMIT: str = "20/minute"
 
     # Google Configuration
     GEMINI_MODEL: str = "gemini-2.5-flash"
-    GEMINI_API_KEY: Optional[str] = None
-    GOOGLE_AI_API_KEY: Optional[str] = None
-    
+    GEMINI_API_KEY: str | None = None
+    GOOGLE_AI_API_KEY: str | None = None
+
     # CORS
-    ALLOWED_HOSTS: Union[str, List[str]] = [
-        "http://localhost:3000", 
-        "http://127.0.0.1:3000", 
-        "http://localhost:5173", 
+    ALLOWED_HOSTS: str | list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
         "http://127.0.0.1:5173",
         "https://interviewready-frontend-266623940622.asia-southeast1.run.app",
         "https://interviewready-backend-266623940622.asia-southeast1.run.app",
@@ -36,7 +35,7 @@ class Settings(BaseSettings):
 
     @field_validator("ALLOWED_HOSTS", mode="before")
     @classmethod
-    def assemble_allowed_hosts(cls, v: Union[str, List[str]]) -> List[str]:
+    def assemble_allowed_hosts(cls, v: str | list[str]) -> list[str]:
         if isinstance(v, str):
             if v.strip().startswith("["):
                 try:
@@ -47,14 +46,14 @@ class Settings(BaseSettings):
         return v
 
     # Langfuse
-    LANGFUSE_PUBLIC_KEY: Optional[str] = None
-    LANGFUSE_SECRET_KEY: Optional[str] = None
-    LANGFUSE_HOST: Optional[str] = "https://cloud.langfuse.com"
+    LANGFUSE_PUBLIC_KEY: str | None = None
+    LANGFUSE_SECRET_KEY: str | None = None
+    LANGFUSE_BASE_URL: str | None = "https://cloud.langfuse.com"
     LANGFUSE_LLM_AS_A_JUDGE_ENABLED: bool = True
 
     # Optional judge cost estimation (USD per 1K tokens)
-    JUDGE_PROMPT_COST_PER_1K_USD: Optional[float] = None
-    JUDGE_COMPLETION_COST_PER_1K_USD: Optional[float] = None
+    JUDGE_PROMPT_COST_PER_1K_USD: float | None = None
+    JUDGE_COMPLETION_COST_PER_1K_USD: float | None = None
 
     # Evals
     SKIP_EVAL_TESTS: bool = True
@@ -80,7 +79,7 @@ class Settings(BaseSettings):
     }
     EXTRACTOR_UNCERTAINTY_WEIGHT: float = 0.0
     EXTRACTOR_UNCERTAINTY_VALIDATION_COMPLETE: bool = False
-    
+
     class Config:
         env_file = ".env"
         case_sensitive = True

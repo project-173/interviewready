@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from langfuse import observe
 
 from app.agents.base import BaseAgent
+from app.core.config import settings
+from app.core.constants import ANTI_JAILBREAK_DIRECTIVE
 from app.core.logging import logger
-from langfuse import observe
-from ..core.config import settings
 from app.models import AgentResponse, Resume, ResumeDocument
 from app.models.agent import AgentInput
-from app.core.constants import ANTI_JAILBREAK_DIRECTIVE
-from app.models.session import SessionContext
-from app.utils.pdf_parser import parse_pdf_base64
 from app.utils.json_parser import parse_json_object
-from app.utils.validators import is_valid_url, is_full_url, is_valid_date
+from app.utils.pdf_parser import parse_pdf_base64
+from app.utils.validators import is_full_url, is_valid_date, is_valid_url
+
+if TYPE_CHECKING:
+    from app.models.session import SessionContext
 
 
 class ExtractorAgent(BaseAgent):
@@ -159,9 +163,8 @@ Output format:
         start_time = time.time()
 
         if isinstance(input_data, AgentInput):
-            raise ValueError(
-                "ExtractorAgent expects a resumeFile JSON payload, not AgentInput."
-            )
+            msg = "ExtractorAgent expects a resumeFile JSON payload, not AgentInput."
+            raise ValueError(msg)
         if isinstance(input_data, bytes):
             input_text = input_data.decode("utf-8", errors="ignore")
         else:
@@ -177,17 +180,18 @@ Output format:
             payload = self._parse_payload(input_text)
             file_type = str(payload.get("fileType", "")).lower()
             if file_type != "pdf":
-                raise ValueError(
-                    f"Unsupported resume file type: {file_type or 'missing'}"
-                )
+                msg = f"Unsupported resume file type: {file_type or 'missing'}"
+                raise ValueError(msg)
 
             base64_data = payload.get("data")
             if not isinstance(base64_data, str) or not base64_data.strip():
-                raise ValueError("resumeFile.data must be a non-empty base64 string")
+                msg = "resumeFile.data must be a non-empty base64 string"
+                raise ValueError(msg)
 
             extracted_text = parse_pdf_base64(base64_data.strip())
             if not extracted_text:
-                raise ValueError("Failed to extract text from resume PDF payload")
+                msg = "Failed to extract text from resume PDF payload"
+                raise ValueError(msg)
 
             if self.USE_MOCK_RESPONSE:
                 resume = self._generate_mock_response(context)
@@ -228,7 +232,7 @@ Output format:
                 "confidence_score": confidence_score,
                 "low_confidence_fields": low_confidence_fields,
                 "validation_errors": validation_errors,
-                "needs_review": needs_review
+                "needs_review": needs_review,
             }
             decision_trace = [
                 "ExtractorAgent: Used LLM to parse resume PDF and extract structured data"
@@ -280,9 +284,10 @@ Output format:
 
         parsed_result = parse_json_object(raw_result)
         if not parsed_result:
-            raise ValueError(
+            msg = (
                 f"Failed to parse valid JSON from mock response: {raw_result[:200]}..."
             )
+            raise ValueError(msg)
 
         return Resume.model_validate(parsed_result)
 
@@ -299,15 +304,16 @@ Output format:
         raw_result = self.call_gemini(user_input, context)
 
         if not raw_result or not raw_result.strip():
-            raise ValueError("Empty response received from Gemini API")
+            msg = "Empty response received from Gemini API"
+            raise ValueError(msg)
 
         parsed_result = parse_json_object(raw_result)
         if not parsed_result:
-            raise ValueError(
-                f"Failed to parse valid JSON from Gemini response: {raw_result[:200]}..."
-            )
+            msg = f"Failed to parse valid JSON from Gemini response: {raw_result[:200]}..."
+            raise ValueError(msg)
         if not isinstance(parsed_result, dict):
-            raise ValueError("ExtractorAgent expected a JSON object response from Gemini")
+            msg = "ExtractorAgent expected a JSON object response from Gemini"
+            raise ValueError(msg)
 
         confidence_map = {}
         if isinstance(parsed_result, dict):
@@ -327,7 +333,12 @@ Output format:
         if not isinstance(low_confidence_fields, list):
             low_confidence_fields = []
 
-        return validated_result, confidence_score, low_confidence_fields, validation_errors
+        return (
+            validated_result,
+            confidence_score,
+            low_confidence_fields,
+            validation_errors,
+        )
 
     def _extract_resume_with_llm(self, text: str, context: SessionContext) -> Resume:
         """Backward-compatible wrapper for resume extraction."""
@@ -339,11 +350,11 @@ Output format:
         try:
             payload = json.loads(input_text)
         except json.JSONDecodeError as exc:
-            raise ValueError(
-                "ExtractorAgent expected JSON payload with data and fileType"
-            ) from exc
+            msg = "ExtractorAgent expected JSON payload with data and fileType"
+            raise ValueError(msg) from exc
         if not isinstance(payload, dict):
-            raise ValueError("ExtractorAgent payload must be a JSON object")
+            msg = "ExtractorAgent payload must be a JSON object"
+            raise ValueError(msg)
         return payload
 
     def _validate_data(self, resume: Resume, source_text: str) -> list[str]:
@@ -380,9 +391,7 @@ Output format:
 
         return errors
 
-    def _handle_validation_errors(
-        self, errors: list[str], resume_data: Resume
-    ) -> None:
+    def _handle_validation_errors(self, errors: list[str], resume_data: Resume) -> None:
         """Log validation errors without short-circuiting confidence scoring."""
         if errors:
             logger.warning(
@@ -404,18 +413,14 @@ Output format:
             return
         if not is_valid_url(url_value):
             invalid_urls.append(f"{field}.{item_name}: url='{url_value}' (invalid)")
-            try:
-                setattr(item, "url", None)
-            except Exception:
-                pass
+            with contextlib.suppress(Exception):
+                item.url = None
         elif url_value.lower() not in source_lower and is_full_url(url_value):
             invalid_urls.append(
                 f"{field}.{item_name}: url='{url_value}' (not in source)"
             )
-            try:
-                setattr(item, "url", None)
-            except Exception:
-                pass
+            with contextlib.suppress(Exception):
+                item.url = None
 
     def _validate_dates_for_item(
         self, item: Any, field: str, item_name: str, invalid_dates: list
@@ -423,9 +428,7 @@ Output format:
         for attr_name in ["startDate", "endDate", "date"]:
             attr_value = getattr(item, attr_name, None)
             if attr_value is not None and not is_valid_date(attr_value):
-                invalid_dates.append(
-                    f"{field}.{item_name}: {attr_name}='{attr_value}'"
-                )
+                invalid_dates.append(f"{field}.{item_name}: {attr_name}='{attr_value}'")
 
     def _calculate_confidence_score(
         self,
@@ -443,9 +446,7 @@ Output format:
 
         base_score = 1.0
 
-        completeness_penalty = (
-            1.0 - self._weighted_completeness_ratio(resume)
-        ) * 0.4
+        completeness_penalty = (1.0 - self._weighted_completeness_ratio(resume)) * 0.4
         uncertainty_penalty = (low_confidence_count / max(total_fields, 1)) * 0.2
         quality_penalty = min(self._count_parser_warnings(source_text) * 0.1, 0.3)
         structure_penalty = min(self._count_missing_sections(resume) * 0.2, 0.2)
@@ -482,7 +483,14 @@ Output format:
                 "courses",
             ],
             "skills": ["name"],
-            "projects": ["name", "startDate", "endDate", "description", "highlights", "url"],
+            "projects": [
+                "name",
+                "startDate",
+                "endDate",
+                "description",
+                "highlights",
+                "url",
+            ],
             "awards": ["title", "date", "awarder", "summary"],
             "certificates": ["name", "date", "issuer", "url"],
         }
@@ -531,7 +539,14 @@ Output format:
                 "courses",
             ],
             "skills": ["name"],
-            "projects": ["name", "startDate", "endDate", "description", "highlights", "url"],
+            "projects": [
+                "name",
+                "startDate",
+                "endDate",
+                "description",
+                "highlights",
+                "url",
+            ],
             "awards": ["title", "date", "awarder", "summary"],
             "certificates": ["name", "date", "issuer", "url"],
         }

@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from app.models.agent import AgentResponse
+if TYPE_CHECKING:
+    from app.models.agent import AgentResponse
 
 
 class SharpGovernanceService:
@@ -44,7 +45,7 @@ class SharpGovernanceService:
         metadata["confidence_check_passed"] = confidence_check
 
         if response.agent_name == "ContentStrengthAgent":
-            self._validate_content_strength_agent(response, metadata, original_input)
+            self._validate_content_strength_agent(response, metadata)
         elif response.agent_name == "InterviewCoachAgent":
             self._validate_interview_coach_agent(metadata)
 
@@ -142,10 +143,7 @@ class SharpGovernanceService:
         return score >= self.CONFIDENCE_THRESHOLD
 
     def _validate_content_strength_agent(
-        self,
-        response: AgentResponse,
-        metadata: dict[str, Any],
-        original_input: str | None,  # noqa: ARG002
+        self, response: AgentResponse, metadata: dict[str, Any]
     ) -> None:
         try:
             content = self._parse_content_json(response.content)
@@ -162,7 +160,9 @@ class SharpGovernanceService:
             suggestions = content.get("suggestions")
             if isinstance(suggestions, list):
                 unfaithful_count = sum(
-                    1 for suggestion in suggestions if suggestion.get("faithful") is False
+                    1
+                    for suggestion in suggestions
+                    if suggestion.get("faithful") is False
                 )
                 metadata["unfaithful_suggestions"] = unfaithful_count
                 metadata["total_suggestions"] = len(suggestions)
@@ -187,7 +187,7 @@ class SharpGovernanceService:
                     for skill in skills
                     if str(skill.get("evidenceStrength", "")).upper() == "HIGH"
                 )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             metadata["validation_error"] = str(exc)
 
     def _parse_content_json(self, content: str | None) -> dict[str, Any] | None:
@@ -198,7 +198,7 @@ class SharpGovernanceService:
             if match:
                 return json.loads(match.group())
             return json.loads(content)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
 
     @staticmethod

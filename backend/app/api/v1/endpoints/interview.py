@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import contextlib
 import json
 import traceback
 from typing import Annotated
@@ -37,9 +38,7 @@ def _build_system_instruction(context) -> str:
         system_instruction += f"\n\nCandidate Resume Context:\n{resume_context}"
 
     if getattr(context, "job_description", None):
-        system_instruction += (
-            f"\n\nTarget Job Description:\n{context.job_description}"
-        )
+        system_instruction += f"\n\nTarget Job Description:\n{context.job_description}"
 
     if not getattr(context, "resume_data", None) and not getattr(
         context, "job_description", None
@@ -145,7 +144,9 @@ async def interview_live_websocket(
                     continue
 
                 if event_type == "audio_stream_end":
-                    logger.info("[VOICE_BACKEND] Audio stream end received from frontend")
+                    logger.info(
+                        "[VOICE_BACKEND] Audio stream end received from frontend"
+                    )
                     await control_input_queue.put("audio_stream_end")
                     continue
 
@@ -169,13 +170,14 @@ async def interview_live_websocket(
                 )
                 raise WebSocketDisconnect
             logger.error(f"[VOICE_BACKEND] Error receiving from client: {exc}")
-            await websocket.send_json(
-                {"error": f"Client communication error: {str(exc)}"}
-            )
+            await websocket.send_json({"error": f"Client communication error: {exc!s}"})
 
     async def run_session():
         await websocket.send_json(
-            {"type": "textStream", "data": "Voice session active. AI is initializing..."}
+            {
+                "type": "textStream",
+                "data": "Voice session active. AI is initializing...",
+            }
         )
 
         async for event in gemini_client.start_session(
@@ -212,7 +214,9 @@ async def interview_live_websocket(
                 continue
 
             if event_type == "error":
-                await websocket.send_json({"error": event.get("error", "Unknown error")})
+                await websocket.send_json(
+                    {"error": event.get("error", "Unknown error")}
+                )
                 continue
 
             await websocket.send_json(event)
@@ -226,19 +230,18 @@ async def interview_live_websocket(
     except WebSocketDisconnect:
         logger.info(f"[VOICE_BACKEND] WebSocket disconnected for session {session_id}")
     except Exception as exc:
-        logger.error(f"[VOICE_BACKEND] WebSocket Error in session {session_id}: {type(exc).__name__}: {exc}")
+        logger.error(
+            f"[VOICE_BACKEND] WebSocket Error in session {session_id}: {type(exc).__name__}: {exc}"
+        )
         logger.error(traceback.format_exc())
         if websocket.client_state.name != "DISCONNECTED":
-            try:
-                await websocket.send_json({"error": f"Voice session failed: {str(exc)}"})
-            except Exception:
-                pass
-            try:
+            with contextlib.suppress(Exception):
+                await websocket.send_json({"error": f"Voice session failed: {exc!s}"})
+            with contextlib.suppress(Exception):
                 await websocket.close(
-                    code=status.WS_1011_INTERNAL_ERROR, reason=f"Voice session error: {type(exc).__name__}"
+                    code=status.WS_1011_INTERNAL_ERROR,
+                    reason=f"Voice session error: {type(exc).__name__}",
                 )
-            except Exception:
-                pass
     finally:
         receive_task.cancel()
         try:
@@ -246,10 +249,12 @@ async def interview_live_websocket(
             await asyncio.shield(receive_task)
         except (asyncio.CancelledError, Exception):
             pass
-        
+
         if websocket.client_state.name != "DISCONNECTED":
             try:
-                logger.info(f"[VOICE_BACKEND] Closing WebSocket for session {session_id}")
+                logger.info(
+                    f"[VOICE_BACKEND] Closing WebSocket for session {session_id}"
+                )
                 await websocket.close()
             except Exception as e:
                 logger.debug(f"[VOICE_BACKEND] Error during final websocket close: {e}")

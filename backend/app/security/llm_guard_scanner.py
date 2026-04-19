@@ -1,8 +1,11 @@
 """LLM Guard scanner service for input/output security."""
 
-from typing import Optional, Tuple, List, Dict, Any
-from ..core.logging import logger
+from typing import Any
+
+import datafog as DataFog
+
 from ..core.config import settings
+from ..core.logging import logger
 
 HAS_LLM_GUARD = False
 
@@ -10,12 +13,6 @@ HAS_LLM_GUARD = False
 # LLM Guard scanners:
 _prompt_injection_scanner = None
 _refusal_scanner = None
-
-
-# NOT LLM GUARD - DataFog for PII detection
-# DataFog is used instead of LLM Guard's Anonymize/Sensitive scanners
-import datafog as DataFog
-
 
 try:
     # LLM Guard: Only import PromptInjection and NoRefusal
@@ -56,7 +53,7 @@ class LLMGuardScanner:
 
             logger.info("Security scanners initialized (PromptInjection, NoRefusal)")
 
-    def scan_input(self, prompt: str) -> Tuple[bool, str, List[Dict[str, Any]]]:
+    def scan_input(self, prompt: str) -> tuple[bool, str, list[dict[str, Any]]]:
         """Scan user input for prompt injection and PII.
 
         Args:
@@ -106,10 +103,10 @@ class LLMGuardScanner:
             return True, sanitized, issues
 
         except Exception as e:
-            logger.error(f"LLM Guard input scan failed: {e}")
+            logger.exception(f"LLM Guard input scan failed: {e}")
             return True, prompt, []
 
-    def scan_output(self, output: str) -> Tuple[bool, str, List[Dict[str, Any]]]:
+    def scan_output(self, output: str) -> tuple[bool, str, list[dict[str, Any]]]:
         """Scan model output for sensitive information and refusals.
 
         Args:
@@ -164,12 +161,12 @@ class LLMGuardScanner:
             return True, sanitized, []
 
         except Exception as e:
-            logger.error(f"LLM Guard output scan failed: {e}")
+            logger.exception(f"LLM Guard output scan failed: {e}")
             return True, output, []
 
     def scan_both(
         self, input_text: str, output_text: str
-    ) -> Tuple[bool, bool, List[Dict[str, Any]]]:
+    ) -> tuple[bool, bool, list[dict[str, Any]]]:
         """Scan both input and output.
 
         Args:
@@ -185,7 +182,7 @@ class LLMGuardScanner:
         return input_safe, output_safe, input_issues + output_issues
 
 
-_llm_guard_scanner: Optional[LLMGuardScanner] = None
+_llm_guard_scanner: LLMGuardScanner | None = None
 
 
 def get_llm_guard_scanner() -> LLMGuardScanner:

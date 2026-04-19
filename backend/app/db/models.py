@@ -1,9 +1,13 @@
 """SQLAlchemy database models."""
 
-from sqlalchemy import ARRAY, Boolean, Column, Date, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import ARRAY, Column, Date, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
+
+# Constants to avoid duplication
+CASCADE_DELETE_ORPHAN = "all, delete-orphan"
+RESUMES_ID_FK = "resumes.id"
 
 
 class ResumeModel(Base):
@@ -14,11 +18,21 @@ class ResumeModel(Base):
     id = Column(String, primary_key=True)
     skills = Column(ARRAY(String), nullable=True)
 
-    experiences = relationship("ExperienceModel", back_populates="resume", cascade="all, delete-orphan")
-    educations = relationship("EducationModel", back_populates="resume", cascade="all, delete-orphan")
-    projects = relationship("ProjectModel", back_populates="resume", cascade="all, delete-orphan")
-    certifications = relationship("CertificationModel", back_populates="resume", cascade="all, delete-orphan")
-    awards = relationship("AwardModel", back_populates="resume", cascade="all, delete-orphan")
+    experiences = relationship(
+        "ExperienceModel", back_populates="resume", cascade=CASCADE_DELETE_ORPHAN
+    )
+    educations = relationship(
+        "EducationModel", back_populates="resume", cascade=CASCADE_DELETE_ORPHAN
+    )
+    projects = relationship(
+        "ProjectModel", back_populates="resume", cascade=CASCADE_DELETE_ORPHAN
+    )
+    certifications = relationship(
+        "CertificationModel", back_populates="resume", cascade=CASCADE_DELETE_ORPHAN
+    )
+    awards = relationship(
+        "AwardModel", back_populates="resume", cascade=CASCADE_DELETE_ORPHAN
+    )
 
 
 class ExperienceModel(Base):
@@ -27,7 +41,7 @@ class ExperienceModel(Base):
     __tablename__ = "experiences"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    resume_id = Column(String, ForeignKey("resumes.id"), nullable=False)
+    resume_id = Column(String, ForeignKey(RESUMES_ID_FK), nullable=False)
     title = Column(String, nullable=True)
     company = Column(String, nullable=True)
     start_date = Column(Date, nullable=True)
@@ -43,7 +57,7 @@ class EducationModel(Base):
     __tablename__ = "educations"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    resume_id = Column(String, ForeignKey("resumes.id"), nullable=False)
+    resume_id = Column(String, ForeignKey(RESUMES_ID_FK), nullable=False)
     school = Column(String, nullable=True)
     degree = Column(String, nullable=True)
     start_date = Column(Date, nullable=True)
@@ -61,7 +75,7 @@ class ProjectModel(Base):
     __tablename__ = "projects"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    resume_id = Column(String, ForeignKey("resumes.id"), nullable=False)
+    resume_id = Column(String, ForeignKey(RESUMES_ID_FK), nullable=False)
     title = Column(String, nullable=True)
     description = Column(Text, nullable=True)
     technologies = Column(ARRAY(String), nullable=True)
@@ -78,7 +92,7 @@ class CertificationModel(Base):
     __tablename__ = "certifications"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    resume_id = Column(String, ForeignKey("resumes.id"), nullable=False)
+    resume_id = Column(String, ForeignKey(RESUMES_ID_FK), nullable=False)
     name = Column(String, nullable=True)
     issuer = Column(String, nullable=True)
     issue_date = Column(Date, nullable=True)
@@ -95,7 +109,7 @@ class AwardModel(Base):
     __tablename__ = "awards"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    resume_id = Column(String, ForeignKey("resumes.id"), nullable=False)
+    resume_id = Column(String, ForeignKey(RESUMES_ID_FK), nullable=False)
     title = Column(String, nullable=True)
     issuer = Column(String, nullable=True)
     date = Column(Date, nullable=True)

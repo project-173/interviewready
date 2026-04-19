@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+SUMMARY_HEADER = "\nSummary"
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DIR = REPO_ROOT / "backend"
 if BACKEND_DIR.exists() and str(BACKEND_DIR) not in sys.path:
@@ -265,18 +267,18 @@ def _run_experiment(
     case_map = {case.id: case for case in cases}
     task = _make_task(case_map, gemini_service)
     evaluator = _make_evaluator(judge, run_name)
-    common_kwargs = dict(
-        name="LLM Judge Eval",
-        run_name=run_name,
-        description="Offline LLM-as-judge batch evaluation run",
-        task=task,
-        evaluators=[evaluator],
-        max_concurrency=1,
-        metadata={
+    common_kwargs = {
+        "name": "LLM Judge Eval",
+        "run_name": run_name,
+        "description": "Offline LLM-as-judge batch evaluation run",
+        "task": task,
+        "evaluators": [evaluator],
+        "max_concurrency": 1,
+        "metadata": {
             "dataset_version": _read_dataset_version(),
             "case_count": len(cases),
         },
-    )
+    }
 
     if dataset:
         # No --max-cases: let Langfuse control which items run
@@ -340,7 +342,7 @@ def _sync_langfuse_dataset(*, langfuse, dataset_name: str, cases) -> None:
     print(f"Uploaded {len(cases)} items to Langfuse dataset '{dataset_name}'")
 
 
-def main() -> None:
+def _setup_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run LLM-as-judge evals")
     parser.add_argument("--agent", help="Comma-separated agent names to run")
     parser.add_argument("--run-name", help="Override run name for Langfuse")
@@ -350,19 +352,134 @@ def main() -> None:
     parser.add_argument("--langfuse-dataset", help="Langfuse dataset name")
     parser.add_argument("--sync-langfuse-dataset", help="Upload local cases to Langfuse dataset")
     parser.add_argument("--edge-cases", action="store_true", help="Run edge cases instead of regular cases")
-    args = parser.parse_args()
+    return parser
 
+
+def _prepare_cases(args: argparse.Namespace) -> list:
     agents_filter = _parse_agents(args.agent)
     cases = load_eval_cases(DATASET_DIR, edge_cases=args.edge_cases)
     cases = filter_cases(cases, agents=agents_filter)
     if args.max_cases:
         cases = cases[: args.max_cases]
+    return cases
 
-    stale = find_stale_fixtures(DATASET_DIR, max_age_days=args.warn_stale_days)
+
+def _check_stale_fixtures(warn_stale_days: int) -> None:
+    stale = find_stale_fixtures(DATASET_DIR, max_age_days=warn_stale_days)
     if stale:
         print("Warning: stale fixtures detected")
         for item in stale:
             print(f" - {item}")
+
+
+def _print_manual_results(results: list) -> None:
+    print(SUMMARY_HEADER)
+    print(f"Cases run: {len(results)}")
+    failures = [r for r in results if r["status"] != "ok"]
+    print(f"Failures: {len(failures)}")
+    if failures:
+        for failure in failures:
+            print(f" - {failure['case']}: {failure['status']}")
+
+
+def _print_experiment_results(result) -> None:
+    print(SUMMARY_HEADER)
+    print(f"Cases run: {len(result.item_results)}")
+    failures = [r for r in result.item_results if not r.evaluations]
+    print(f"Failures: {len(failures)}")
+    for item_result in result.item_results:
+        case_id = _case_id_from_item(item_result.item)
+        evals = {e.name: e.value for e in item_result.evaluations}
+        if evals:
+            print(
+                f"[OK] {case_id} "
+                f"quality={evals.get('judge_quality_score', 0):.2f} "
+                f"accuracy={evals.get('judge_accuracy_score', 0):.2f} "
+                f"helpfulness={evals.get('judge_helpfulness_score', 0):.2f}"
+            )
+        else:
+            print(f"[FAIL] {case_id} no evaluations")
+
+
+def _backfill_trace_scores(langfuse, result) -> None:
+    backfilled_count = 0
+    backfilled_traces: set = set()
+    backfill_failures = 0
+    for item_result in result.item_results:
+        if not item_result.trace_id:
+            continue
+        for evaluation in item_result.evaluations:
+            try:
+                langfuse.create_score(
+                    name=evaluation.name,
+                    value=evaluation.value,
+                    trace_id=item_result.trace_id,
+                    metadata=evaluation.metadata,
+                )
+                backfilled_count += 1
+                backfilled_traces.add(item_result.trace_id)
+                print(
+                    f"[BACKFILL] trace={item_result.trace_id} "
+                    f"score={evaluation.name} value={evaluation.value}"
+                )
+            except Exception as exc:
+                backfill_failures += 1
+                print(f"Failed to attach score to trace {item_result.trace_id}: {exc}")
+
+    print(f"Scores backfilled: {backfilled_count} across {len(backfilled_traces)} trace(s)")
+    if backfill_failures:
+        print(f"Backfill failures: {backfill_failures}")
+
+
+def _run_langfuse_experiment(args, cases, judge, gemini_service) -> bool:
+    try:
+        from langfuse import Langfuse
+
+        langfuse = Langfuse()
+        batch_run_name = _build_batch_run_name(args.run_name)
+
+        if args.sync_langfuse_dataset:
+            _sync_langfuse_dataset(
+                langfuse=langfuse,
+                dataset_name=args.sync_langfuse_dataset,
+                cases=cases,
+            )
+
+        dataset_name = args.langfuse_dataset or args.sync_langfuse_dataset
+        use_dataset = dataset_name and not args.max_cases
+        dataset = langfuse.get_dataset(dataset_name) if use_dataset else None
+
+        result = _run_experiment(
+            cases=cases,
+            langfuse=langfuse,
+            judge=judge,
+            gemini_service=gemini_service,
+            run_name=batch_run_name,
+            dataset=dataset,
+        )
+
+        _print_experiment_results(result)
+        _backfill_trace_scores(langfuse, result)
+
+        try:
+            langfuse.flush()
+            print("Langfuse flush complete")
+        except Exception as exc:
+            print(f"Langfuse flush failed: {exc}")
+
+        if result.dataset_run_url:
+            print(f"Langfuse experiment: {result.dataset_run_url}")
+        return True
+    except Exception as exc:
+        print(f"Langfuse experiment run failed: {exc}")
+        return False
+
+
+def main() -> None:
+    args = _setup_argument_parser().parse_args()
+    
+    cases = _prepare_cases(args)
+    _check_stale_fixtures(args.warn_stale_days)
 
     if not settings.LANGFUSE_PUBLIC_KEY:
         print(
@@ -381,100 +498,13 @@ def main() -> None:
             trace_id=args.trace_id,
             run_name_override=args.run_name,
         )
-        print("\nSummary")
-        print(f"Cases run: {len(results)}")
-        failures = [r for r in results if r["status"] != "ok"]
-        print(f"Failures: {len(failures)}")
-        if failures:
-            for failure in failures:
-                print(f" - {failure['case']}: {failure['status']}")
+        _print_manual_results(results)
         print(f"Langfuse trace: {args.trace_id}")
         return
 
     if settings.LANGFUSE_PUBLIC_KEY:
-        try:
-            from langfuse import Langfuse
-
-            langfuse = Langfuse()
-            batch_run_name = _build_batch_run_name(args.run_name)
-
-            if args.sync_langfuse_dataset:
-                _sync_langfuse_dataset(
-                    langfuse=langfuse,
-                    dataset_name=args.sync_langfuse_dataset,
-                    cases=cases,
-                )
-
-            dataset_name = args.langfuse_dataset or args.sync_langfuse_dataset
-            use_dataset = dataset_name and not args.max_cases
-            dataset = langfuse.get_dataset(dataset_name) if use_dataset else None
-
-            result = _run_experiment(
-                cases=cases,
-                langfuse=langfuse,
-                judge=judge,
-                gemini_service=gemini_service,
-                run_name=batch_run_name,
-                dataset=dataset,
-            )
-
-            print("\nSummary")
-            print(f"Cases run: {len(result.item_results)}")
-            failures = [r for r in result.item_results if not r.evaluations]
-            print(f"Failures: {len(failures)}")
-            for item_result in result.item_results:
-                case_id = _case_id_from_item(item_result.item)
-                evals = {e.name: e.value for e in item_result.evaluations}
-                if evals:
-                    print(
-                        f"[OK] {case_id} "
-                        f"quality={evals.get('judge_quality_score', 0):.2f} "
-                        f"accuracy={evals.get('judge_accuracy_score', 0):.2f} "
-                        f"helpfulness={evals.get('judge_helpfulness_score', 0):.2f}"
-                    )
-                else:
-                    print(f"[FAIL] {case_id} no evaluations")
-
-            # Backfill trace-level scores
-            backfilled_count = 0
-            backfilled_traces: set = set()
-            backfill_failures = 0
-            for item_result in result.item_results:
-                if not item_result.trace_id:
-                    continue
-                for evaluation in item_result.evaluations:
-                    try:
-                        langfuse.create_score(
-                            name=evaluation.name,
-                            value=evaluation.value,
-                            trace_id=item_result.trace_id,
-                            metadata=evaluation.metadata,
-                        )
-                        backfilled_count += 1
-                        backfilled_traces.add(item_result.trace_id)
-                        print(
-                            f"[BACKFILL] trace={item_result.trace_id} "
-                            f"score={evaluation.name} value={evaluation.value}"
-                        )
-                    except Exception as exc:
-                        backfill_failures += 1
-                        print(f"Failed to attach score to trace {item_result.trace_id}: {exc}")
-
-            print(f"Scores backfilled: {backfilled_count} across {len(backfilled_traces)} trace(s)")
-            if backfill_failures:
-                print(f"Backfill failures: {backfill_failures}")
-
-            try:
-                langfuse.flush()
-                print("Langfuse flush complete")
-            except Exception as exc:
-                print(f"Langfuse flush failed: {exc}")
-
-            if result.dataset_run_url:
-                print(f"Langfuse experiment: {result.dataset_run_url}")
+        if _run_langfuse_experiment(args, cases, judge, gemini_service):
             return
-        except Exception as exc:
-            print(f"Langfuse experiment run failed: {exc}")
 
     results = _run_manual(
         cases=cases,
@@ -483,13 +513,7 @@ def main() -> None:
         trace_id=None,
         run_name_override=args.run_name,
     )
-    print("\nSummary")
-    print(f"Cases run: {len(results)}")
-    failures = [r for r in results if r["status"] != "ok"]
-    print(f"Failures: {len(failures)}")
-    if failures:
-        for failure in failures:
-            print(f" - {failure['case']}: {failure['status']}")
+    _print_manual_results(results)
 
 
 if __name__ == "__main__":

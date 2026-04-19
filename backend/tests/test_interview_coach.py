@@ -6,6 +6,7 @@ from app.agents.gemini_service import GeminiService
 from app.agents.interview_coach import InterviewCoachAgent
 from app.models.agent import AgentInput
 from app.models.session import SessionContext
+import pytest
 
 
 def _build_agent(monkeypatch) -> InterviewCoachAgent:
@@ -21,7 +22,13 @@ def _build_live_agent(monkeypatch) -> InterviewCoachAgent:
     return agent
 
 
-def _mock_evaluator(monkeypatch, agent: InterviewCoachAgent, score: float, can_proceed: bool, feedback: str = "Evaluator feedback.") -> None:
+def _mock_evaluator(
+    monkeypatch,
+    agent: InterviewCoachAgent,
+    score: float,
+    can_proceed: bool,
+    feedback: str = "Evaluator feedback.",
+) -> None:
     monkeypatch.setattr(
         agent,
         "_evaluate_interview_answer",
@@ -33,7 +40,9 @@ def _mock_evaluator(monkeypatch, agent: InterviewCoachAgent, score: float, can_p
     )
 
 
-def test_interview_coach_returns_first_question_and_initializes_state(monkeypatch) -> None:
+def test_interview_coach_returns_first_question_and_initializes_state(
+    monkeypatch,
+) -> None:
     agent = _build_agent(monkeypatch)
     context = SessionContext(session_id="s1", user_id="u1")
 
@@ -50,12 +59,14 @@ def test_interview_coach_returns_first_question_and_initializes_state(monkeypatc
     assert len(context.shared_memory["asked_questions"]) == 1
 
 
-def test_interview_coach_recovers_from_invalid_model_output_on_first_question(monkeypatch) -> None:
+def test_interview_coach_recovers_from_invalid_model_output_on_first_question(
+    monkeypatch,
+) -> None:
     agent = _build_live_agent(monkeypatch)
     monkeypatch.setattr(
         agent,
         "_call_gemini_with_system_prompt",
-        lambda *args, **kwargs: "<SYSTEM PROMPT LEAKAGE>"
+        lambda *args, **kwargs: "<SYSTEM PROMPT LEAKAGE>",
     )
 
     context = SessionContext(session_id="s1_invalid_model", user_id="u1")
@@ -99,7 +110,9 @@ def test_interview_coach_recovers_from_gemini_service_errors(monkeypatch) -> Non
     assert len(context.shared_memory["asked_questions"]) == 0
 
 
-def test_interview_coach_ignores_blank_user_history_on_first_question(monkeypatch) -> None:
+def test_interview_coach_ignores_blank_user_history_on_first_question(
+    monkeypatch,
+) -> None:
     agent = _build_agent(monkeypatch)
     context = SessionContext(session_id="s1_blank", user_id="u1", shared_memory=None)
 
@@ -155,7 +168,9 @@ def test_interview_coach_reasks_question_one_on_invalid_answer(monkeypatch) -> N
     assert context.shared_memory["user_answers"] == []
 
 
-def test_interview_coach_reasks_on_low_effort_answer_without_advancing(monkeypatch) -> None:
+def test_interview_coach_reasks_on_low_effort_answer_without_advancing(
+    monkeypatch,
+) -> None:
     agent = _build_agent(monkeypatch)
     context = SessionContext(
         session_id="s2",
@@ -213,7 +228,12 @@ def test_interview_coach_advances_on_valid_answers_until_summary(monkeypatch) ->
         response = agent.process(
             AgentInput(
                 intent="INTERVIEW_COACH",
-                message_history=[{"role": "user", "text": "This is a detailed, relevant interview answer."}],
+                message_history=[
+                    {
+                        "role": "user",
+                        "text": "This is a detailed, relevant interview answer.",
+                    }
+                ],
             ),
             context,
         )
@@ -222,7 +242,10 @@ def test_interview_coach_advances_on_valid_answers_until_summary(monkeypatch) ->
         assert payload["can_proceed"] is True
         assert payload["current_question_number"] == next_question
         assert context.shared_memory["current_question_index"] == current_question
-        assert context.shared_memory["user_answers"][-1] == "This is a detailed, relevant interview answer."
+        assert (
+            context.shared_memory["user_answers"][-1]
+            == "This is a detailed, relevant interview answer."
+        )
 
     final_context = SessionContext(
         session_id="s-valid-5",
@@ -239,7 +262,12 @@ def test_interview_coach_advances_on_valid_answers_until_summary(monkeypatch) ->
     final_response = agent.process(
         AgentInput(
             intent="INTERVIEW_COACH",
-            message_history=[{"role": "user", "text": "This is a detailed, relevant interview answer."}],
+            message_history=[
+                {
+                    "role": "user",
+                    "text": "This is a detailed, relevant interview answer.",
+                }
+            ],
         ),
         final_context,
     )
@@ -248,10 +276,15 @@ def test_interview_coach_advances_on_valid_answers_until_summary(monkeypatch) ->
     assert final_payload["interview_complete"] is True
     assert final_context.shared_memory["interview_active"] is False
     assert final_context.shared_memory["current_question_index"] == 5
-    assert final_context.shared_memory["user_answers"][-1] == "This is a detailed, relevant interview answer."
+    assert (
+        final_context.shared_memory["user_answers"][-1]
+        == "This is a detailed, relevant interview answer."
+    )
 
 
-def test_interview_coach_handles_invalid_then_valid_and_reaches_summary(monkeypatch) -> None:
+def test_interview_coach_handles_invalid_then_valid_and_reaches_summary(
+    monkeypatch,
+) -> None:
     agent = _build_agent(monkeypatch)
     context = SessionContext(
         session_id="s-e2e",
@@ -302,7 +335,10 @@ def test_interview_coach_handles_invalid_then_valid_and_reaches_summary(monkeypa
         payload = json.loads(response.content)
         assert payload["can_proceed"] is True
         assert payload["current_question_number"] == expected_question_number
-        assert context.shared_memory["current_question_index"] == expected_question_number - 1
+        assert (
+            context.shared_memory["current_question_index"]
+            == expected_question_number - 1
+        )
 
     summary_response = agent.process(
         AgentInput(
@@ -318,7 +354,9 @@ def test_interview_coach_handles_invalid_then_valid_and_reaches_summary(monkeypa
     assert len(context.shared_memory["user_answers"]) == 5
 
 
-def test_interview_coach_advances_on_dict_history_from_question_four(monkeypatch) -> None:
+def test_interview_coach_advances_on_dict_history_from_question_four(
+    monkeypatch,
+) -> None:
     agent = _build_agent(monkeypatch)
     _mock_evaluator(monkeypatch, agent, 85.0, True, "Strong answer.")
 
@@ -354,7 +392,9 @@ def test_interview_coach_advances_on_dict_history_from_question_four(monkeypatch
     assert payload["can_proceed"] is True
     assert payload["current_question_number"] == 5
     assert context.shared_memory["current_question_index"] == 4
-    assert context.shared_memory["user_answers"][-1].startswith("I keep code quality high")
+    assert context.shared_memory["user_answers"][-1].startswith(
+        "I keep code quality high"
+    )
 
 
 def test_interview_coach_keeps_same_question_on_invalid_answers(monkeypatch) -> None:
@@ -387,7 +427,9 @@ def test_interview_coach_keeps_same_question_on_invalid_answers(monkeypatch) -> 
         assert payload["current_question_number"] == current_question
         assert payload["feedback"]
         assert context.shared_memory["current_question_index"] == current_question - 1
-        assert context.shared_memory["user_answers"] == [f"a{i}" for i in range(1, current_question)]
+        assert context.shared_memory["user_answers"] == [
+            f"a{i}" for i in range(1, current_question)
+        ]
 
 
 def test_interview_coach_evaluator_rejects_greeting_answer(monkeypatch) -> None:
@@ -406,13 +448,19 @@ def test_interview_coach_evaluator_rejects_greeting_answer(monkeypatch) -> None:
 
     result = agent._evaluate_interview_answer(
         AgentInput(intent="INTERVIEW_COACH", job_description="Backend engineer role"),
-        SessionContext(job_description="Backend engineer role", shared_memory={"asked_questions": ["Q1"]}),
+        SessionContext(
+            job_description="Backend engineer role",
+            shared_memory={"asked_questions": ["Q1"]},
+        ),
         "Hello",
     )
 
     assert result["answer_score"] == 0
     assert result["can_proceed"] is False
-    assert "greeting" in result["feedback"].lower() or "answer the interview question" in result["feedback"].lower()
+    assert (
+        "greeting" in result["feedback"].lower()
+        or "answer the interview question" in result["feedback"].lower()
+    )
 
 
 def test_interview_coach_evaluator_rejects_invalid_payload(monkeypatch) -> None:
@@ -425,11 +473,14 @@ def test_interview_coach_evaluator_rejects_invalid_payload(monkeypatch) -> None:
 
     result = agent._evaluate_interview_answer(
         AgentInput(intent="INTERVIEW_COACH", job_description="Backend engineer role"),
-        SessionContext(job_description="Backend engineer role", shared_memory={"asked_questions": ["Q1"]}),
+        SessionContext(
+            job_description="Backend engineer role",
+            shared_memory={"asked_questions": ["Q1"]},
+        ),
         "nonsence",
     )
 
-    assert result["answer_score"] == 0.0
+    assert result["answer_score"] == pytest.approx(0.0, abs=1e-9)
     assert result["can_proceed"] is False
     assert "could not be evaluated" in result["feedback"].lower()
 
@@ -471,7 +522,12 @@ def test_interview_coach_recovers_from_invalid_evaluator_payload(monkeypatch) ->
     response = agent.process(
         AgentInput(
             intent="INTERVIEW_COACH",
-            message_history=[{"role": "user", "text": "I improved deployment reliability by automating rollouts."}],
+            message_history=[
+                {
+                    "role": "user",
+                    "text": "I improved deployment reliability by automating rollouts.",
+                }
+            ],
         ),
         context,
     )
@@ -609,7 +665,9 @@ def test_interview_coach_uses_model_approval_and_generates_summary(monkeypatch) 
     assert context.shared_memory["user_answers"][-1] == final_answer
 
 
-def test_interview_coach_normalizes_question_number_after_progression(monkeypatch) -> None:
+def test_interview_coach_normalizes_question_number_after_progression(
+    monkeypatch,
+) -> None:
     agent = _build_live_agent(monkeypatch)
     context = SessionContext(
         session_id="s-normalize-qnum",
@@ -666,12 +724,17 @@ def test_interview_coach_normalizes_question_number_after_progression(monkeypatc
 
     payload = json.loads(response.content)
     assert payload["current_question_number"] == 5
-    assert payload["question"] == "Can you describe a time when you improved code quality across your team?"
+    assert (
+        payload["question"]
+        == "Can you describe a time when you improved code quality across your team?"
+    )
     assert context.shared_memory["current_question_index"] == 4
     assert context.shared_memory["asked_questions"][-1] == payload["question"]
 
 
-def test_interview_coach_generates_summary_after_five_sequential_valid_answers(monkeypatch) -> None:
+def test_interview_coach_generates_summary_after_five_sequential_valid_answers(
+    monkeypatch,
+) -> None:
     agent = _build_live_agent(monkeypatch)
     context = SessionContext(
         session_id="s-live-e2e",
@@ -846,7 +909,9 @@ def test_interview_coach_completes_after_final_valid_answer(monkeypatch) -> None
     assert context.shared_memory["user_answers"][-1] == final_answer
 
 
-def test_interview_coach_redacts_sensitive_content_and_emits_responsible_ai_metadata(monkeypatch) -> None:
+def test_interview_coach_redacts_sensitive_content_and_emits_responsible_ai_metadata(
+    monkeypatch,
+) -> None:
     agent = _build_live_agent(monkeypatch)
     context = SessionContext(
         session_id="s-sensitive",
@@ -912,11 +977,16 @@ def test_interview_coach_redacts_sensitive_content_and_emits_responsible_ai_meta
     assert set(response.sharp_metadata["sensitive_input_types"]) == {"email", "phone"}
     assert response.sharp_metadata["bias_review_required"] is True
     assert "age" in response.sharp_metadata["bias_flags"]
-    assert "InterviewCoachAgent: Redacted sensitive candidate data before prompt construction" in response.decision_trace
+    assert (
+        "InterviewCoachAgent: Redacted sensitive candidate data before prompt construction"
+        in response.decision_trace
+    )
     assert "responsible_ai" in response.sharp_metadata
 
 
-def test_interview_coach_blocks_prompt_injection_attempt_before_model_call(monkeypatch) -> None:
+def test_interview_coach_blocks_prompt_injection_attempt_before_model_call(
+    monkeypatch,
+) -> None:
     agent = _build_live_agent(monkeypatch)
     context = SessionContext(
         session_id="s-prompt-injection",
@@ -932,7 +1002,8 @@ def test_interview_coach_blocks_prompt_injection_attempt_before_model_call(monke
     )
 
     def _should_not_run(*args, **kwargs):
-        raise AssertionError("Model call should be blocked for prompt injection")
+        msg = "Model call should be blocked for prompt injection"
+        raise AssertionError(msg)
 
     monkeypatch.setattr(agent, "_call_gemini_with_system_prompt", _should_not_run)
 
@@ -958,10 +1029,15 @@ def test_interview_coach_blocks_prompt_injection_attempt_before_model_call(monke
     assert response.sharp_metadata["prompt_injection_blocked"] is True
     assert response.sharp_metadata["human_review_recommended"] is True
     assert response.sharp_metadata["prompt_injection_signals"]
-    assert "InterviewCoachAgent: Blocked adversarial candidate input before model execution and re-asked the same question" in response.decision_trace
+    assert (
+        "InterviewCoachAgent: Blocked adversarial candidate input before model execution and re-asked the same question"
+        in response.decision_trace
+    )
 
 
-def test_interview_coach_provides_detailed_security_feedback_on_injection_block(monkeypatch) -> None:
+def test_interview_coach_provides_detailed_security_feedback_on_injection_block(
+    monkeypatch,
+) -> None:
     agent = _build_live_agent(monkeypatch)
     context = SessionContext(
         session_id="s-detailed-security-feedback",
@@ -977,7 +1053,8 @@ def test_interview_coach_provides_detailed_security_feedback_on_injection_block(
     )
 
     def _should_not_run(*args, **kwargs):
-        raise AssertionError("Model call should be blocked for prompt injection")
+        msg = "Model call should be blocked for prompt injection"
+        raise AssertionError(msg)
 
     monkeypatch.setattr(agent, "_call_gemini_with_system_prompt", _should_not_run)
 
@@ -1004,7 +1081,9 @@ def test_interview_coach_provides_detailed_security_feedback_on_injection_block(
     assert response.sharp_metadata["prompt_injection_blocked"] is True
 
 
-def test_interview_coach_handles_evaluator_failure_with_helpful_feedback(monkeypatch) -> None:
+def test_interview_coach_handles_evaluator_failure_with_helpful_feedback(
+    monkeypatch,
+) -> None:
     agent = _build_live_agent(monkeypatch)
     context = SessionContext(
         session_id="s-evaluator-failure-feedback",
@@ -1042,7 +1121,9 @@ def test_interview_coach_handles_evaluator_failure_with_helpful_feedback(monkeyp
     response = agent.process(
         AgentInput(
             intent="INTERVIEW_COACH",
-            message_history=[{"role": "user", "text": "I built a microservices system."}],
+            message_history=[
+                {"role": "user", "text": "I built a microservices system."}
+            ],
         ),
         context,
     )

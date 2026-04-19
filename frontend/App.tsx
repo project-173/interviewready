@@ -4,7 +4,6 @@ import {
   WorkflowStatus,
   ChatRequest,
   InterviewMode,
-  InterviewMessage,
   Resume
 } from './types';
 
@@ -93,6 +92,7 @@ const AppContent: React.FC = () => {
     }
   }, []);
 
+  // FIX S7735: replaced negated guard with positive condition wrapping the body
   const handleStepClick = useCallback((status: WorkflowStatus) => {
     const canNavigate: Partial<Record<WorkflowStatus, boolean>> = {
       [WorkflowStatus.IDLE]: true,
@@ -102,24 +102,24 @@ const AppContent: React.FC = () => {
       [WorkflowStatus.INTERVIEWING]: !!state.alignmentReport,
     };
 
-    if (!canNavigate[status]) return;
+    if (canNavigate[status]) {
+      const completedStatus: Partial<Record<WorkflowStatus, WorkflowStatus>> = {
+        [WorkflowStatus.CRITIQUING]: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
+        [WorkflowStatus.ANALYZING_CONTENT]: WorkflowStatus.AWAITING_CONTENT_APPROVAL,
+        [WorkflowStatus.ALIGNING_JD]: WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL,
+      };
 
-    const completedStatus: Partial<Record<WorkflowStatus, WorkflowStatus>> = {
-      [WorkflowStatus.CRITIQUING]: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
-      [WorkflowStatus.ANALYZING_CONTENT]: WorkflowStatus.AWAITING_CONTENT_APPROVAL,
-      [WorkflowStatus.ALIGNING_JD]: WorkflowStatus.AWAITING_ALIGNMENT_APPROVAL,
-    };
+      const reportAvailable: Partial<Record<WorkflowStatus, boolean>> = {
+        [WorkflowStatus.CRITIQUING]: !!state.criticReport,
+        [WorkflowStatus.ANALYZING_CONTENT]: !!state.contentReport,
+        [WorkflowStatus.ALIGNING_JD]: !!state.alignmentReport,
+      };
 
-    const reportAvailable: Partial<Record<WorkflowStatus, boolean>> = {
-      [WorkflowStatus.CRITIQUING]: !!state.criticReport,
-      [WorkflowStatus.ANALYZING_CONTENT]: !!state.contentReport,
-      [WorkflowStatus.ALIGNING_JD]: !!state.alignmentReport,
-    };
+      const targetStatus =
+        (reportAvailable[status] && completedStatus[status]) || status;
 
-    const targetStatus =
-      (reportAvailable[status] && completedStatus[status]) || status;
-
-    setState(prev => ({ ...prev, status: targetStatus }));
+      setState(prev => ({ ...prev, status: targetStatus }));
+    }
   }, [state.currentResume, state.criticReport, state.contentReport, state.alignmentReport]);
 
   return (
@@ -178,11 +178,7 @@ const AppContent: React.FC = () => {
               </div>
             )}
 
-            {!sessionReady ? (
-              <div className="flex items-center justify-center h-32">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-900"></div>
-              </div>
-            ) : (
+            {sessionReady && (
               <div className="relative">
                 <WorkflowController 
                   state={state} 
@@ -190,6 +186,11 @@ const AppContent: React.FC = () => {
                   setError={setError}
                   chatEndRef={chatEndRef}
                 />
+              </div>
+            )}
+            {!sessionReady && (
+              <div className="flex items-center justify-center h-32">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-900"></div>
               </div>
             )}
           </div>
@@ -206,7 +207,8 @@ const AppContent: React.FC = () => {
         {/* Right Panel: Resume Preview */}
         <main className="flex-1 bg-slate-100/30 overflow-hidden flex flex-col relative">
           <div className="flex-1 overflow-y-auto">
-            <ResumePreview resume={state.currentResume} />
+            {/* FIX TS2322: fallback to DEFAULT_RESUME so resume is never null */}
+            <ResumePreview resume={state.currentResume ?? DEFAULT_RESUME} />
           </div>
         </main>
       </div>
@@ -222,7 +224,7 @@ const WorkflowController: React.FC<{
   state: SharedState;
   setState: React.Dispatch<React.SetStateAction<SharedState>>;
   setError: React.Dispatch<React.SetStateAction<string | null>>;
-  chatEndRef: React.RefObject<HTMLDivElement>;
+  chatEndRef: React.RefObject<HTMLDivElement | null>;
 }> = ({ state, setState, setError, chatEndRef }) => {
   const { startLoading, updateProgress, stopLoading } = useLoading();
   const [manualResumeText, setManualResumeText] = useState('');
@@ -235,8 +237,8 @@ const WorkflowController: React.FC<{
 
   const getResponseMetadata = (response: any) => {
     const payloadMetadata =
-      isRecord(response?.payload) && isRecord((response.payload as any).metadata)
-        ? (response.payload as any).metadata
+      isRecord(response?.payload) && isRecord(response.payload.metadata)
+        ? response.payload.metadata
         : null;
     const directMetadata = isRecord(response?.metadata) ? response.metadata : null;
     return directMetadata ?? payloadMetadata;
@@ -255,136 +257,146 @@ const WorkflowController: React.FC<{
     });
   };
 
-const handleUploadSubmit = async (file: File | null) => {
-  setError(null);
-  setManualResumeError(null);
+  const processPdfFile = async (file: File) => {
+    updateProgress(25, 0);
+    const base64 = await fileToBase64(file);
+    updateProgress(50, 1);
 
-  // CASE 1: File provided → extract → critic
-  if (file) {
+    const request: ChatRequest = {
+      intent: 'RESUME_CRITIC',
+      resumeData: null,
+      jobDescription: '',
+      messageHistory: [],
+      resumeFile: { data: base64, fileType: 'pdf' }
+    };
+
+    updateProgress(75, 2);
+    const response = await backendService.callChatEndpoint(request);
+    const parsedResume = await backendService.fetchCurrentResume();
+
+    let responseData;
+    try {
+      responseData = response.payload || JSON.parse(response.content || '{}');
+    } catch (parseErr) {
+      throw new Error(`Invalid response from backend: ${parseErr}`);
+    }
+
+    const metadata = getResponseMetadata(response);
+    const needsReview = Boolean(metadata?.review_required ?? metadata?.needs_review);
+    const reviewPayload =
+      metadata?.review_payload ||
+      (isRecord(response.payload) ? response.payload.review_payload : null);
+    const checkpointId = metadata?.checkpoint_id;
+
+    updateProgress(90, 3);
+
+    return { responseData, parsedResume, needsReview, reviewPayload, checkpointId };
+  };
+
+  const handleReviewRequired = (reviewPayload: any, checkpointId: string, parsedResume: Resume | null) => {
+    if (reviewPayload?.extracted_data) {
+      setManualResumeText(JSON.stringify(reviewPayload.extracted_data, null, 2));
+    }
+    setState(prev => ({
+      ...prev,
+      currentResume: parsedResume || prev.currentResume,
+      history: parsedResume ? [...prev.history, parsedResume] : prev.history,
+      criticReport: null,
+      status: WorkflowStatus.IDLE,
+      extractionReview: {
+        needsReview: true,
+        checkpointId,
+        reviewPayload,
+      }
+    }));
+    updateProgress(100, 3);
+  };
+
+  const handleSuccessfulProcessing = (responseData: any, parsedResume: Resume | null) => {
+    setState(prev => ({
+      ...prev,
+      currentResume: parsedResume || prev.currentResume,
+      history: parsedResume ? [...prev.history, parsedResume] : prev.history,
+      criticReport: responseData,
+      status: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
+      extractionReview: null,
+    }));
+    setManualResumeText('');
+    updateProgress(100, 3);
+  };
+
+  const processExistingResume = async () => {
     startLoading('Analyzing your resume...', [
-      'Uploading file',
-      'Extracting content',
+      'Validating resume',
       'Analyzing structure',
       'Generating insights'
     ]);
 
     try {
-      if (file.type === 'application/pdf') {
-        updateProgress(25, 0);
+      updateProgress(50, 1);
+      if (!state.currentResume) throw new Error("Current resume is null");
+      const report = await backendService.resumeCriticAgent(state.currentResume);
+      updateProgress(100, 2);
 
-        const base64 = await fileToBase64(file);
-
-        updateProgress(50, 1);
-
-        const request: ChatRequest = {
-          intent: 'RESUME_CRITIC',
-          resumeData: null,
-          jobDescription: '',
-          messageHistory: [],
-          resumeFile: { data: base64, fileType: 'pdf' }
-        };
-
-        updateProgress(75, 2);
-
-        const response = await backendService.callChatEndpoint(request);
-        const parsedResume = await backendService.fetchCurrentResume();
-
-        let responseData;
-        try {
-          responseData = response.payload || JSON.parse(response.content || '{}');
-        } catch {
-          throw new Error('Invalid response from backend');
-        }
-
-        const metadata = getResponseMetadata(response);
-        const needsReview = Boolean(metadata?.review_required ?? metadata?.needs_review);
-        const reviewPayload =
-          metadata?.review_payload ||
-          (isRecord(response.payload) ? (response.payload as any).review_payload : null);
-        const checkpointId = metadata?.checkpoint_id;
-
-        updateProgress(90, 3);
-
-        if (needsReview) {
-          if (reviewPayload?.extracted_data) {
-            setManualResumeText(JSON.stringify(reviewPayload.extracted_data, null, 2));
-          }
-          setState(prev => ({
-            ...prev,
-            currentResume: parsedResume || prev.currentResume,
-            history: parsedResume ? [...prev.history, parsedResume] : prev.history,
-            criticReport: null,
-            status: WorkflowStatus.IDLE,
-            extractionReview: {
-              needsReview: true,
-              checkpointId,
-              reviewPayload,
-            }
-          }));
-
-          updateProgress(100, 3);
-          return;
-        }
-
-        setState(prev => ({
-          ...prev,
-          currentResume: parsedResume || prev.currentResume,
-          history: parsedResume ? [...prev.history, parsedResume] : prev.history,
-          criticReport: responseData,
-          status: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
-          extractionReview: null,
-        }));
-        setManualResumeText('');
-
-        updateProgress(100, 3);
-      }
+      setState(prev => ({
+        ...prev,
+        criticReport: report,
+        status: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
+        extractionReview: null,
+      }));
     } catch (err: any) {
-      setError(err.message || "Failed to process resume");
+      setError(err.message || 'Failed to analyze resume');
     } finally {
       stopLoading();
     }
+  };
 
-    return;
-  }
+  const handleUploadSubmit = async (file: File | null) => {
+    setError(null);
+    setManualResumeError(null);
 
-  // CASE 2: No file → use resume from preview panel
-  if (!state.currentResume) {
-    setError('No resume available. Please upload or edit your resume.');
-    return;
-  }
+    if (file) {
+      startLoading('Analyzing your resume...', [
+        'Uploading file',
+        'Extracting content',
+        'Analyzing structure',
+        'Generating insights'
+      ]);
 
-  startLoading('Analyzing your resume...', [
-    'Validating resume',
-    'Analyzing structure',
-    'Generating insights'
-  ]);
+      try {
+        if (file.type === 'application/pdf') {
+          const { responseData, parsedResume, needsReview, reviewPayload, checkpointId } = 
+            await processPdfFile(file);
 
-  try {
-    updateProgress(50, 1);
+          if (needsReview) {
+            handleReviewRequired(reviewPayload, checkpointId, parsedResume);
+            return;
+          }
 
-    const report = await backendService.resumeCriticAgent(state.currentResume);
+          handleSuccessfulProcessing(responseData, parsedResume);
+        }
+      } catch (err: any) {
+        setError(err.message || "Failed to process resume");
+      } finally {
+        stopLoading();
+      }
+      return;
+    }
 
-    updateProgress(100, 2);
+    if (!state.currentResume) {
+      setError('No resume available. Please upload or edit your resume.');
+      return;
+    }
 
-    setState(prev => ({
-      ...prev,
-      criticReport: report,
-      status: WorkflowStatus.AWAITING_CRITIC_APPROVAL,
-      extractionReview: null,
-    }));
-  } catch (err: any) {
-    setError(err.message || 'Failed to analyze resume');
-  } finally {
-    stopLoading();
-  }
-};
+    await processExistingResume();
+  };
 
   const submitManualResume = async () => {
     setManualResumeError(null);
     let parsed: any;
     try {
       parsed = JSON.parse(manualResumeText);
-    } catch (error) {
+    } catch {
       setManualResumeError('Manual resume data must be valid JSON.');
       return;
     }
@@ -426,7 +438,7 @@ const handleUploadSubmit = async (file: File | null) => {
     let parsed: any;
     try {
       parsed = JSON.parse(manualResumeText);
-    } catch (error) {
+    } catch {
       setManualResumeError('Review edits must be valid JSON.');
       return;
     }
@@ -454,7 +466,7 @@ const handleUploadSubmit = async (file: File | null) => {
       const needsReview = Boolean(metadata?.review_required ?? metadata?.needs_review);
       const reviewPayload =
         metadata?.review_payload ||
-        (isRecord(response.payload) ? (response.payload as any).review_payload : null);
+        (isRecord(response.payload) ? response.payload.review_payload : null);
       const nextCheckpointId = metadata?.checkpoint_id || checkpointId;
 
       updateProgress(70, 1);
@@ -480,10 +492,11 @@ const handleUploadSubmit = async (file: File | null) => {
       }
 
       let responseData;
+      // FIX S2486: include original error context instead of swallowing it
       try {
         responseData = response.payload || JSON.parse(response.content || '{}');
-      } catch {
-        throw new Error('Invalid response from backend');
+      } catch (parseErr) {
+        throw new Error(`Invalid response from backend: ${parseErr}`);
       }
 
       updateProgress(100, 2);
@@ -629,7 +642,7 @@ const handleUploadSubmit = async (file: File | null) => {
       setState(prev => {
         const newHistory = prev.interviewHistory.map((msg, i) => 
           i === prev.interviewHistory.length - 1 && msg.text === '[Analyzing audio...]' 
-            ? { ...msg, text: (response as any).transcription || '[Audio response]' } 
+            ? { ...msg, text: response.transcription || '[Audio response]' } 
             : msg
         );
         return {
@@ -651,10 +664,9 @@ const handleUploadSubmit = async (file: File | null) => {
     if (event.type === 'user' && event.text) {
       setState(prev => {
         const history = [...prev.interviewHistory];
-        const last = history[history.length - 1];
-        if (last && last.role === 'user') {
-          // If the last message was also from user, we might be getting streaming updates
-          // For simplicity in this UI, we just append or replace
+        // FIX S7755 + S6582: use .at(-1) and optional chaining
+        const last = history.at(-1);
+        if (last?.role === 'user') {
           return { ...prev, interviewHistory: [...history.slice(0, -1), { role: 'user', text: event.text || '' }] };
         }
         return { ...prev, interviewHistory: [...history, { role: 'user', text: event.text || '' }] };
@@ -662,8 +674,9 @@ const handleUploadSubmit = async (file: File | null) => {
     } else if (event.type === 'gemini' && event.text) {
       setState(prev => {
         const history = [...prev.interviewHistory];
-        const last = history[history.length - 1];
-        if (last && last.role === 'agent') {
+        // FIX S7755 + S6582: use .at(-1) and optional chaining
+        const last = history.at(-1);
+        if (last?.role === 'agent') {
           return { ...prev, interviewHistory: [...history.slice(0, -1), { role: 'agent', text: event.text || '' }] };
         }
         return { ...prev, interviewHistory: [...history, { role: 'agent', text: event.text || '' }] };

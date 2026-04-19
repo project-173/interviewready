@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 
 interface LoadingStateProps {
   isLoading: boolean;
@@ -8,14 +8,33 @@ interface LoadingStateProps {
   currentStep?: number;
 }
 
-export const LoadingState: React.FC<LoadingStateProps> = ({ 
-  isLoading, 
-  message = "Processing...", 
+export const LoadingState: React.FC<LoadingStateProps> = ({
+  isLoading,
+  message = "Processing...",
   progress,
   steps = [],
-  currentStep = 0
+  currentStep = 0,
 }) => {
   if (!isLoading) return null;
+
+  const getStepStyles = (isComplete: boolean, isCurrent: boolean) => {
+    if (isComplete) {
+      return {
+        textColorClass: "text-green-600",
+        badgeClass: "bg-green-100 border-2 border-green-500",
+      };
+    }
+    if (isCurrent) {
+      return {
+        textColorClass: "text-slate-900 font-medium",
+        badgeClass: "bg-slate-900 border-2 border-slate-900",
+      };
+    }
+    return {
+      textColorClass: "text-slate-400",
+      badgeClass: "bg-slate-100 border-2 border-slate-300",
+    };
+  };
 
   return (
     <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex items-center justify-center">
@@ -33,8 +52,12 @@ export const LoadingState: React.FC<LoadingStateProps> = ({
 
         {/* Main Message */}
         <div className="text-center mb-6">
-          <h3 className="text-lg font-semibold text-slate-900 mb-2">{message}</h3>
-          <p className="text-sm text-slate-500">AI agents are analyzing your request</p>
+          <h3 className="text-lg font-semibold text-slate-900 mb-2">
+            {message}
+          </h3>
+          <p className="text-sm text-slate-500">
+            AI agents are analyzing your request
+          </p>
         </div>
 
         {/* Progress Bar */}
@@ -45,7 +68,7 @@ export const LoadingState: React.FC<LoadingStateProps> = ({
               <span>{Math.round(progress)}%</span>
             </div>
             <div className="w-full bg-slate-200 rounded-full h-2">
-              <div 
+              <div
                 className="bg-slate-900 h-2 rounded-full transition-all duration-300 ease-out"
                 style={{ width: `${progress}%` }}
               ></div>
@@ -56,39 +79,32 @@ export const LoadingState: React.FC<LoadingStateProps> = ({
         {/* Steps */}
         {steps.length > 0 && (
           <div className="space-y-2">
-            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Processing Steps</p>
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+              Processing Steps
+            </p>
             <div className="space-y-2">
-              {steps.map((step, index) => (
-                <div 
-                  key={index} 
-                  className={`flex items-center gap-3 text-sm ${
-                    index < currentStep 
-                      ? 'text-green-600' 
-                      : index === currentStep 
-                      ? 'text-slate-900 font-medium' 
-                      : 'text-slate-400'
-                  }`}
-                >
-                  <div className={`w-4 h-4 rounded-full flex items-center justify-center ${
-                    index < currentStep 
-                      ? 'bg-green-100 border-2 border-green-500' 
-                      : index === currentStep 
-                      ? 'bg-slate-900 border-2 border-slate-900' 
-                      : 'bg-slate-100 border-2 border-slate-300'
-                  }`}>
-                    {index < currentStep ? (
-                      <svg className="w-2 h-2 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
-                    ) : index === currentStep ? (
-                      <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
-                    ) : (
-                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full"></div>
-                    )}
+              {steps.map((step, index) => {
+                const isComplete = index < currentStep;
+                const isCurrent = index === currentStep;
+                const { textColorClass, badgeClass } = getStepStyles(
+                  isComplete,
+                  isCurrent,
+                );
+
+                return (
+                  <div
+                    key={step}
+                    className={`flex items-center gap-3 text-sm ${textColorClass}`}
+                  >
+                    <div
+                      className={`w-4 h-4 rounded-full flex items-center justify-center ${badgeClass}`}
+                    >
+                      <StepBadgeIcon isComplete={isComplete} isCurrent={isCurrent} />
+                    </div>
+                    <span className="truncate">{step}</span>
                   </div>
-                  <span className="truncate">{step}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -102,4 +118,25 @@ export const LoadingState: React.FC<LoadingStateProps> = ({
       </div>
     </div>
   );
+};
+
+const StepBadgeIcon: React.FC<{ isComplete: boolean; isCurrent: boolean }> = ({
+  isComplete,
+  isCurrent,
+}) => {
+  if (isComplete) {
+    return (
+      <svg className="w-2 h-2 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+        <path
+          fillRule="evenodd"
+          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+          clipRule="evenodd"
+        />
+      </svg>
+    );
+  }
+  if (isCurrent) {
+    return <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />;
+  }
+  return <div className="w-1.5 h-1.5 bg-slate-400 rounded-full" />;
 };

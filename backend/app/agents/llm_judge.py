@@ -1,12 +1,13 @@
 """LLM-as-a-judge evaluator for agent outputs."""
 
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel
-from langfuse import get_client
+from typing import Any
 
+from langfuse import get_client
+from pydantic import BaseModel
+
+from app.agents.eval_rubrics import JUDGE_TEMPERATURE, get_rubric
 from app.core.config import settings
 from app.core.logging import logger
-from app.agents.eval_rubrics import JUDGE_TEMPERATURE, get_rubric
 
 
 class JudgeEvaluation(BaseModel):
@@ -54,12 +55,12 @@ Provide a JSON response with:
         agent_name: str,
         input_data: str,
         output: str,
-        expected_output: Optional[str] = None,
-        trace_id: Optional[str] = None,
-        intent: Optional[str] = None,
-        session_id: Optional[str] = None,
-        message_history: Optional[List[Any]] = None,
-        run_name: Optional[str] = None,
+        expected_output: str | None = None,
+        trace_id: str | None = None,
+        intent: str | None = None,
+        session_id: str | None = None,
+        message_history: list[Any] | None = None,
+        run_name: str | None = None,
     ) -> JudgeEvaluation:
         """Evaluate an agent's output using LLM-as-a-judge.
 
@@ -93,7 +94,7 @@ Provide a JSON response with:
         system_prompt = self._build_system_prompt(agent_name)
 
         try:
-            usage_details: Optional[Dict[str, int]] = None
+            usage_details: dict[str, int] | None = None
             if hasattr(self.gemini_service, "generate_response_with_usage"):
                 response, usage_details = (
                     self.gemini_service.generate_response_with_usage(
@@ -151,7 +152,7 @@ Provide a JSON response with:
                 quality_score=0.5,
                 accuracy_score=0.5,
                 helpfulness_score=0.5,
-                reasoning=f"Evaluation failed: {str(e)}",
+                reasoning=f"Evaluation failed: {e!s}",
                 concerns=["Judge evaluation unavailable"],
             )
 
@@ -164,9 +165,9 @@ Provide a JSON response with:
         agent_name: str,
         input_data: str,
         output: str,
-        expected_output: Optional[str],
+        expected_output: str | None,
         *,
-        message_history: Optional[List[Any]] = None,
+        message_history: list[Any] | None = None,
     ) -> str:
         """Build the prompt for the judge LLM."""
         prompt = f"""Evaluate the following agent output from '{agent_name}'.
@@ -200,7 +201,6 @@ Provide your evaluation as valid JSON."""
 
     def _parse_judge_response(self, response: str) -> JudgeEvaluation:
         """Parse the judge's JSON response into a JudgeEvaluation."""
-        import json
         from app.utils.json_parser import parse_json_object
 
         parsed = parse_json_object(response)
@@ -223,14 +223,14 @@ Provide your evaluation as valid JSON."""
         )
 
     def _build_cost_details(
-        self, usage_details: Dict[str, int]
-    ) -> Optional[Dict[str, float]]:
+        self, usage_details: dict[str, int]
+    ) -> dict[str, float] | None:
         prompt_rate = settings.JUDGE_PROMPT_COST_PER_1K_USD
         completion_rate = settings.JUDGE_COMPLETION_COST_PER_1K_USD
         if prompt_rate is None and completion_rate is None:
             return None
 
-        cost_details: Dict[str, float] = {}
+        cost_details: dict[str, float] = {}
         total_cost = 0.0
 
         prompt_tokens = usage_details.get("prompt_tokens")
@@ -250,13 +250,13 @@ Provide your evaluation as valid JSON."""
         self,
         trace_id: str,
         agent_name: str,
-        usage_details: Dict[str, int],
+        usage_details: dict[str, int],
         system_prompt: str,
         judge_input: str,
         response_text: str,
-        intent: Optional[str] = None,
-        session_id: Optional[str] = None,
-        run_name: Optional[str] = None,
+        intent: str | None = None,
+        session_id: str | None = None,
+        run_name: str | None = None,
     ) -> None:
         if not usage_details:
             return
@@ -312,7 +312,7 @@ Provide your evaluation as valid JSON."""
                 )
 
         try:
-            event_metadata: Dict[str, Any] = {
+            event_metadata: dict[str, Any] = {
                 **metadata,
                 "usage_details": usage_details,
             }
@@ -340,9 +340,9 @@ Provide your evaluation as valid JSON."""
         trace_id: str,
         agent_name: str,
         evaluation: JudgeEvaluation,
-        intent: Optional[str] = None,
-        session_id: Optional[str] = None,
-        run_name: Optional[str] = None,
+        intent: str | None = None,
+        session_id: str | None = None,
+        run_name: str | None = None,
     ) -> None:
         """Log evaluation scores to Langfuse."""
         try:
